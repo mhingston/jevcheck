@@ -24,12 +24,30 @@ Poor examples:
 ## Authoring a rule
 
 1. Phrase one atomic Noul question. YES must always mean a violation.
-2. Narrow candidates deterministically with files, exclude, prefilter, and unless.
-3. Add true and false criteria when the boundary is easy to confuse.
-4. Add both valid and invalid fixtures.
-5. Start the rule in shadow status.
-6. Inspect false positives, false negatives, probability margins, and model drift before making it owned.
-7. Keep thresholds, CI behavior, suppressions, baselines, and other policy in code rather than asking the model to decide them.
+2. Narrow candidates deterministically. Prefer an `ast` selector when a structural construct is identifiable; otherwise use `files`, `exclude`, `prefilter`, and `unless`.
+3. Keep AST context bounded. The matched node is the focus; surrounding lines are evidence only.
+4. Add true and false criteria when the semantic boundary is easy to confuse.
+5. Add both valid and invalid fixtures.
+6. Start the rule in `shadow` status.
+7. Inspect false positives, false negatives, probability margins, and model drift before making it `owned`.
+8. Keep thresholds, CI behavior, suppressions, baselines, and other policy in code rather than asking the model to decide them.
+
+## Suppressing known findings
+
+Use a committed baseline for accepted existing backlog:
+
+~~~sh
+jevcheck baseline
+~~~
+
+Use an inline suppression only for a local intentional exception, and require a reason:
+
+~~~ts
+// jevcheck-ignore security/no-sensitive-log -- logger wrapper redacts this value
+console.log(secret);
+~~~
+
+Do not add a suppression simply to make CI green. Confirm that the exception is durable and explain why it is safe.
 
 ## Running
 
@@ -43,6 +61,12 @@ jevcheck test
 jevcheck list
 ~~~
 
-A shadow finding is advisory. Only an owned error finding is blocking.
+For code-scanning integration:
+
+~~~sh
+jevcheck --changed --base origin/main --format sarif > jevcheck.sarif
+~~~
+
+A shadow finding is advisory. Only an owned error finding is blocking. Suppressed findings remain visible in JSON output for auditability.
 
 Do not treat a high Jev probability as proof. It is a semantic signal that should be evaluated against labelled fixtures and real review outcomes.

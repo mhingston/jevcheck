@@ -30,6 +30,19 @@ class FakeClient implements SystemOneLikeClient {
   }
 }
 
+const astRule = {
+  id: "security/no-secret-log",
+  question: "Does this code log a secret?",
+  status: "owned" as const,
+  severity: "error" as const,
+  threshold: 0.8,
+  ast: {
+    language: "typescript" as const,
+    rule: { pattern: "console.log($A)" },
+    contextBefore: 1,
+  },
+};
+
 describe("createJevCheck", () => {
   it("uses deterministic prefilters before Jev and marks owned errors as blocking", async () => {
     const client = new FakeClient();
@@ -104,6 +117,41 @@ describe("createJevCheck", () => {
 
     expect(result.findings).toHaveLength(1);
     expect(result.findings[0]).toMatchObject({ startLine: 1, endLine: 2 });
+  });
+
+  it("suppresses an AST finding only when an inline comment includes a reason", async () => {
+    const source = [
+      "// jevcheck-ignore security/no-secret-log -- value is redacted by the logger wrapper",
+      "console.log(secret);",
+    ].join("\n");
+    const checker = createJevCheck({ client: new FakeClient(), rules: [astRule] });
+
+    const result = await checker.checkSource("src/a.ts", source);
+
+    expect(result.findings).toHaveLength(0);
+    expect(result.suppressedFindings).toHaveLength(1);
+    expect(result.suppressedFindings[0]).toMatchObject({
+      suppression: "inline",
+      suppressionReason: "value is redacted by the logger wrapper",
+    });
+  });
+
+  it("suppresses an unchanged finding when its fingerprint is in the baseline", async () => {
+    const source = "console.log(secret);";
+    const first = await createJevCheck({ client: new FakeClient(), rules: [astRule] }).checkSource("src/a.ts", source);
+    const fingerprint = first.findings[0]?.fingerprint;
+    expect(fingerprint).toBeDefined();
+
+    const checker = createJevCheck({
+      client: new FakeClient(),
+      rules: [astRule],
+      baseline: [{ ruleId: astRule.id, path: "src/a.ts", fingerprint: fingerprint! }],
+    });
+    const result = await checker.checkSource("src/a.ts", source);
+
+    expect(result.findings).toHaveLength(0);
+    expect(result.suppressedFindings).toHaveLength(1);
+    expect(result.suppressedFindings[0]?.suppression).toBe("baseline");
   });
 
   it("runs fixtures even when production file globs do not match the fixture path", async () => {

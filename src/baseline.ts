@@ -47,7 +47,11 @@ export function inlineSuppressionReason(
 ): string | undefined {
   const lines = source.split(/\r?\n/);
   const pattern = new RegExp(
-    escapeRegExp(marker) + "\\s+" + escapeRegExp(ruleId) + "\\s+--\\s+(.+?)\\s*$",
+    "^\\s*(?://|#|/\\*+|\\*|<!--)\\s*" +
+      escapeRegExp(marker) +
+      "\\s+" +
+      escapeRegExp(ruleId) +
+      "\\s+--\\s+(.+?)\\s*(?:\\*/|-->)?\\s*$",
   );
   const start = Math.max(0, startLine - 2);
   const end = Math.min(lines.length, endLine);

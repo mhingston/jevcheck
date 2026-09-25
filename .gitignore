@@ -1,5 +1,6 @@
 node_modules/
 dist/
 coverage/
-.jevcheck/
+.jevcheck/*
+!.jevcheck/baseline.json
 *.tgz
