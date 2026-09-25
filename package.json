@@ -25,6 +25,7 @@
     "prepublishOnly": "npm run typecheck && npm test && npm run build"
   },
   "dependencies": {
+    "@ast-grep/napi": "^0.45.3",
     "@mhingston5/jev-cli": "^0.3.0",
     "fast-glob": "^3.3.3",
     "minimatch": "^10.0.1"

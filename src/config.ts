@@ -1,7 +1,8 @@
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
+import { validateAstCandidate } from "./ast.js";
 import { compilePattern } from "./candidates.js";
-import type { JevCheckConfig, JevCheckRule } from "./types.js";
+import type { AstCandidateConfig, JevCheckConfig, JevCheckRule } from "./types.js";
 
 function nonEmptyStrings(value: unknown, field: string): string[] | undefined {
   if (value === undefined) return undefined;
@@ -15,6 +16,33 @@ function optionalNonEmptyString(value: unknown, field: string): string | undefin
   if (value === undefined) return undefined;
   if (typeof value !== "string" || !value.trim()) throw new Error(field + " must be a non-empty string");
   return value;
+}
+
+function validateNonNegativeInteger(value: unknown, field: string): void {
+  if (value !== undefined && (!Number.isInteger(value) || (value as number) < 0)) {
+    throw new Error(field + " must be a non-negative integer");
+  }
+}
+
+function validateAst(value: unknown, ruleId: string): void {
+  if (value === undefined) return;
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(ruleId + ".ast must be an object");
+  }
+  const ast = value as Record<string, unknown>;
+  if (ast.language !== "typescript" && ast.language !== "tsx") {
+    throw new Error(ruleId + ".ast.language must be typescript or tsx");
+  }
+  if (!ast.rule || typeof ast.rule !== "object" || Array.isArray(ast.rule)) {
+    throw new Error(ruleId + ".ast.rule must be an ast-grep rule object");
+  }
+  validateNonNegativeInteger(ast.contextBefore, ruleId + ".ast.contextBefore");
+  validateNonNegativeInteger(ast.contextAfter, ruleId + ".ast.contextAfter");
+  try {
+    validateAstCandidate(ast as unknown as AstCandidateConfig);
+  } catch (error) {
+    throw new Error(ruleId + ".ast.rule is invalid: " + (error instanceof Error ? error.message : String(error)));
+  }
 }
 
 function validateRule(value: unknown, index: number): JevCheckRule {
@@ -36,11 +64,12 @@ function validateRule(value: unknown, index: number): JevCheckRule {
   if (rule.threshold !== undefined && (typeof rule.threshold !== "number" || rule.threshold < 0 || rule.threshold > 1)) {
     throw new Error(rule.id + ".threshold must be between 0 and 1");
   }
-  if (rule.contextLines !== undefined && (!Number.isInteger(rule.contextLines) || (rule.contextLines as number) < 0)) {
-    throw new Error(rule.id + ".contextLines must be a non-negative integer");
-  }
+  validateNonNegativeInteger(rule.contextLines, rule.id + ".contextLines");
   if (rule.wholeFile !== undefined && typeof rule.wholeFile !== "boolean") {
     throw new Error(rule.id + ".wholeFile must be a boolean");
+  }
+  if (rule.ast !== undefined && rule.wholeFile === true) {
+    throw new Error(rule.id + " cannot use ast and wholeFile together");
   }
 
   optionalNonEmptyString(rule.why, rule.id + ".why");
@@ -58,6 +87,7 @@ function validateRule(value: unknown, index: number): JevCheckRule {
     }
   }
 
+  validateAst(rule.ast, rule.id);
   nonEmptyStrings(rule.files, rule.id + ".files");
   nonEmptyStrings(rule.exclude, rule.id + ".exclude");
 
@@ -95,10 +125,7 @@ export function parseConfig(value: unknown): JevCheckConfig {
   }
 
   for (const field of ["chunkChars", "overlapLines", "contextLines"] as const) {
-    const raw = config[field];
-    if (raw !== undefined && (!Number.isInteger(raw) || (raw as number) < 0)) {
-      throw new Error(field + " must be a non-negative integer");
-    }
+    validateNonNegativeInteger(config[field], field);
   }
   if (typeof config.chunkChars === "number" && config.chunkChars < 256) {
     throw new Error("chunkChars must be at least 256");

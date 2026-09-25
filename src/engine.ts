@@ -22,7 +22,7 @@ const DEFAULT_CHUNK_CHARS = 6000;
 const DEFAULT_OVERLAP_LINES = 4;
 const DEFAULT_CONTEXT_LINES = 20;
 const DEFAULT_THRESHOLD = 0.8;
-const CACHE_SEMANTICS_VERSION = "v2";
+const CACHE_SEMANTICS_VERSION = "v3";
 
 function hash(value: string): string {
   return createHash("sha256").update(value).digest("hex");
@@ -38,6 +38,7 @@ function normalizedRule(rule: JevCheckRule): Record<string, unknown> {
     exclude: rule.exclude ?? [],
     prefilter: rule.prefilter ?? null,
     unless: rule.unless ?? null,
+    ast: rule.ast ?? null,
     wholeFile: rule.wholeFile ?? false,
     threshold: rule.threshold ?? DEFAULT_THRESHOLD,
     contextLines: rule.contextLines ?? null,

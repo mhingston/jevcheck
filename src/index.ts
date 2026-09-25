@@ -1,4 +1,5 @@
 export * from "./types.js";
+export * from "./ast.js";
 export * from "./cache.js";
 export * from "./candidates.js";
 export * from "./config.js";

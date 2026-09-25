@@ -2,6 +2,7 @@ import type { SystemOneLikeClient } from "@mhingston5/jev-cli";
 
 export type RuleSeverity = "error" | "warning";
 export type RuleStatus = "shadow" | "owned";
+export type AstLanguage = "typescript" | "tsx";
 
 export interface RuleCriteria {
   true?: string;
@@ -11,6 +12,13 @@ export interface RuleCriteria {
 export interface RuleFixtures {
   valid?: string[];
   invalid?: string[];
+}
+
+export interface AstCandidateConfig {
+  language: AstLanguage;
+  rule: Record<string, unknown>;
+  contextBefore?: number;
+  contextAfter?: number;
 }
 
 export interface JevCheckRule {
@@ -24,6 +32,7 @@ export interface JevCheckRule {
   exclude?: string[];
   prefilter?: string;
   unless?: string;
+  ast?: AstCandidateConfig;
   wholeFile?: boolean;
   threshold?: number;
   contextLines?: number;
