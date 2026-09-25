@@ -1,16 +1,22 @@
 #!/usr/bin/env node
 import { resolve } from "node:path";
 import { createJevClient, JEV_PROVIDERS, type JevProvider } from "@mhingston5/jev-cli";
+import {
+  DEFAULT_BASELINE_FILE,
+  baselineEntry,
+  readBaseline,
+  writeBaseline,
+} from "./baseline.js";
 import { DiskAnswerCache } from "./cache.js";
 import { loadConfig } from "./config.js";
 import { createJevCheck } from "./engine.js";
 import { discoverFiles, filterFiles } from "./files.js";
-import { formatFixtureStylish, formatJson, formatStylish } from "./format.js";
+import { formatFixtureStylish, formatJson, formatSarif, formatStylish } from "./format.js";
 import { changedFiles, stagedSources } from "./git.js";
 import type { SourceInput } from "./types.js";
 
-type Command = "check" | "test" | "list";
-type OutputFormat = "stylish" | "json";
+type Command = "check" | "test" | "list" | "baseline";
+type OutputFormat = "stylish" | "json" | "sarif";
 
 interface CliOptions {
   command: Command;
@@ -37,13 +43,14 @@ function usage(): string {
     "  jevcheck [patterns...] [options]",
     "  jevcheck test [options]",
     "  jevcheck list [options]",
+    "  jevcheck baseline [patterns...] [options]",
     "",
     "Options:",
     "  --config <path>       Config file (default: jevcheck.config.json)",
     "  --changed             Check working-tree changes and untracked files",
     "  --staged              Check the exact staged index snapshot",
     "  --base <ref>          With --changed, check base...HEAD",
-    "  --format <style>      stylish or json",
+    "  --format <style>      stylish, json, or sarif (sarif is check-only)",
     "  --provider <name>     Jev provider inherited from @mhingston5/jev-cli",
     "  --model <name>        Override the provider model",
     "  --no-cache            Disable the answer cache",
@@ -62,7 +69,9 @@ function requireValue(argv: string[], index: number, flag: string): string {
 function parseArgs(argv: string[]): CliOptions {
   const args = [...argv];
   let command: Command = "check";
-  if (args[0] === "test" || args[0] === "list") command = args.shift() as Command;
+  if (args[0] === "test" || args[0] === "list" || args[0] === "baseline") {
+    command = args.shift() as Command;
+  }
 
   const options: CliOptions = {
     command,
@@ -83,7 +92,9 @@ function parseArgs(argv: string[]): CliOptions {
         break;
       case "--format": {
         const value = requireValue(args, i, arg);
-        if (value !== "stylish" && value !== "json") throw new Error("--format must be stylish or json");
+        if (value !== "stylish" && value !== "json" && value !== "sarif") {
+          throw new Error("--format must be stylish, json, or sarif");
+        }
         options.format = value;
         i += 1;
         break;
@@ -127,6 +138,9 @@ function parseArgs(argv: string[]): CliOptions {
 
   if (options.changed && options.staged) throw new Error("choose either --changed or --staged");
   if (options.base && !options.changed) throw new Error("--base requires --changed");
+  if (options.format === "sarif" && options.command !== "check") {
+    throw new Error("--format sarif is only valid for check");
+  }
   return options;
 }
 
@@ -141,6 +155,7 @@ async function main(): Promise<void> {
       severity: rule.severity ?? "error",
       threshold: rule.threshold ?? 0.8,
       source: rule.source,
+      candidate: rule.ast ? "ast" : rule.wholeFile ? "whole-file" : rule.prefilter ? "prefilter" : "chunks",
     }));
     console.log(
       args.format === "json"
@@ -154,13 +169,17 @@ async function main(): Promise<void> {
                 "  " +
                 rule.id +
                 "  threshold=" +
-                rule.threshold,
+                rule.threshold +
+                "  candidate=" +
+                rule.candidate,
             )
             .join("\n"),
     );
     return;
   }
 
+  const baselineFile = resolve(config.baselineFile ?? DEFAULT_BASELINE_FILE);
+  const baseline = args.command === "check" ? await readBaseline(baselineFile) : [];
   const client = createJevClient({ provider: args.provider, model: args.model });
   const cacheFile = resolve(config.cacheFile ?? ".jevcheck/cache.json");
   const cache = args.cache ? new DiskAnswerCache(cacheFile) : undefined;
@@ -175,6 +194,8 @@ async function main(): Promise<void> {
     chunkChars: config.chunkChars,
     overlapLines: config.overlapLines,
     contextLines: config.contextLines,
+    baseline,
+    suppressionMarker: config.suppressionMarker,
   });
 
   if (args.command === "test") {
@@ -206,28 +227,51 @@ async function main(): Promise<void> {
   }
 
   if (!paths.length) {
+    const empty = {
+      findings: [],
+      suppressedFindings: [],
+      evaluations: [],
+      diagnostics: [],
+      stats: {
+        filesChecked: 0,
+        candidatesChecked: 0,
+        requests: 0,
+        cacheHits: 0,
+        inputTokens: 0,
+        outputTokens: 0,
+      },
+    };
     console.log(
-      args.format === "json"
-        ? formatJson({
-            findings: [],
-            evaluations: [],
-            diagnostics: [],
-            stats: {
-              filesChecked: 0,
-              candidatesChecked: 0,
-              requests: 0,
-              cacheHits: 0,
-              inputTokens: 0,
-              outputTokens: 0,
-            },
-          })
-        : "No files matched.",
+      args.format === "json" ? formatJson(empty) : args.format === "sarif" ? formatSarif(empty) : "No files matched.",
     );
     return;
   }
 
   const result = stagedInputs ? await checker.checkSources(stagedInputs) : await checker.checkFiles(paths);
-  console.log(args.format === "json" ? formatJson(result) : formatStylish(result));
+
+  if (args.command === "baseline") {
+    const entries = result.findings.map(baselineEntry);
+    const total = await writeBaseline(
+      baselineFile,
+      new Set(paths.map((path) => path.replaceAll("\\", "/"))),
+      new Set(config.rules.map((rule) => rule.id)),
+      entries,
+    );
+    console.log(
+      args.format === "json"
+        ? formatJson({ baselineFile, entriesWritten: entries.length, totalEntries: total })
+        : "Updated " + baselineFile + " with " + entries.length + " current finding(s); " + total + " total baseline entry(s).",
+    );
+    return;
+  }
+
+  console.log(
+    args.format === "json"
+      ? formatJson(result)
+      : args.format === "sarif"
+        ? formatSarif(result)
+        : formatStylish(result),
+  );
   process.exitCode = result.findings.some((finding) => finding.blocking) ? 1 : 0;
 }
 

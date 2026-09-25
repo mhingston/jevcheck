@@ -130,9 +130,6 @@ export function parseConfig(value: unknown): JevCheckConfig {
   if (typeof config.chunkChars === "number" && config.chunkChars < 256) {
     throw new Error("chunkChars must be at least 256");
   }
-  if (config.cacheFile !== undefined && (typeof config.cacheFile !== "string" || !config.cacheFile.trim())) {
-    throw new Error("cacheFile must be a non-empty string");
-  }
 
   return {
     include: nonEmptyStrings(config.include, "include"),
@@ -140,7 +137,9 @@ export function parseConfig(value: unknown): JevCheckConfig {
     chunkChars: config.chunkChars as number | undefined,
     overlapLines: config.overlapLines as number | undefined,
     contextLines: config.contextLines as number | undefined,
-    cacheFile: config.cacheFile as string | undefined,
+    cacheFile: optionalNonEmptyString(config.cacheFile, "cacheFile"),
+    baselineFile: optionalNonEmptyString(config.baselineFile, "baselineFile"),
+    suppressionMarker: optionalNonEmptyString(config.suppressionMarker, "suppressionMarker"),
     rules,
   };
 }

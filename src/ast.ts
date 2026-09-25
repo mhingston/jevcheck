@@ -2,7 +2,7 @@ import type { NapiConfig } from "@ast-grep/napi";
 import { Lang, parse } from "@ast-grep/napi";
 import type { AstCandidateConfig, Candidate, Diagnostic } from "./types.js";
 
-function langFor(language: AstCandidateConfig["language"]): Lang {
+function langFor(language: AstCandidateConfig["language"]) {
   return language === "tsx" ? Lang.Tsx : Lang.TypeScript;
 }
 
