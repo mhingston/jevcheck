@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
+import { resolve } from "node:path";
 import { minimatch } from "minimatch";
 import { noul } from "@mhingston5/jev-cli";
 import { buildCandidates } from "./candidates.js";
@@ -250,7 +251,7 @@ export function createJevCheck(options: JevCheckOptions): JevCheck {
         }
 
         for (const path of paths) {
-          const source = await readFile(path, "utf8");
+          const source = await readFile(resolve(cwd, path), "utf8");
           const fixtureResult = await checkSourceInternal(path.replaceAll("\\", "/"), source, [rule.id], true);
           mergeStats(stats, fixtureResult.stats);
           diagnostics.push(...fixtureResult.diagnostics);
