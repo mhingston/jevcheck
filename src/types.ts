@@ -2,6 +2,7 @@ import type { SystemOneLikeClient } from "@mhingston5/jev-cli";
 
 export type RuleSeverity = "error" | "warning";
 export type RuleStatus = "shadow" | "owned";
+export type AstLanguage = "typescript" | "tsx";
 
 export interface RuleCriteria {
   true?: string;
@@ -11,6 +12,13 @@ export interface RuleCriteria {
 export interface RuleFixtures {
   valid?: string[];
   invalid?: string[];
+}
+
+export interface AstCandidateConfig {
+  language: AstLanguage;
+  rule: Record<string, unknown>;
+  contextBefore?: number;
+  contextAfter?: number;
 }
 
 export interface JevCheckRule {
@@ -24,6 +32,7 @@ export interface JevCheckRule {
   exclude?: string[];
   prefilter?: string;
   unless?: string;
+  ast?: AstCandidateConfig;
   wholeFile?: boolean;
   threshold?: number;
   contextLines?: number;
@@ -38,6 +47,8 @@ export interface JevCheckConfig {
   overlapLines?: number;
   contextLines?: number;
   cacheFile?: string;
+  baselineFile?: string;
+  suppressionMarker?: string;
   rules: JevCheckRule[];
 }
 
@@ -72,8 +83,22 @@ export interface Finding extends Evaluation {
   severity: RuleSeverity;
   status: RuleStatus;
   blocking: boolean;
+  fingerprint: string;
   why?: string;
   source?: string;
+}
+
+export type SuppressionKind = "baseline" | "inline";
+
+export interface SuppressedFinding extends Finding {
+  suppression: SuppressionKind;
+  suppressionReason?: string;
+}
+
+export interface BaselineEntry {
+  ruleId: string;
+  path: string;
+  fingerprint: string;
 }
 
 export interface Diagnostic {
@@ -94,6 +119,7 @@ export interface RunStats {
 
 export interface CheckResult {
   findings: Finding[];
+  suppressedFindings: SuppressedFinding[];
   evaluations: Evaluation[];
   diagnostics: Diagnostic[];
   stats: RunStats;
@@ -117,6 +143,8 @@ export interface JevCheckOptions {
   chunkChars?: number;
   overlapLines?: number;
   contextLines?: number;
+  baseline?: BaselineEntry[];
+  suppressionMarker?: string;
 }
 
 export interface FixtureTestResult {

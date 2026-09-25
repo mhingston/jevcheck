@@ -1,3 +1,4 @@
+import { astCandidates } from "./ast.js";
 import type { Candidate, Diagnostic, JevCheckRule } from "./types.js";
 
 export interface CandidateOptions {
@@ -33,13 +34,6 @@ export function compilePattern(pattern: string, global = false): RegExp {
   if (global) flags.add("g");
   else flags.delete("g");
   return new RegExp(parsed.source, Array.from(flags).join(""));
-}
-
-function joinedSize(lines: string[], start: number, endExclusive: number): number {
-  if (endExclusive <= start) return 0;
-  let size = endExclusive - start - 1;
-  for (let index = start; index < endExclusive; index += 1) size += lines[index].length;
-  return size;
 }
 
 function lineChunksDetailed(
@@ -177,6 +171,19 @@ function appendOversizedLineDiagnostics(
   }
 }
 
+function applyCandidateFilters(candidates: Candidate[], rule: JevCheckRule): Candidate[] {
+  let filtered = candidates;
+  if (rule.prefilter) {
+    const prefilter = compilePattern(rule.prefilter);
+    filtered = filtered.filter((candidate) => prefilter.test(candidate.text));
+  }
+  if (rule.unless) {
+    const unless = compilePattern(rule.unless);
+    filtered = filtered.filter((candidate) => !unless.test(candidate.text));
+  }
+  return filtered;
+}
+
 export function buildCandidates(
   path: string,
   source: string,
@@ -209,6 +216,14 @@ export function buildCandidates(
     };
     if (rule.unless && compilePattern(rule.unless).test(candidate.text)) return { candidates: [], diagnostics };
     return { candidates: [candidate], diagnostics };
+  }
+
+  if (rule.ast) {
+    const ast = astCandidates(path, source, rule.ast, options.chunkChars, rule.id);
+    return {
+      candidates: applyCandidateFilters(ast.candidates, rule),
+      diagnostics: ast.diagnostics,
+    };
   }
 
   let candidates: Candidate[];

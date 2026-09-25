@@ -44,7 +44,9 @@ export function formatStylish(result: CheckResult): string {
     result.findings.length +
       " finding(s), " +
       blocking +
-      " blocking; " +
+      " blocking, " +
+      result.suppressedFindings.length +
+      " suppressed; " +
       result.stats.filesChecked +
       " file(s), " +
       result.stats.candidatesChecked +
@@ -60,6 +62,92 @@ export function formatStylish(result: CheckResult): string {
 
 export function formatJson(value: unknown): string {
   return JSON.stringify(value, null, 2);
+}
+
+function sarifLevel(status: "shadow" | "owned", severity: "error" | "warning"): "error" | "warning" | "note" {
+  if (status === "shadow") return "note";
+  return severity === "error" ? "error" : "warning";
+}
+
+function sarifUri(path: string): string {
+  return path
+    .replaceAll("\\", "/")
+    .split("/")
+    .map((part) => encodeURIComponent(part))
+    .join("/");
+}
+
+export function formatSarif(result: CheckResult): string {
+  const rules = new Map<string, { id: string; why?: string; source?: string }>();
+  for (const finding of result.findings) {
+    if (!rules.has(finding.ruleId)) {
+      rules.set(finding.ruleId, { id: finding.ruleId, why: finding.why, source: finding.source });
+    }
+  }
+
+  const sarif = {
+    $schema: "https://json.schemastore.org/sarif-2.1.0.json",
+    version: "2.1.0",
+    runs: [{
+      tool: {
+        driver: {
+          name: "jevcheck",
+          informationUri: "https://github.com/mhingston/jevcheck",
+          rules: [...rules.values()].map((rule) => ({
+            id: rule.id,
+            shortDescription: { text: rule.why ?? rule.id },
+            ...(rule.source ? { help: { text: "Source: " + rule.source } } : {}),
+          })),
+        },
+      },
+      results: result.findings.map((finding) => ({
+        ruleId: finding.ruleId,
+        level: sarifLevel(finding.status, finding.severity),
+        message: {
+          text:
+            (finding.why ?? "Semantic rule violation") +
+            " (p=" +
+            finding.probability.toFixed(2) +
+            ", threshold=" +
+            finding.threshold.toFixed(2) +
+            ")",
+        },
+        locations: [{
+          physicalLocation: {
+            artifactLocation: { uri: sarifUri(finding.path) },
+            region: {
+              startLine: finding.startLine,
+              endLine: finding.endLine,
+            },
+          },
+        }],
+        partialFingerprints: {
+          "jevcheck/v1": finding.fingerprint,
+        },
+        properties: {
+          probability: finding.probability,
+          threshold: finding.threshold,
+          status: finding.status,
+          model: finding.model,
+          blocking: finding.blocking,
+        },
+      })),
+      invocations: [{
+        executionSuccessful: !result.diagnostics.some((item) => item.level === "error"),
+        toolExecutionNotifications: result.diagnostics.map((diagnostic) => ({
+          level: diagnostic.level === "error" ? "error" : "warning",
+          message: {
+            text:
+              [diagnostic.path, diagnostic.ruleId].filter(Boolean).join(" ") +
+              (diagnostic.path || diagnostic.ruleId ? ": " : "") +
+              diagnostic.message,
+          },
+        })),
+      }],
+    }],
+  };
+
+  return JSON.stringify(sarif, null, 2);
 }
 
 export function formatFixtureStylish(result: FixtureRunResult): string {

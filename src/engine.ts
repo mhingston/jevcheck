@@ -3,6 +3,12 @@ import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { minimatch } from "minimatch";
 import { noul } from "@mhingston5/jev-cli";
+import {
+  DEFAULT_SUPPRESSION_MARKER,
+  findingFingerprint,
+  inlineSuppressionReason,
+  normalizedFindingText,
+} from "./baseline.js";
 import { buildCandidates } from "./candidates.js";
 import { discoverFiles } from "./files.js";
 import type {
@@ -16,13 +22,14 @@ import type {
   JevCheckRule,
   RunStats,
   SourceInput,
+  SuppressedFinding,
 } from "./types.js";
 
 const DEFAULT_CHUNK_CHARS = 6000;
 const DEFAULT_OVERLAP_LINES = 4;
 const DEFAULT_CONTEXT_LINES = 20;
 const DEFAULT_THRESHOLD = 0.8;
-const CACHE_SEMANTICS_VERSION = "v2";
+const CACHE_SEMANTICS_VERSION = "v3";
 
 function hash(value: string): string {
   return createHash("sha256").update(value).digest("hex");
@@ -38,6 +45,7 @@ function normalizedRule(rule: JevCheckRule): Record<string, unknown> {
     exclude: rule.exclude ?? [],
     prefilter: rule.prefilter ?? null,
     unless: rule.unless ?? null,
+    ast: rule.ast ?? null,
     wholeFile: rule.wholeFile ?? false,
     threshold: rule.threshold ?? DEFAULT_THRESHOLD,
     contextLines: rule.contextLines ?? null,
@@ -49,7 +57,7 @@ function ruleFingerprint(rule: JevCheckRule): string {
   return hash(JSON.stringify(normalizedRule(rule)));
 }
 
-function appliesToFile(rule: JevCheckRule, path: string): boolean {
+export function ruleAppliesToFile(rule: JevCheckRule, path: string): boolean {
   const normalized = path.replaceAll("\\", "/");
   const includes = rule.files ?? ["**/*"];
   if (!includes.some((pattern) => minimatch(normalized, pattern, { dot: true }))) return false;
@@ -67,6 +75,16 @@ function emptyStats(): RunStats {
   };
 }
 
+function emptyResult(): CheckResult {
+  return {
+    findings: [],
+    suppressedFindings: [],
+    evaluations: [],
+    diagnostics: [],
+    stats: emptyStats(),
+  };
+}
+
 function mergeStats(target: RunStats, source: RunStats): void {
   target.filesChecked += source.filesChecked;
   target.candidatesChecked += source.candidatesChecked;
@@ -74,6 +92,14 @@ function mergeStats(target: RunStats, source: RunStats): void {
   target.cacheHits += source.cacheHits;
   target.inputTokens += source.inputTokens;
   target.outputTokens += source.outputTokens;
+}
+
+function mergeResult(target: CheckResult, source: CheckResult): void {
+  target.findings.push(...source.findings);
+  target.suppressedFindings.push(...source.suppressedFindings);
+  target.evaluations.push(...source.evaluations);
+  target.diagnostics.push(...source.diagnostics);
+  mergeStats(target.stats, source.stats);
 }
 
 function cacheKey(
@@ -116,6 +142,10 @@ function focusedQuestion(rule: JevCheckRule): string {
   ].join(" ");
 }
 
+function baselineKey(ruleId: string, path: string, fingerprint: string): string {
+  return [ruleId, path.replaceAll("\\", "/"), fingerprint].join("\0");
+}
+
 export interface JevCheck {
   checkSource(path: string, source: string, onlyRuleIds?: string[]): Promise<CheckResult>;
   checkSources(sources: SourceInput[]): Promise<CheckResult>;
@@ -129,25 +159,25 @@ export function createJevCheck(options: JevCheckOptions): JevCheck {
   const contextLines = options.contextLines ?? DEFAULT_CONTEXT_LINES;
   const namespace = options.cacheNamespace ?? "default";
   const cache: AnswerCache | undefined = options.cache;
+  const suppressionMarker = options.suppressionMarker ?? DEFAULT_SUPPRESSION_MARKER;
+  const baseline = new Set(
+    (options.baseline ?? []).map((entry) => baselineKey(entry.ruleId, entry.path, entry.fingerprint)),
+  );
 
   async function checkSourceInternal(
     path: string,
     source: string,
     onlyRuleIds?: string[],
     ignoreFileScope = false,
+    applySuppressions = true,
   ): Promise<CheckResult> {
-    const result: CheckResult = {
-      findings: [],
-      evaluations: [],
-      diagnostics: [],
-      stats: emptyStats(),
-    };
+    const result = emptyResult();
     result.stats.filesChecked = 1;
 
     const selected = onlyRuleIds ? new Set(onlyRuleIds) : undefined;
     for (const rule of options.rules) {
       if (selected && !selected.has(rule.id)) continue;
-      if (!ignoreFileScope && !appliesToFile(rule, path)) continue;
+      if (!ignoreFileScope && !ruleAppliesToFile(rule, path)) continue;
 
       const built = buildCandidates(path, source, rule, {
         chunkChars,
@@ -160,6 +190,7 @@ export function createJevCheck(options: JevCheckOptions): JevCheck {
       const threshold = rule.threshold ?? DEFAULT_THRESHOLD;
       const severity = rule.severity ?? "error";
       const status = rule.status ?? "shadow";
+      const occurrenceCounts = new Map<string, number>();
 
       for (const candidate of built.candidates) {
         result.stats.candidatesChecked += 1;
@@ -174,6 +205,14 @@ export function createJevCheck(options: JevCheckOptions): JevCheck {
           candidate.focusEndLine,
           codeHash,
         );
+
+        const identityText = normalizedFindingText(
+          source,
+          candidate.focusStartLine,
+          candidate.focusEndLine,
+        );
+        const occurrence = occurrenceCounts.get(identityText) ?? 0;
+        occurrenceCounts.set(identityText, occurrence + 1);
 
         let probability: number;
         let model: string;
@@ -226,14 +265,47 @@ export function createJevCheck(options: JevCheckOptions): JevCheck {
         result.evaluations.push(evaluation);
 
         if (evaluation.violates) {
+          const fingerprint = findingFingerprint(
+            rule.id,
+            path,
+            source,
+            candidate.focusStartLine,
+            candidate.focusEndLine,
+            occurrence,
+          );
           const finding: Finding = {
             ...evaluation,
             severity,
             status,
             blocking: status === "owned" && severity === "error",
+            fingerprint,
             why: rule.why,
             source: rule.source,
           };
+
+          if (applySuppressions) {
+            const reason = inlineSuppressionReason(
+              source,
+              rule.id,
+              finding.startLine,
+              suppressionMarker,
+            );
+            if (reason) {
+              const suppressed: SuppressedFinding = {
+                ...finding,
+                suppression: "inline",
+                suppressionReason: reason,
+              };
+              result.suppressedFindings.push(suppressed);
+              continue;
+            }
+
+            if (baseline.has(baselineKey(rule.id, path, fingerprint))) {
+              result.suppressedFindings.push({ ...finding, suppression: "baseline" });
+              continue;
+            }
+          }
+
           result.findings.push(finding);
         }
       }
@@ -243,22 +315,11 @@ export function createJevCheck(options: JevCheckOptions): JevCheck {
   }
 
   async function checkSources(sources: SourceInput[]): Promise<CheckResult> {
-    const result: CheckResult = {
-      findings: [],
-      evaluations: [],
-      diagnostics: [],
-      stats: emptyStats(),
-    };
-
+    const result = emptyResult();
     for (const input of sources) {
       const normalizedPath = input.path.replaceAll("\\", "/");
-      const fileResult = await checkSourceInternal(normalizedPath, input.source);
-      result.findings.push(...fileResult.findings);
-      result.evaluations.push(...fileResult.evaluations);
-      result.diagnostics.push(...fileResult.diagnostics);
-      mergeStats(result.stats, fileResult.stats);
+      mergeResult(result, await checkSourceInternal(normalizedPath, input.source));
     }
-
     return result;
   }
 
@@ -295,7 +356,13 @@ export function createJevCheck(options: JevCheckOptions): JevCheck {
 
         for (const path of paths) {
           const source = await readFile(resolve(cwd, path), "utf8");
-          const fixtureResult = await checkSourceInternal(path.replaceAll("\\", "/"), source, [rule.id], true);
+          const fixtureResult = await checkSourceInternal(
+            path.replaceAll("\\", "/"),
+            source,
+            [rule.id],
+            true,
+            false,
+          );
           mergeStats(stats, fixtureResult.stats);
           diagnostics.push(...fixtureResult.diagnostics);
           const probabilities = fixtureResult.evaluations.map((item) => item.probability);
