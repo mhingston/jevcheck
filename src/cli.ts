@@ -4,12 +4,13 @@ import { createJevClient, JEV_PROVIDERS, type JevProvider } from "@mhingston5/je
 import {
   DEFAULT_BASELINE_FILE,
   baselineEntry,
+  baselineScopeKey,
   readBaseline,
   writeBaseline,
 } from "./baseline.js";
 import { DiskAnswerCache } from "./cache.js";
 import { loadConfig } from "./config.js";
-import { createJevCheck } from "./engine.js";
+import { createJevCheck, ruleAppliesToFile } from "./engine.js";
 import { discoverFiles, filterFiles } from "./files.js";
 import { formatFixtureStylish, formatJson, formatSarif, formatStylish } from "./format.js";
 import { changedFiles, stagedSources } from "./git.js";
@@ -251,12 +252,15 @@ async function main(): Promise<void> {
 
   if (args.command === "baseline") {
     const entries = result.findings.map(baselineEntry);
-    const total = await writeBaseline(
-      baselineFile,
-      new Set(paths.map((path) => path.replaceAll("\\", "/"))),
-      new Set(config.rules.map((rule) => rule.id)),
-      entries,
-    );
+    const evaluatedScopes = new Set<string>();
+    for (const path of paths) {
+      for (const rule of config.rules) {
+        if (ruleAppliesToFile(rule, path)) {
+          evaluatedScopes.add(baselineScopeKey(rule.id, path));
+        }
+      }
+    }
+    const total = await writeBaseline(baselineFile, evaluatedScopes, entries);
     console.log(
       args.format === "json"
         ? formatJson({ baselineFile, entriesWritten: entries.length, totalEntries: total })

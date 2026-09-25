@@ -7,6 +7,7 @@ import {
   DEFAULT_SUPPRESSION_MARKER,
   findingFingerprint,
   inlineSuppressionReason,
+  normalizedFindingText,
 } from "./baseline.js";
 import { buildCandidates } from "./candidates.js";
 import { discoverFiles } from "./files.js";
@@ -56,7 +57,7 @@ function ruleFingerprint(rule: JevCheckRule): string {
   return hash(JSON.stringify(normalizedRule(rule)));
 }
 
-function appliesToFile(rule: JevCheckRule, path: string): boolean {
+export function ruleAppliesToFile(rule: JevCheckRule, path: string): boolean {
   const normalized = path.replaceAll("\\", "/");
   const includes = rule.files ?? ["**/*"];
   if (!includes.some((pattern) => minimatch(normalized, pattern, { dot: true }))) return false;
@@ -176,7 +177,7 @@ export function createJevCheck(options: JevCheckOptions): JevCheck {
     const selected = onlyRuleIds ? new Set(onlyRuleIds) : undefined;
     for (const rule of options.rules) {
       if (selected && !selected.has(rule.id)) continue;
-      if (!ignoreFileScope && !appliesToFile(rule, path)) continue;
+      if (!ignoreFileScope && !ruleAppliesToFile(rule, path)) continue;
 
       const built = buildCandidates(path, source, rule, {
         chunkChars,
@@ -189,6 +190,7 @@ export function createJevCheck(options: JevCheckOptions): JevCheck {
       const threshold = rule.threshold ?? DEFAULT_THRESHOLD;
       const severity = rule.severity ?? "error";
       const status = rule.status ?? "shadow";
+      const occurrenceCounts = new Map<string, number>();
 
       for (const candidate of built.candidates) {
         result.stats.candidatesChecked += 1;
@@ -203,6 +205,14 @@ export function createJevCheck(options: JevCheckOptions): JevCheck {
           candidate.focusEndLine,
           codeHash,
         );
+
+        const identityText = normalizedFindingText(
+          source,
+          candidate.focusStartLine,
+          candidate.focusEndLine,
+        );
+        const occurrence = occurrenceCounts.get(identityText) ?? 0;
+        occurrenceCounts.set(identityText, occurrence + 1);
 
         let probability: number;
         let model: string;
@@ -261,6 +271,7 @@ export function createJevCheck(options: JevCheckOptions): JevCheck {
             source,
             candidate.focusStartLine,
             candidate.focusEndLine,
+            occurrence,
           );
           const finding: Finding = {
             ...evaluation,
@@ -277,7 +288,6 @@ export function createJevCheck(options: JevCheckOptions): JevCheck {
               source,
               rule.id,
               finding.startLine,
-              finding.endLine,
               suppressionMarker,
             );
             if (reason) {

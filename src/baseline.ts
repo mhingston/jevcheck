@@ -10,19 +10,28 @@ function normalizePath(path: string): string {
   return path.replaceAll("\\", "/");
 }
 
+export function normalizedFindingText(
+  source: string,
+  startLine: number,
+  endLine: number,
+): string {
+  return source
+    .split(/\r?\n/)
+    .slice(Math.max(0, startLine - 1), Math.max(0, endLine))
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .join("\n");
+}
+
 export function findingFingerprint(
   ruleId: string,
   path: string,
   source: string,
   startLine: number,
   endLine: number,
+  occurrence = 0,
 ): string {
-  const lines = source.split(/\r?\n/);
-  const normalized = lines
-    .slice(Math.max(0, startLine - 1), Math.max(0, endLine))
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .join("\n");
+  const normalized = normalizedFindingText(source, startLine, endLine);
 
   return createHash("sha256")
     .update(ruleId)
@@ -30,6 +39,8 @@ export function findingFingerprint(
     .update(normalizePath(path))
     .update("\0")
     .update(normalized)
+    .update("\0")
+    .update(String(occurrence))
     .digest("hex")
     .slice(0, 20);
 }
@@ -42,7 +53,6 @@ export function inlineSuppressionReason(
   source: string,
   ruleId: string,
   startLine: number,
-  endLine: number,
   marker = DEFAULT_SUPPRESSION_MARKER,
 ): string | undefined {
   const lines = source.split(/\r?\n/);
@@ -53,11 +63,12 @@ export function inlineSuppressionReason(
       escapeRegExp(ruleId) +
       "\\s+--\\s+(.+?)\\s*(?:\\*/|-->)?\\s*$",
   );
-  const start = Math.max(0, startLine - 2);
-  const end = Math.min(lines.length, endLine);
 
-  for (const line of lines.slice(start, end)) {
-    const reason = pattern.exec(line)?.[1]?.trim();
+  // Bind a suppression to the finding's first line or the line immediately above it.
+  // Do not scan the entire focus range: chunk-based findings can span many unrelated lines.
+  for (const index of [startLine - 2, startLine - 1]) {
+    if (index < 0 || index >= lines.length) continue;
+    const reason = pattern.exec(lines[index])?.[1]?.trim();
     if (reason) return reason;
   }
   return undefined;
@@ -101,15 +112,17 @@ export function baselineEntry(finding: Finding): BaselineEntry {
   };
 }
 
+export function baselineScopeKey(ruleId: string, path: string): string {
+  return ruleId + "\0" + normalizePath(path);
+}
+
 export async function writeBaseline(
   path: string,
-  scannedFiles: ReadonlySet<string>,
-  selectedRules: ReadonlySet<string>,
+  evaluatedScopes: ReadonlySet<string>,
   current: readonly BaselineEntry[],
 ): Promise<number> {
-  const normalizedScanned = new Set([...scannedFiles].map(normalizePath));
   const kept = (await readBaseline(path)).filter(
-    (entry) => !(normalizedScanned.has(entry.path) && selectedRules.has(entry.ruleId)),
+    (entry) => !evaluatedScopes.has(baselineScopeKey(entry.ruleId, entry.path)),
   );
   const next = [...kept, ...current].sort(
     (a, b) =>

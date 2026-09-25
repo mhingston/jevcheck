@@ -69,6 +69,14 @@ function sarifLevel(status: "shadow" | "owned", severity: "error" | "warning"): 
   return severity === "error" ? "error" : "warning";
 }
 
+function sarifUri(path: string): string {
+  return path
+    .replaceAll("\\", "/")
+    .split("/")
+    .map((part) => encodeURIComponent(part))
+    .join("/");
+}
+
 export function formatSarif(result: CheckResult): string {
   const rules = new Map<string, { id: string; why?: string; source?: string }>();
   for (const finding of result.findings) {
@@ -106,7 +114,7 @@ export function formatSarif(result: CheckResult): string {
         },
         locations: [{
           physicalLocation: {
-            artifactLocation: { uri: finding.path },
+            artifactLocation: { uri: sarifUri(finding.path) },
             region: {
               startLine: finding.startLine,
               endLine: finding.endLine,
