@@ -11,6 +11,11 @@ export interface CandidateResult {
   diagnostics: Diagnostic[];
 }
 
+interface ChunkResult {
+  candidates: Candidate[];
+  skippedLines: number[];
+}
+
 function regexParts(pattern: string): { source: string; flags: string } {
   if (pattern.startsWith("/")) {
     const lastSlash = pattern.lastIndexOf("/");
@@ -30,36 +35,82 @@ export function compilePattern(pattern: string, global = false): RegExp {
   return new RegExp(parsed.source, Array.from(flags).join(""));
 }
 
-function lineChunks(lines: string[], maxChars: number, overlapLines: number, baseLine: number): Candidate[] {
-  if (!lines.length) return [];
-  const chunks: Candidate[] = [];
+function joinedSize(lines: string[], start: number, endExclusive: number): number {
+  if (endExclusive <= start) return 0;
+  let size = endExclusive - start - 1;
+  for (let index = start; index < endExclusive; index += 1) size += lines[index].length;
+  return size;
+}
+
+function lineChunksDetailed(
+  lines: string[],
+  maxChars: number,
+  overlapLines: number,
+  baseLine: number,
+): ChunkResult {
+  if (!lines.length) return { candidates: [], skippedLines: [] };
+
+  const candidates: Candidate[] = [];
+  const skippedLines: number[] = [];
   let start = 0;
 
   while (start < lines.length) {
+    if (lines[start].length > maxChars) {
+      skippedLines.push(baseLine + start);
+      start += 1;
+      continue;
+    }
+
     let end = start;
     let size = 0;
     while (end < lines.length) {
-      const nextSize = size + lines[end].length + 1;
-      if (end > start && nextSize > maxChars) break;
+      if (lines[end].length > maxChars) break;
+      const nextSize = size + (end > start ? 1 : 0) + lines[end].length;
+      if (nextSize > maxChars) break;
       size = nextSize;
       end += 1;
     }
 
-    chunks.push({
-      text: lines.slice(start, end).join("\n"),
-      startLine: baseLine + start,
-      endLine: baseLine + end - 1,
+    const focusStart = start;
+    const focusEnd = end - 1;
+    let contextStart = focusStart;
+    let contextEnd = focusEnd;
+    let contextSize = size;
+
+    for (let count = 0; count < overlapLines && contextStart > 0; count += 1) {
+      const previous = contextStart - 1;
+      if (lines[previous].length > maxChars) break;
+      const extra = lines[previous].length + 1;
+      if (contextSize + extra > maxChars) break;
+      contextStart = previous;
+      contextSize += extra;
+    }
+
+    for (let count = 0; count < overlapLines && contextEnd + 1 < lines.length; count += 1) {
+      const next = contextEnd + 1;
+      if (lines[next].length > maxChars) break;
+      const extra = lines[next].length + 1;
+      if (contextSize + extra > maxChars) break;
+      contextEnd = next;
+      contextSize += extra;
+    }
+
+    candidates.push({
+      text: lines.slice(contextStart, contextEnd + 1).join("\n"),
+      startLine: baseLine + contextStart,
+      endLine: baseLine + contextEnd,
+      focusStartLine: baseLine + focusStart,
+      focusEndLine: baseLine + focusEnd,
     });
 
-    if (end >= lines.length) break;
-    start = Math.max(start + 1, end - overlapLines);
+    start = end;
   }
 
-  return chunks;
+  return { candidates, skippedLines };
 }
 
 export function chunkSource(source: string, maxChars: number, overlapLines: number, baseLine = 1): Candidate[] {
-  return lineChunks(source.split(/\r?\n/), maxChars, overlapLines, baseLine);
+  return lineChunksDetailed(source.split(/\r?\n/), maxChars, overlapLines, baseLine).candidates;
 }
 
 function lineForIndex(source: string, index: number): number {
@@ -104,6 +155,28 @@ function prefilterWindows(source: string, pattern: string, contextLines: number)
   return mergeWindows(windows);
 }
 
+function appendOversizedLineDiagnostics(
+  diagnostics: Diagnostic[],
+  path: string,
+  ruleId: string,
+  skippedLines: number[],
+  maxChars: number,
+): void {
+  for (const line of skippedLines) {
+    diagnostics.push({
+      level: "warning",
+      path,
+      ruleId,
+      message:
+        "Line " +
+        line +
+        " skipped because it exceeds chunkChars (" +
+        maxChars +
+        "); jevcheck will not send an oversized semantic request.",
+    });
+  }
+}
+
 export function buildCandidates(
   path: string,
   source: string,
@@ -126,7 +199,14 @@ export function buildCandidates(
       return { candidates: [], diagnostics };
     }
 
-    const candidate = { text: source, startLine: 1, endLine: source.split(/\r?\n/).length };
+    const lineCount = source.split(/\r?\n/).length;
+    const candidate = {
+      text: source,
+      startLine: 1,
+      endLine: lineCount,
+      focusStartLine: 1,
+      focusEndLine: lineCount,
+    };
     if (rule.unless && compilePattern(rule.unless).test(candidate.text)) return { candidates: [], diagnostics };
     return { candidates: [candidate], diagnostics };
   }
@@ -135,12 +215,22 @@ export function buildCandidates(
   if (rule.prefilter) {
     const lines = source.split(/\r?\n/);
     const windows = prefilterWindows(source, rule.prefilter, rule.contextLines ?? options.contextLines);
-    candidates = windows.flatMap((window) => {
-      const text = lines.slice(window.start, window.end + 1).join("\n");
-      return chunkSource(text, options.chunkChars, options.overlapLines, window.start + 1);
+    const chunked = windows.map((window) => {
+      const selected = lines.slice(window.start, window.end + 1);
+      return lineChunksDetailed(selected, options.chunkChars, options.overlapLines, window.start + 1);
     });
+    candidates = chunked.flatMap((item) => item.candidates);
+    appendOversizedLineDiagnostics(
+      diagnostics,
+      path,
+      rule.id,
+      chunked.flatMap((item) => item.skippedLines),
+      options.chunkChars,
+    );
   } else {
-    candidates = chunkSource(source, options.chunkChars, options.overlapLines);
+    const chunked = lineChunksDetailed(source.split(/\r?\n/), options.chunkChars, options.overlapLines, 1);
+    candidates = chunked.candidates;
+    appendOversizedLineDiagnostics(diagnostics, path, rule.id, chunked.skippedLines, options.chunkChars);
   }
 
   if (rule.unless) {

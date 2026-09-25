@@ -11,8 +11,15 @@ class FakeClient implements SystemOneLikeClient {
 
   async systemOne(request: SystemOneRequest): Promise<SystemOneResponse> {
     this.calls += 1;
-    const state = request.state as { code: string };
-    const probability = state.code.includes("console.log(secret)") ? 0.95 : 0.05;
+    const state = request.state as {
+      code: string;
+      lineRange: [number, number];
+      focusLineRange: [number, number];
+    };
+    const focusOffset = state.focusLineRange[0] - state.lineRange[0];
+    const focusLength = state.focusLineRange[1] - state.focusLineRange[0] + 1;
+    const focus = state.code.split(/\r?\n/).slice(focusOffset, focusOffset + focusLength).join("\n");
+    const probability = focus.includes("console.log(secret)") ? 0.95 : 0.05;
     return {
       model: "fake-jev",
       answers: {
@@ -71,6 +78,32 @@ describe("createJevCheck", () => {
     expect(first.findings[0]?.blocking).toBe(false);
     expect(second.stats.cacheHits).toBe(1);
     expect(second.evaluations[0]?.cached).toBe(true);
+  });
+
+  it("treats overlap as context so one violation is not reported from two focus ranges", async () => {
+    const client = new FakeClient();
+    const checker = createJevCheck({
+      client,
+      chunkChars: 40,
+      overlapLines: 1,
+      rules: [{
+        id: "security/no-secret-log",
+        question: "Does this code log a secret?",
+        status: "owned",
+        threshold: 0.8,
+      }],
+    });
+
+    const source = [
+      "aaaaaaaaaaaaaaa",
+      "console.log(secret);",
+      "bbbbbbbbbbbbbbb",
+      "ccccccccccccccc",
+    ].join("\n");
+    const result = await checker.checkSource("src/a.ts", source);
+
+    expect(result.findings).toHaveLength(1);
+    expect(result.findings[0]).toMatchObject({ startLine: 1, endLine: 2 });
   });
 
   it("runs fixtures even when production file globs do not match the fixture path", async () => {

@@ -45,6 +45,13 @@ export interface Candidate {
   text: string;
   startLine: number;
   endLine: number;
+  focusStartLine: number;
+  focusEndLine: number;
+}
+
+export interface SourceInput {
+  path: string;
+  source: string;
 }
 
 export interface Evaluation {

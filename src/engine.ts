@@ -15,12 +15,14 @@ import type {
   JevCheckOptions,
   JevCheckRule,
   RunStats,
+  SourceInput,
 } from "./types.js";
 
 const DEFAULT_CHUNK_CHARS = 6000;
 const DEFAULT_OVERLAP_LINES = 4;
 const DEFAULT_CONTEXT_LINES = 20;
 const DEFAULT_THRESHOLD = 0.8;
+const CACHE_SEMANTICS_VERSION = "v2";
 
 function hash(value: string): string {
   return createHash("sha256").update(value).digest("hex");
@@ -78,11 +80,25 @@ function cacheKey(
   namespace: string,
   ruleHash: string,
   path: string,
-  startLine: number,
-  endLine: number,
+  contextStartLine: number,
+  contextEndLine: number,
+  focusStartLine: number,
+  focusEndLine: number,
   codeHash: string,
 ): string {
-  return hash(["v1", namespace, ruleHash, path, String(startLine), String(endLine), codeHash].join("\n"));
+  return hash(
+    [
+      CACHE_SEMANTICS_VERSION,
+      namespace,
+      ruleHash,
+      path,
+      String(contextStartLine),
+      String(contextEndLine),
+      String(focusStartLine),
+      String(focusEndLine),
+      codeHash,
+    ].join("\n"),
+  );
 }
 
 function labelsFor(rule: JevCheckRule): { true: string; false: string } {
@@ -92,8 +108,17 @@ function labelsFor(rule: JevCheckRule): { true: string; false: string } {
   };
 }
 
+function focusedQuestion(rule: JevCheckRule): string {
+  return [
+    "Judge only whether the rule is violated by code inside focusLineRange.",
+    "Code outside focusLineRange is surrounding context only and must not itself cause a positive answer.",
+    rule.question,
+  ].join(" ");
+}
+
 export interface JevCheck {
   checkSource(path: string, source: string, onlyRuleIds?: string[]): Promise<CheckResult>;
+  checkSources(sources: SourceInput[]): Promise<CheckResult>;
   checkFiles(paths: string[]): Promise<CheckResult>;
   testFixtures(cwd?: string): Promise<FixtureRunResult>;
 }
@@ -139,7 +164,16 @@ export function createJevCheck(options: JevCheckOptions): JevCheck {
       for (const candidate of built.candidates) {
         result.stats.candidatesChecked += 1;
         const codeHash = hash(candidate.text);
-        const key = cacheKey(namespace, rHash, path, candidate.startLine, candidate.endLine, codeHash);
+        const key = cacheKey(
+          namespace,
+          rHash,
+          path,
+          candidate.startLine,
+          candidate.endLine,
+          candidate.focusStartLine,
+          candidate.focusEndLine,
+          codeHash,
+        );
 
         let probability: number;
         let model: string;
@@ -156,10 +190,11 @@ export function createJevCheck(options: JevCheckOptions): JevCheck {
             state: {
               path,
               lineRange: [candidate.startLine, candidate.endLine],
+              focusLineRange: [candidate.focusStartLine, candidate.focusEndLine],
               code: candidate.text,
             },
             questions: {
-              violation: noul(rule.question, labelsFor(rule)),
+              violation: noul(focusedQuestion(rule), labelsFor(rule)),
             },
           });
           const answer = response.answers.violation;
@@ -178,8 +213,8 @@ export function createJevCheck(options: JevCheckOptions): JevCheck {
         const evaluation: Evaluation = {
           ruleId: rule.id,
           path,
-          startLine: candidate.startLine,
-          endLine: candidate.endLine,
+          startLine: candidate.focusStartLine,
+          endLine: candidate.focusEndLine,
           probability,
           threshold,
           model,
@@ -207,7 +242,7 @@ export function createJevCheck(options: JevCheckOptions): JevCheck {
     return result;
   }
 
-  async function checkFiles(paths: string[]): Promise<CheckResult> {
+  async function checkSources(sources: SourceInput[]): Promise<CheckResult> {
     const result: CheckResult = {
       findings: [],
       evaluations: [],
@@ -215,9 +250,9 @@ export function createJevCheck(options: JevCheckOptions): JevCheck {
       stats: emptyStats(),
     };
 
-    for (const path of paths) {
-      const source = await readFile(path, "utf8");
-      const fileResult = await checkSourceInternal(path.replaceAll("\\", "/"), source);
+    for (const input of sources) {
+      const normalizedPath = input.path.replaceAll("\\", "/");
+      const fileResult = await checkSourceInternal(normalizedPath, input.source);
       result.findings.push(...fileResult.findings);
       result.evaluations.push(...fileResult.evaluations);
       result.diagnostics.push(...fileResult.diagnostics);
@@ -225,6 +260,14 @@ export function createJevCheck(options: JevCheckOptions): JevCheck {
     }
 
     return result;
+  }
+
+  async function checkFiles(paths: string[]): Promise<CheckResult> {
+    const sources: SourceInput[] = [];
+    for (const path of paths) {
+      sources.push({ path, source: await readFile(path, "utf8") });
+    }
+    return checkSources(sources);
   }
 
   async function testFixtures(cwd = process.cwd()): Promise<FixtureRunResult> {
@@ -277,5 +320,5 @@ export function createJevCheck(options: JevCheckOptions): JevCheck {
     return checkSourceInternal(path, source, onlyRuleIds);
   }
 
-  return { checkSource, checkFiles, testFixtures };
+  return { checkSource, checkSources, checkFiles, testFixtures };
 }

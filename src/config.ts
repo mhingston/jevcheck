@@ -11,6 +11,12 @@ function nonEmptyStrings(value: unknown, field: string): string[] | undefined {
   return value as string[];
 }
 
+function optionalNonEmptyString(value: unknown, field: string): string | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== "string" || !value.trim()) throw new Error(field + " must be a non-empty string");
+  return value;
+}
+
 function validateRule(value: unknown, index: number): JevCheckRule {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw new Error("rules[" + index + "] must be an object");
@@ -33,6 +39,12 @@ function validateRule(value: unknown, index: number): JevCheckRule {
   if (rule.contextLines !== undefined && (!Number.isInteger(rule.contextLines) || (rule.contextLines as number) < 0)) {
     throw new Error(rule.id + ".contextLines must be a non-negative integer");
   }
+  if (rule.wholeFile !== undefined && typeof rule.wholeFile !== "boolean") {
+    throw new Error(rule.id + ".wholeFile must be a boolean");
+  }
+
+  optionalNonEmptyString(rule.why, rule.id + ".why");
+  optionalNonEmptyString(rule.source, rule.id + ".source");
 
   for (const field of ["prefilter", "unless"] as const) {
     const raw = rule[field];
@@ -48,11 +60,23 @@ function validateRule(value: unknown, index: number): JevCheckRule {
 
   nonEmptyStrings(rule.files, rule.id + ".files");
   nonEmptyStrings(rule.exclude, rule.id + ".exclude");
-  if (rule.criteria !== undefined && (!rule.criteria || typeof rule.criteria !== "object" || Array.isArray(rule.criteria))) {
-    throw new Error(rule.id + ".criteria must be an object");
+
+  if (rule.criteria !== undefined) {
+    if (!rule.criteria || typeof rule.criteria !== "object" || Array.isArray(rule.criteria)) {
+      throw new Error(rule.id + ".criteria must be an object");
+    }
+    const criteria = rule.criteria as Record<string, unknown>;
+    optionalNonEmptyString(criteria.true, rule.id + ".criteria.true");
+    optionalNonEmptyString(criteria.false, rule.id + ".criteria.false");
   }
-  if (rule.fixtures !== undefined && (!rule.fixtures || typeof rule.fixtures !== "object" || Array.isArray(rule.fixtures))) {
-    throw new Error(rule.id + ".fixtures must be an object");
+
+  if (rule.fixtures !== undefined) {
+    if (!rule.fixtures || typeof rule.fixtures !== "object" || Array.isArray(rule.fixtures)) {
+      throw new Error(rule.id + ".fixtures must be an object");
+    }
+    const fixtures = rule.fixtures as Record<string, unknown>;
+    nonEmptyStrings(fixtures.valid, rule.id + ".fixtures.valid");
+    nonEmptyStrings(fixtures.invalid, rule.id + ".fixtures.invalid");
   }
 
   return rule as unknown as JevCheckRule;
@@ -79,6 +103,9 @@ export function parseConfig(value: unknown): JevCheckConfig {
   if (typeof config.chunkChars === "number" && config.chunkChars < 256) {
     throw new Error("chunkChars must be at least 256");
   }
+  if (config.cacheFile !== undefined && (typeof config.cacheFile !== "string" || !config.cacheFile.trim())) {
+    throw new Error("cacheFile must be a non-empty string");
+  }
 
   return {
     include: nonEmptyStrings(config.include, "include"),
@@ -86,7 +113,7 @@ export function parseConfig(value: unknown): JevCheckConfig {
     chunkChars: config.chunkChars as number | undefined,
     overlapLines: config.overlapLines as number | undefined,
     contextLines: config.contextLines as number | undefined,
-    cacheFile: typeof config.cacheFile === "string" ? config.cacheFile : undefined,
+    cacheFile: config.cacheFile as string | undefined,
     rules,
   };
 }

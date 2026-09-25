@@ -6,7 +6,8 @@ import { loadConfig } from "./config.js";
 import { createJevCheck } from "./engine.js";
 import { discoverFiles, filterFiles } from "./files.js";
 import { formatFixtureStylish, formatJson, formatStylish } from "./format.js";
-import { changedFiles, stagedFiles } from "./git.js";
+import { changedFiles, stagedSources } from "./git.js";
+import type { SourceInput } from "./types.js";
 
 type Command = "check" | "test" | "list";
 type OutputFormat = "stylish" | "json";
@@ -40,7 +41,7 @@ function usage(): string {
     "Options:",
     "  --config <path>       Config file (default: jevcheck.config.json)",
     "  --changed             Check working-tree changes and untracked files",
-    "  --staged              Check staged files",
+    "  --staged              Check the exact staged index snapshot",
     "  --base <ref>          With --changed, check base...HEAD",
     "  --format <style>      stylish or json",
     "  --provider <name>     Jev provider inherited from @mhingston5/jev-cli",
@@ -188,8 +189,16 @@ async function main(): Promise<void> {
 
   const includes = config.include ?? DEFAULT_INCLUDE;
   let paths: string[];
+  let stagedInputs: SourceInput[] | undefined;
   if (args.staged) {
-    paths = filterFiles(await stagedFiles(), includes, config.exclude ?? []);
+    const staged = await stagedSources();
+    paths = filterFiles(
+      staged.map((item) => item.path),
+      includes,
+      config.exclude ?? [],
+    );
+    const byPath = new Map(staged.map((item) => [item.path.replaceAll("\\", "/"), item]));
+    stagedInputs = paths.map((path) => byPath.get(path)).filter((item): item is SourceInput => item !== undefined);
   } else if (args.changed) {
     paths = filterFiles(await changedFiles(args.base), includes, config.exclude ?? []);
   } else {
@@ -217,7 +226,7 @@ async function main(): Promise<void> {
     return;
   }
 
-  const result = await checker.checkFiles(paths);
+  const result = stagedInputs ? await checker.checkSources(stagedInputs) : await checker.checkFiles(paths);
   console.log(args.format === "json" ? formatJson(result) : formatStylish(result));
   process.exitCode = result.findings.some((finding) => finding.blocking) ? 1 : 0;
 }
