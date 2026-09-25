@@ -26,6 +26,7 @@ export function compilePattern(pattern: string, global = false): RegExp {
   const flags = new Set(parsed.flags.split("").filter(Boolean));
   flags.add("m");
   if (global) flags.add("g");
+  else flags.delete("g");
   return new RegExp(parsed.source, Array.from(flags).join(""));
 }
 
@@ -119,7 +120,8 @@ export function buildCandidates(
         level: "warning",
         path,
         ruleId: rule.id,
-        message: "Whole-file rule skipped because the file exceeds chunkChars; increase the bound explicitly rather than judging a truncated file.",
+        message:
+          "Whole-file rule skipped because the file exceeds chunkChars; increase the bound explicitly rather than judging a truncated file.",
       });
       return { candidates: [], diagnostics };
     }
