@@ -15,7 +15,7 @@ jobs:
       - uses: actions/checkout@v4
 
       # @mhingston5/jev-cli 0.3.0 is landed but not yet published to npm.
-      # Build the exact landed commit so this PR can verify against the intended API.
+      # Build and pack the exact landed commit so this PR verifies the intended API.
       # Remove this source override once 0.3.0 is published.
       - uses: actions/checkout@v4
         with:
@@ -25,7 +25,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 24
           registry-url: https://registry.npmjs.org
 
       - name: Build pinned jev-cli
@@ -33,11 +33,12 @@ jobs:
         run: |
           npm install --ignore-scripts
           npm run build
+          npm pack --pack-destination ..
 
       - name: Install dependencies
         run: |
           cp package.json package.json.release
-          npm pkg set 'dependencies.@mhingston5/jev-cli=file:.deps/jev-cli'
+          node -e 'const fs=require("fs"); const p=JSON.parse(fs.readFileSync("package.json","utf8")); p.dependencies["@mhingston5/jev-cli"]="file:.deps/mhingston5-jev-cli-0.3.0.tgz"; fs.writeFileSync("package.json", JSON.stringify(p, null, 2) + "\n");'
           npm install --ignore-scripts
           mv package.json.release package.json
 
