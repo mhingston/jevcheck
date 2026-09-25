@@ -1,4 +1,5 @@
 import fg from "fast-glob";
+import { minimatch } from "minimatch";
 import { readFile } from "node:fs/promises";
 
 const DEFAULT_IGNORES = [
@@ -23,6 +24,14 @@ export async function discoverFiles(
     ignore: [...DEFAULT_IGNORES, ...exclude],
   });
   return files.sort();
+}
+
+export function filterFiles(paths: string[], include: string[], exclude: string[] = []): string[] {
+  return paths
+    .map((path) => path.replaceAll("\\", "/"))
+    .filter((path) => include.some((pattern) => minimatch(path, pattern, { dot: true })))
+    .filter((path) => !exclude.some((pattern) => minimatch(path, pattern, { dot: true })))
+    .sort();
 }
 
 export async function readSource(path: string): Promise<string> {
