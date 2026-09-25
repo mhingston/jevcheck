@@ -104,7 +104,12 @@ export function createJevCheck(options: JevCheckOptions): JevCheck {
   const namespace = options.cacheNamespace ?? "default";
   const cache: AnswerCache | undefined = options.cache;
 
-  async function checkSource(path: string, source: string, onlyRuleIds?: string[]): Promise<CheckResult> {
+  async function checkSourceInternal(
+    path: string,
+    source: string,
+    onlyRuleIds?: string[],
+    ignoreFileScope = false,
+  ): Promise<CheckResult> {
     const result: CheckResult = {
       findings: [],
       evaluations: [],
@@ -116,7 +121,7 @@ export function createJevCheck(options: JevCheckOptions): JevCheck {
     const selected = onlyRuleIds ? new Set(onlyRuleIds) : undefined;
     for (const rule of options.rules) {
       if (selected && !selected.has(rule.id)) continue;
-      if (!appliesToFile(rule, path)) continue;
+      if (!ignoreFileScope && !appliesToFile(rule, path)) continue;
 
       const built = buildCandidates(path, source, rule, {
         chunkChars,
@@ -211,7 +216,7 @@ export function createJevCheck(options: JevCheckOptions): JevCheck {
 
     for (const path of paths) {
       const source = await readFile(path, "utf8");
-      const fileResult = await checkSource(path.replaceAll("\\", "/"), source);
+      const fileResult = await checkSourceInternal(path.replaceAll("\\", "/"), source);
       result.findings.push(...fileResult.findings);
       result.evaluations.push(...fileResult.evaluations);
       result.diagnostics.push(...fileResult.diagnostics);
@@ -246,7 +251,7 @@ export function createJevCheck(options: JevCheckOptions): JevCheck {
 
         for (const path of paths) {
           const source = await readFile(path, "utf8");
-          const fixtureResult = await checkSource(path.replaceAll("\\", "/"), source, [rule.id]);
+          const fixtureResult = await checkSourceInternal(path.replaceAll("\\", "/"), source, [rule.id], true);
           mergeStats(stats, fixtureResult.stats);
           diagnostics.push(...fixtureResult.diagnostics);
           const probabilities = fixtureResult.evaluations.map((item) => item.probability);
@@ -265,6 +270,10 @@ export function createJevCheck(options: JevCheckOptions): JevCheck {
     }
 
     return { tests, diagnostics, stats };
+  }
+
+  async function checkSource(path: string, source: string, onlyRuleIds?: string[]): Promise<CheckResult> {
+    return checkSourceInternal(path, source, onlyRuleIds);
   }
 
   return { checkSource, checkFiles, testFixtures };
