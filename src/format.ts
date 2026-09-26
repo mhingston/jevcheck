@@ -323,10 +323,14 @@ export function formatRobustnessStylish(result: RobustnessRunResult): string {
   if (!result.cases.length) lines.push("No robustness cases measured.");
   lines.push(
     result.cases.length +
-      " robustness case(s), " +
+      "/" +
+      result.expectedCases +
+      " robustness case(s) measured, " +
       result.flips +
       " classification flip(s), max |Δp|=" +
       result.maxDelta.toFixed(3) +
+      "; " +
+      (result.complete ? "complete" : "INCOMPLETE") +
       "; " +
       result.stats.requests +
       " request(s)",
