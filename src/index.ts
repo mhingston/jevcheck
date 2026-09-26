@@ -7,6 +7,8 @@ export * from "./candidates.js";
 export * from "./config.js";
 export * from "./engine.js";
 export * from "./evidence.js";
+export * from "./evidence-store.js";
+export * from "./graduation.js";
 export * from "./files.js";
 export * from "./format.js";
 export * from "./git.js";
