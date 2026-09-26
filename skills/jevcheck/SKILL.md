@@ -126,13 +126,13 @@ Use robustness testing to check whether model-visible text that should not chang
 jevcheck test --robustness
 ~~~
 
-The probe inserts deterministic comments immediately beside the semantic focus for labelled fixtures. It currently tests direct instruction injection, false approval/authority claims, and unrelated nearby context. Inspect both probability movement and classification flips.
+The probe keeps the selected source and semantic focus unchanged and adds deterministic untrusted surrounding context to the semantic request. It currently tests direct instruction injection, false approval/authority claims, and unrelated nearby context. Inspect both probability movement and classification flips.
 
 Robustness complements mutation recall:
 - mutation recall asks whether meaningful semantic changes are detected
 - robustness asks whether label-preserving changes are ignored
 
-The result is persisted in `.jevcheck/evidence.json` with a freshness identity. It is advisory rather than a graduation blocker: a flip should be investigated, but do not weaken the rule or threshold merely to make the probe green. Unsupported fixture languages are skipped with a diagnostic instead of applying a potentially semantic-changing transform.
+The result is persisted in `.jevcheck/evidence.json` with a freshness identity only when every expected fixture/perturbation case was measured. Incomplete runs surface diagnostics and do not overwrite durable evidence. It is advisory rather than a graduation blocker: a flip should be investigated, but do not weaken the rule or threshold merely to make the probe green.
 
 ## Audit rule evidence
 
