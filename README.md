@@ -41,11 +41,13 @@ The model does semantic judgment. Code owns everything deterministic.
 - valid/invalid fixtures through `jevcheck test`
 - exact staged-index and changed-file Git scopes
 - accepted-backlog baselines and reasoned inline suppressions
+- versioned, commit-able semantic replay corpora for offline evaluation
+- strict offline replay with explicit coverage misses and no provider fallback
 - stylish, JSON, and SARIF output
 - rule/model/code fingerprints and stable finding fingerprints
 - bundled agent skill, CI, and package metadata
 
-Replay/offline evaluation, calibration/drift, mutation recall, and enforced graduation gates remain deliberately separate follow-up slices.
+Calibration/drift, mutation recall, and enforced graduation gates remain deliberately separate follow-up slices.
 
 ## Development
 
@@ -74,6 +76,7 @@ Create `jevcheck.config.json`:
   "include": ["src/**/*.ts"],
   "exclude": ["**/*.test.ts"],
   "baselineFile": ".jevcheck/baseline.json",
+  "replayFile": ".jevcheck/replay.json",
   "rules": [
     {
       "id": "security/no-sensitive-log",
@@ -170,6 +173,32 @@ Markers without a reason are ignored. The marker name can be changed with `suppr
 
 For broad chunk rules, suppressions and baselines apply to the chunk's focus range. Prefer AST selectors when you need precise finding ownership.
 
+### Replay and offline evaluation
+
+Replay is deliberately separate from the execution cache. The cache is an optimization; the replay corpus is durable evaluation evidence.
+
+Capture the current semantic decisions with a live provider:
+
+~~~sh
+jevcheck record
+jevcheck record --changed --base origin/main
+~~~
+
+By default this writes `.jevcheck/replay.json`. The file is versioned and commit-friendly, but it does **not** store source code or prompts verbatim. Each entry records hashed semantic inputs plus the rule/path/focus metadata, probability, and model that produced the decision.
+
+Run the same semantic checks later without provider credentials or network access:
+
+~~~sh
+jevcheck replay
+jevcheck replay --changed --base origin/main
+~~~
+
+Replay is strict. A request is reused only when the model-visible state and semantic question/criteria are identical. Policy-only changes such as `threshold`, `severity`, or `status` do not change the replay key, so you can evaluate those changes against the recorded probabilities. Changes to the question, criteria, candidate context, focused code, or other model-visible state produce an explicit replay miss.
+
+Replay never falls back to the ordinary answer cache or a provider. Missing corpus coverage exits non-zero.
+
+This is regression evidence, not ground truth. Replaying an old model decision proves that deterministic policy and candidate changes can be evaluated reproducibly; it does not prove that the original semantic judgment was correct.
+
 ## Commands
 
 Check the configured include set:
@@ -200,6 +229,18 @@ Run labelled fixtures:
 
 ~~~sh
 jevcheck test
+~~~
+
+Record a reusable semantic decision corpus:
+
+~~~sh
+jevcheck record
+~~~
+
+Replay that corpus strictly offline:
+
+~~~sh
+jevcheck replay
 ~~~
 
 Create or refresh accepted-backlog baseline entries:
@@ -280,7 +321,9 @@ const result = await checker.checkSource(
 );
 ~~~
 
-Every evaluation records the rule fingerprint, candidate code fingerprint, returned model, probability, threshold, and whether the answer came from cache. Every reported finding also has a stable focused-range fingerprint used by baselines and SARIF.
+Every evaluation records the rule fingerprint, candidate code fingerprint, returned model, probability, threshold, and whether the answer came from cache or replay. Every reported finding also has a stable focused-range fingerprint used by baselines and SARIF.
+
+For programmatic replay, pass a `SemanticDecisionStore` to `createJevCheck`. `MemorySemanticDecisionStore` is useful in tests; `DiskSemanticDecisionStore` writes the versioned corpus. Call `flush()` after a recording run when using the disk store. Set `replayOnly: true` to make the checker strict and provider-free.
 
 ## Architecture
 
@@ -304,10 +347,10 @@ Provider choice changes transport, not lint semantics. Domain policy stays in je
 
 ## Next slices
 
-The next useful reliability slice is replay/offline evaluation so rule changes can be tested without repeatedly calling a provider. After that:
+The next useful reliability work is to turn recorded decisions and labelled fixtures into stronger quality evidence:
 
-1. related-node AST context across separate definitions/callers
-2. recorded fixture probabilities and drift checks
+1. recorded fixture probabilities and drift checks
+2. related-node AST context across separate definitions/callers
 3. mutation recall
 4. enforced shadow-to-owned graduation gates
 5. a `rules audit` command exposing evidence and blockers

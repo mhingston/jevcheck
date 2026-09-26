@@ -48,6 +48,20 @@ JavaScript, TypeScript, TSX, HTML, and CSS are supported by the bundled parser. 
 
 Do not turn a deterministic structural condition into a Jev question. If ast-grep alone proves the violation, use ast-grep or an ordinary linter directly instead of jevcheck.
 
+## Replay before re-asking
+
+Use replay when evaluating deterministic rule/config changes against decisions already made by Jev:
+
+~~~sh
+jevcheck record
+# change threshold/status/severity or other deterministic policy
+jevcheck replay
+~~~
+
+The replay corpus is separate from the answer cache and can be committed. Replay is strict and offline: if the semantic question, criteria, focused code, or model-visible context changed, expect a replay miss rather than silently reusing an incompatible decision or calling a provider.
+
+A replay hit is reproducibility evidence, not correctness evidence. Do not use replay to justify promoting a weak rule to `owned`; labelled fixtures, drift checks, and recall evidence are still required.
+
 ## Suppressing known findings
 
 Use a committed baseline for accepted existing backlog:
@@ -74,6 +88,8 @@ jevcheck --staged
 jevcheck --changed
 jevcheck --changed --base origin/main
 jevcheck test
+jevcheck record
+jevcheck replay
 jevcheck list
 ~~~
 
