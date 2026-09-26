@@ -29,7 +29,8 @@ import type {
 
 export const DEFAULT_EVIDENCE_FILE = ".jevcheck/evidence.json";
 export const RULE_EVIDENCE_FORMAT_VERSION = 1;
-const EVIDENCE_IDENTITY_VERSION = "v2";
+const DRIFT_IDENTITY_VERSION = "v1";
+const MUTATION_IDENTITY_VERSION = "v2";
 
 export const DEFAULT_SOURCE_INCLUDE = [
   "**/*.{js,jsx,ts,tsx,mjs,cjs,mts,cts,py,go,rs,java,cs,rb,php,vue,svelte}",
@@ -340,7 +341,7 @@ export function driftEvidenceIdentity(
   modelNamespace: string,
 ): string {
   return hash(JSON.stringify({
-    version: EVIDENCE_IDENTITY_VERSION,
+    version: DRIFT_IDENTITY_VERSION,
     kind: "drift",
     ruleId,
     fixtures: sortedFixtureEvidence(ruleId, fixtures),
@@ -384,6 +385,9 @@ export async function mutationEvidenceIdentity(
   options: MutationIdentityOptions,
   measurement: readonly RecallMutantResult[] = [],
 ): Promise<string> {
+  if (!Number.isSafeInteger(options.sampleSize) || options.sampleSize < 1) {
+    throw new Error("mutation evidence sampleSize must be a positive safe integer");
+  }
   const cwd = options.cwd ?? process.cwd();
   const sourceCache = new Map<string, string>();
   const scopedPaths = [...paths]
@@ -419,7 +423,7 @@ export async function mutationEvidenceIdentity(
   }
 
   return hash(JSON.stringify({
-    version: EVIDENCE_IDENTITY_VERSION,
+    version: MUTATION_IDENTITY_VERSION,
     kind: "mutation",
     rule: normalizedMutationRule(rule),
     candidateDefaults: {
@@ -494,6 +498,9 @@ export async function persistDriftEvidence(
   driftThreshold: number,
   modelNamespace: string,
 ): Promise<void> {
+  if (!Number.isSafeInteger(sampleSize) || sampleSize < 1) {
+    throw new Error("mutation evidence sampleSize must be a positive safe integer");
+  }
   const artifact = await readRuleEvidenceArtifact(path);
   artifact.drift = rules.map((rule) => ({
     ruleId: rule.id,
