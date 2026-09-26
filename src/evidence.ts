@@ -68,6 +68,8 @@ export interface RuleEvidenceInputs {
   mutationError?: string;
   robustness?: readonly RobustnessCaseResult[];
   robustnessError?: string;
+  sourceError?: string;
+  sourceMessage?: string;
 }
 
 export const DEFAULT_RULE_EVIDENCE_POLICY: RuleEvidencePolicy = {
@@ -587,10 +589,13 @@ export function evaluateRuleEvidence(
     });
   }
 
+  const sourceProblem = !rule.source
+    ? "rule source/provenance is missing"
+    : evidence.sourceError;
   checks.push({
     id: "source",
-    status: rule.source ? "pass" : statusFor(policy.requireSource),
-    message: rule.source ? rule.source : "rule source/provenance is missing",
+    status: sourceProblem ? statusFor(policy.requireSource) : "pass",
+    message: sourceProblem ?? evidence.sourceMessage ?? rule.source!,
   });
 
   const blockers = checks.filter((check) => check.status === "block").map((check) => check.message);
