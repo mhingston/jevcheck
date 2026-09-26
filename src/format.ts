@@ -1,3 +1,4 @@
+import type { RuleEvidenceReport } from "./evidence.js";
 import type { CheckResult, FixtureDriftResult, FixtureRunResult, RecallRunResult } from "./types.js";
 
 export function formatStylish(result: CheckResult): string {
@@ -323,4 +324,28 @@ export function formatRecallStylish(result: RecallRunResult): string {
       " cache hit(s)",
   );
   return lines.join("\n");
+}
+
+
+export function formatRuleEvidenceStylish(reports: readonly RuleEvidenceReport[]): string {
+  if (!reports.length) return "No rules configured.";
+
+  return reports.map((report) => {
+    const lines = [report.ruleId + "  " + report.currentStatus, ""];
+    for (const check of report.checks) {
+      lines.push(
+        check.id.replaceAll("-", " ").padEnd(14) +
+          check.status.toUpperCase().padEnd(7) +
+          check.message,
+      );
+    }
+    if (report.blockers.length) {
+      lines.push("", ...report.blockers.map((message) => "BLOCKER: " + message));
+    }
+    if (report.warnings.length) {
+      lines.push(...report.warnings.map((message) => "WARNING: " + message));
+    }
+    lines.push("", "Ready for owned: " + (report.readyForOwned ? "yes" : "no"));
+    return lines.join("\n");
+  }).join("\n\n");
 }

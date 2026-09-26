@@ -2,7 +2,6 @@ import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { minimatch } from "minimatch";
-import { noul } from "@mhingston5/jev-cli";
 import {
   DEFAULT_SUPPRESSION_MARKER,
   findingFingerprint,
@@ -13,7 +12,7 @@ import { FIXTURE_THIN_MARGIN } from "./calibration.js";
 import { buildCandidates } from "./candidates.js";
 import { discoverFiles } from "./files.js";
 import { applyMutation, stableMutationOrder } from "./mutate.js";
-import { semanticDecisionKey } from "./replay.js";
+import { semanticRequestForCandidate } from "./semantic.js";
 import type {
   AnswerCache,
   CheckResult,
@@ -29,10 +28,10 @@ import type {
   SuppressedFinding,
 } from "./types.js";
 
-const DEFAULT_CHUNK_CHARS = 6000;
-const DEFAULT_OVERLAP_LINES = 4;
-const DEFAULT_CONTEXT_LINES = 20;
-const DEFAULT_THRESHOLD = 0.8;
+export const DEFAULT_CHUNK_CHARS = 6000;
+export const DEFAULT_OVERLAP_LINES = 4;
+export const DEFAULT_CONTEXT_LINES = 20;
+export const DEFAULT_THRESHOLD = 0.8;
 const CACHE_SEMANTICS_VERSION = "v4";
 
 function hash(value: string): string {
@@ -141,21 +140,6 @@ function cacheKey(
   );
 }
 
-function labelsFor(rule: JevCheckRule): { true: string; false: string } {
-  return {
-    true: rule.criteria?.true ?? "The rule violation is present in the supplied code.",
-    false: rule.criteria?.false ?? "The rule violation is not present in the supplied code.",
-  };
-}
-
-function focusedQuestion(rule: JevCheckRule): string {
-  return [
-    "Judge only whether the rule is violated by code inside focusLineRange/focusRange.",
-    "Code outside that focus is surrounding context only and must not itself cause a positive answer.",
-    rule.question,
-  ].join(" ");
-}
-
 function baselineKey(ruleId: string, path: string, fingerprint: string): string {
   return [ruleId, path.replaceAll("\\", "/"), fingerprint].join("\0");
 }
@@ -238,29 +222,11 @@ export function createJevCheck(options: JevCheckOptions): JevCheck {
         const occurrence = occurrenceCounts.get(identityText) ?? 0;
         occurrenceCounts.set(identityText, occurrence + 1);
 
-        const focusRange =
-          candidate.focusStartColumn !== undefined && candidate.focusEndColumn !== undefined
-            ? {
-                start: {
-                  line: candidate.focusStartLine,
-                  column: candidate.focusStartColumn,
-                },
-                end: {
-                  line: candidate.focusEndLine,
-                  column: candidate.focusEndColumn,
-                },
-              }
-            : undefined;
-        const state = {
-          path,
-          lineRange: [candidate.startLine, candidate.endLine],
-          focusLineRange: [candidate.focusStartLine, candidate.focusEndLine],
-          ...(focusRange ? { focusRange } : {}),
-          ...(candidate.focusKind ? { focusKind: candidate.focusKind } : {}),
-          code: candidate.text,
-        };
-        const question = noul(focusedQuestion(rule), labelsFor(rule));
-        const replayIdentity = semanticDecisionKey(question, state);
+        const {
+          state,
+          question,
+          identity: replayIdentity,
+        } = semanticRequestForCandidate(rule, path, candidate);
 
         let probability: number;
         let model: string;
