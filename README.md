@@ -242,7 +242,7 @@ Context is evidence, not permission to broaden the question. Nearby code may hel
 A useful default workflow is:
 
 ~~~text
-author -> shadow -> fixtures -> calibrate -> drift/recall/robustness -> audit -> owned
+author -> shadow -> development fixtures -> calibrate -> drift/recall/robustness -> confirm -> audit -> owned
 ~~~
 
 You do not need all of this to experiment with a shadow rule. The evidence workflow matters when you want a semantic rule to become a blocking reviewer.
@@ -294,7 +294,7 @@ Later, re-ask those fixtures and compare the probabilities:
 npx jevcheck test --drift
 ~~~
 
-Drift checks intentionally bypass the normal answer cache.
+Drift checks intentionally bypass the normal answer cache. If the resolved model changes, the prior calibration is treated as stale and must be requalified rather than reported as ordinary probability drift.
 
 ### 4. Measure mutation recall
 
@@ -339,15 +339,42 @@ The command keeps the selected source and semantic focus unchanged, then re-runs
 
 It reports probability movement and classification flips, and records freshness-aware results in `.jevcheck/evidence.json` only when every expected fixture/perturbation case was measured. Incomplete runs surface diagnostics and do not overwrite durable evidence. Robustness is intentionally advisory for now: flips appear as audit warnings rather than silently changing graduation policy.
 
-### 6. Audit the evidence
+### 6. Confirm on untouched fixtures
+
+Keep a small confirmation set separate from the fixtures used to author the rule or choose its threshold:
+
+~~~json
+{
+  "fixtures": {
+    "valid": ["fixtures/unbounded-retry/valid/**/*.ts"],
+    "invalid": ["fixtures/unbounded-retry/invalid/**/*.ts"],
+    "confirmation": {
+      "valid": ["fixtures/unbounded-retry/confirmation/valid/**/*.ts"],
+      "invalid": ["fixtures/unbounded-retry/confirmation/invalid/**/*.ts"]
+    }
+  }
+}
+~~~
+
+After the rule, threshold, and development evidence are frozen, run:
+
+~~~sh
+npx jevcheck test --confirm
+~~~
+
+A configured confirmation set becomes a graduation gate: both valid and invalid cases must exist, remain semantically current, and pass. Successful confirmation is recorded separately in `.jevcheck/confirmation.json`.
+
+Do not tune against confirmation failures and then call the same cases untouched. Once you inspect a failed confirmation result, treat those cases as development evidence and replace them with fresh confirmation cases before the next graduation attempt.
+
+### 7. Audit the evidence
 
 ~~~sh
 npx jevcheck rules audit
 ~~~
 
-The audit reports whether each rule has the evidence required to act as an owned rule and explains any blockers. It also shows advisory threshold-separation diagnostics from current labelled calibration and persisted robustness results. If valid and invalid fixture probabilities overlap, the audit says explicitly that no single threshold can separate the labelled fixtures rather than encouraging threshold tuning.
+The audit reports whether each rule has the evidence required to act as an owned rule and explains any blockers. It also shows advisory threshold-separation diagnostics from current labelled calibration and persisted robustness results. If confirmation fixtures are configured, missing, stale, or failing confirmation evidence blocks graduation. If valid and invalid development fixture probabilities overlap, the audit says explicitly that no single threshold can separate the labelled fixtures rather than encouraging threshold tuning.
 
-### 7. Promote to owned
+### 8. Promote to owned
 
 Only after the rule has earned that responsibility:
 
@@ -438,7 +465,8 @@ The default `.gitignore` policy keeps transient cache state out while allowing d
 | `jevcheck.config.json` | Rules and checker configuration | Yes |
 | `.jevcheck/baseline.json` | Accepted existing findings | Usually |
 | `.jevcheck/replay.json` | Reusable semantic decisions | When replay is part of your workflow |
-| `.jevcheck/calibration.json` | Recorded fixture probabilities | For evidence-gated rules |
+| `.jevcheck/calibration.json` | Recorded development-fixture probabilities | For evidence-gated rules |
+| `.jevcheck/confirmation.json` | Untouched confirmation-fixture results | When confirmation fixtures are configured |
 | `.jevcheck/evidence.json` | Drift, mutation, and robustness evidence | For evidence-gated rules |
 | `.jevcheck/cache.json` | Local answer cache | No |
 
@@ -454,7 +482,8 @@ These evidence files contain hashes and evaluation metadata rather than a second
 | `jevcheck --changed --base origin/main` | Check a branch diff |
 | `jevcheck test` | Run labelled fixtures |
 | `jevcheck test --record` | Record fixture calibration |
-| `jevcheck test --drift` | Re-ask fixtures and detect probability drift |
+| `jevcheck test --drift` | Re-ask development fixtures and detect probability drift |
+| `jevcheck test --confirm` | Evaluate and record untouched confirmation fixtures |
 | `jevcheck test --robustness` | Probe fixture stability under label-preserving adversarial context |
 | `jevcheck recall` | Measure mutation recall against real code |
 | `jevcheck rules audit` | Inspect rule evidence without calling a provider |
@@ -500,6 +529,7 @@ A more complete rule can include provenance, AST context, fixtures, and mutants:
   "baselineFile": ".jevcheck/baseline.json",
   "replayFile": ".jevcheck/replay.json",
   "calibrationFile": ".jevcheck/calibration.json",
+  "confirmationFile": ".jevcheck/confirmation.json",
   "evidenceFile": ".jevcheck/evidence.json",
   "driftThreshold": 0.1,
   "rules": [
@@ -526,7 +556,11 @@ A more complete rule can include provenance, AST context, fixtures, and mutants:
       "threshold": 0.8,
       "fixtures": {
         "valid": ["fixtures/no-sensitive-log/valid/**/*.ts"],
-        "invalid": ["fixtures/no-sensitive-log/invalid/**/*.ts"]
+        "invalid": ["fixtures/no-sensitive-log/invalid/**/*.ts"],
+        "confirmation": {
+          "valid": ["fixtures/no-sensitive-log/confirmation/valid/**/*.ts"],
+          "invalid": ["fixtures/no-sensitive-log/confirmation/invalid/**/*.ts"]
+        }
       },
       "mutants": [
         {
