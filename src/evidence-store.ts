@@ -382,7 +382,7 @@ export async function persistMutationEvidence(
   result: RecallRunResult,
   sourcePaths: readonly string[],
   sampleSize: number,
-  options: MutationIdentityOptions,
+  options: Omit<MutationIdentityOptions, "sampleSize">,
 ): Promise<void> {
   const artifact = await readRuleEvidenceArtifact(path);
   artifact.mutation = [];
@@ -391,7 +391,10 @@ export async function persistMutationEvidence(
     if (!rule.mutants?.length) continue;
     artifact.mutation.push({
       ruleId: rule.id,
-      identity: await mutationEvidenceIdentity(rule, sourcePaths, options),
+      identity: await mutationEvidenceIdentity(rule, sourcePaths, {
+        ...options,
+        sampleSize,
+      }),
       modelNamespace: options.modelNamespace,
       sampleSize,
       mutants: result.mutants.filter((item) => item.ruleId === rule.id),
