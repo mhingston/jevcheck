@@ -37,12 +37,13 @@ Then:
 4. Keep AST focus precise. The matched node is what Jev judges; `context.ancestor` and surrounding lines are evidence only.
 5. Keep all context bounded. Do not increase `chunkChars` merely to avoid a skipped oversized construct without checking the token/cost implications.
 6. Add true and false criteria when the semantic boundary is easy to confuse.
-7. Add both valid and invalid fixtures.
-8. Start the rule in `shadow` status.
-9. Inspect false positives, false negatives, probability margins, and model drift before making it `owned`.
-10. Keep thresholds, CI behavior, suppressions, baselines, and other policy in code rather than asking the model to decide them.
-11. Ensure the deterministically selected candidate contains enough evidence to answer the bounded question. If it does not, improve or narrow the context rather than adding a second model call to judge applicability.
-12. Stop once the rule has sufficient evidence. Do not broaden context, weaken graduation policy, or tune thresholds merely to make the measured results look better.
+7. Add both valid and invalid development fixtures.
+8. Reserve separate valid and invalid confirmation fixtures that will not be used to author the rule or choose its threshold.
+9. Start the rule in `shadow` status.
+10. Inspect false positives, false negatives, probability margins, and model drift before making it `owned`.
+11. Keep thresholds, CI behavior, suppressions, baselines, and other policy in code rather than asking the model to decide them.
+12. Ensure the deterministically selected candidate contains enough evidence to answer the bounded question. If it does not, improve or narrow the context rather than adding a second model call to judge applicability.
+13. Stop once the rule has sufficient evidence. Do not broaden context, weaken graduation policy, or tune thresholds merely to make the measured results look better.
 
 ## Context sufficiency and trust boundary
 
@@ -129,7 +130,7 @@ jevcheck test --drift
 
 Treat a `THIN` passing fixture (0.05 or less from the threshold) as weak evidence that deserves review. Calibration recording and drift both bypass the answer cache.
 
-Drift compares probabilities only when the exact semantic request hashes and configured threshold are unchanged. If the fixture/rule/context or threshold changed, jevcheck reports the calibration as `STALE`; re-record it instead of mixing changed policy with model drift. Significant drift, stale calibration, and added/removed fixtures fail `test --drift` so CI cannot silently ignore changed evidence.
+Drift compares probabilities only when the exact semantic request hashes, configured threshold, and resolved model are unchanged. If the fixture/rule/context, threshold, or resolved model changed, jevcheck reports the calibration as `STALE`; re-record and requalify it instead of mixing a changed decision surface with ordinary model drift. Significant drift, stale calibration, and added/removed fixtures fail `test --drift` so CI cannot silently ignore changed evidence.
 
 Do not confuse calibration with replay:
 - replay reuses prior semantic decisions and never calls a provider
@@ -185,6 +186,33 @@ Robustness complements mutation recall:
 
 The result is persisted in `.jevcheck/evidence.json` with a freshness identity only when every expected fixture/perturbation case was measured. Incomplete runs surface diagnostics and do not overwrite durable evidence. It is advisory rather than a graduation blocker: a flip should be investigated, but do not weaken the rule or threshold merely to make the probe green.
 
+## Confirm on untouched fixtures
+
+Keep confirmation evidence separate from the fixtures used during authoring and threshold selection:
+
+~~~json
+{
+  "fixtures": {
+    "valid": ["fixtures/rule/valid/**/*.ts"],
+    "invalid": ["fixtures/rule/invalid/**/*.ts"],
+    "confirmation": {
+      "valid": ["fixtures/rule/confirmation/valid/**/*.ts"],
+      "invalid": ["fixtures/rule/confirmation/invalid/**/*.ts"]
+    }
+  }
+}
+~~~
+
+Freeze the rule and threshold, then run:
+
+~~~sh
+jevcheck test --confirm
+~~~
+
+When confirmation fixtures are configured, they are a graduation gate. Successful results are recorded in `.jevcheck/confirmation.json`; changed confirmation code, rule semantics, or thresholds make that evidence stale.
+
+Confirmation is not a tuning set. If you inspect a failed confirmation result and change the rule because of it, treat that case as development evidence and replace it with fresh confirmation cases before claiming an untouched confirmation.
+
 ## Audit rule evidence
 
 Before treating a semantic rule as reviewer-of-record, inspect its evidence without making new model calls:
@@ -202,6 +230,7 @@ The audit distinguishes:
 - failing fixture evidence
 - thin passing margins
 - missing versus stale calibration
+- configured confirmation evidence, including missing/stale/failing untouched cases
 - drift evidence
 - mutation recall, including unmeasured or zero-judged mutants
 - rule source/provenance, including local policy-source freshness
@@ -225,12 +254,13 @@ jevcheck test --record
 jevcheck test --drift
 jevcheck test --robustness
 jevcheck recall
+jevcheck test --confirm
 jevcheck rules audit
 ~~~
 
 Only change `status` to `owned` when audit reports `Ready for owned: yes`. Normal checks and replay fail closed if an owned rule's required evidence is missing, stale, or failing. Robustness warnings are deliberately advisory and therefore do not change `Ready for owned` yet.
 
-Default policy requires valid and invalid fixtures, current calibration, no thin margins, clean drift, mutants with at least 0.90 recall and non-zero judged samples, and `source` provenance. Global `graduation` config can adjust those explicit requirements; do not weaken them merely to make CI pass.
+Default policy requires valid and invalid development fixtures, current calibration, no thin margins, clean drift, mutants with at least 0.90 recall and non-zero judged samples, and `source` provenance. If a rule configures confirmation fixtures, current passing confirmation evidence is additionally required. Global `graduation` config can adjust the existing development-evidence requirements; do not weaken them merely to make CI pass.
 
 A scoped recall such as `jevcheck recall src/foo.ts` is exploratory and is not persisted as graduation evidence. Run full-scope `jevcheck recall` to refresh the committed evidence artifact.
 
@@ -265,6 +295,7 @@ jevcheck inspect --changed --base origin/main
 jevcheck test
 jevcheck test --record
 jevcheck test --drift
+jevcheck test --confirm
 jevcheck recall
 jevcheck record
 jevcheck replay
