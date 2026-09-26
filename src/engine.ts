@@ -12,6 +12,7 @@ import {
 import { FIXTURE_THIN_MARGIN } from "./calibration.js";
 import { buildCandidates } from "./candidates.js";
 import { discoverFiles } from "./files.js";
+import { applyMutation, stableMutationOrder } from "./mutate.js";
 import { semanticDecisionKey } from "./replay.js";
 import type {
   AnswerCache,
@@ -22,6 +23,7 @@ import type {
   FixtureTestResult,
   JevCheckOptions,
   JevCheckRule,
+  RecallRunResult,
   RunStats,
   SourceInput,
   SuppressedFinding,
@@ -163,6 +165,7 @@ export interface JevCheck {
   checkSources(sources: SourceInput[]): Promise<CheckResult>;
   checkFiles(paths: string[]): Promise<CheckResult>;
   testFixtures(cwd?: string): Promise<FixtureRunResult>;
+  recallFiles(paths: string[], sampleSize?: number, cwd?: string): Promise<RecallRunResult>;
 }
 
 export function createJevCheck(options: JevCheckOptions): JevCheck {
@@ -481,9 +484,122 @@ export function createJevCheck(options: JevCheckOptions): JevCheck {
     return { tests, diagnostics, stats };
   }
 
+  async function recallFiles(
+    paths: string[],
+    sampleSize = 12,
+    cwd = process.cwd(),
+  ): Promise<RecallRunResult> {
+    if (!Number.isInteger(sampleSize) || sampleSize < 1) {
+      throw new Error("recall sampleSize must be a positive integer");
+    }
+
+    const mutants: RecallRunResult["mutants"] = [];
+    const diagnostics: RecallRunResult["diagnostics"] = [];
+    const stats = emptyStats();
+    const sourceCache = new Map<string, string>();
+    const normalizedPaths = paths.map((path) => path.replaceAll("\\", "/"));
+
+    async function sourceFor(path: string): Promise<string> {
+      const cached = sourceCache.get(path);
+      if (cached !== undefined) return cached;
+      const source = await readFile(resolve(cwd, path), "utf8");
+      sourceCache.set(path, source);
+      return source;
+    }
+
+    for (const rule of options.rules) {
+      if (!rule.mutants?.length) continue;
+      const scoped = normalizedPaths.filter((path) => ruleAppliesToFile(rule, path));
+
+      for (const mutant of rule.mutants) {
+        const candidates: Array<{ path: string; source: string; mutated: string }> = [];
+        for (const path of scoped) {
+          const source = await sourceFor(path);
+          const mutated = applyMutation(source, mutant);
+          if (mutated !== undefined) candidates.push({ path, source, mutated });
+        }
+
+        candidates.sort((a, b) =>
+          stableMutationOrder(rule.id, mutant.id, a.path)
+            .localeCompare(stableMutationOrder(rule.id, mutant.id, b.path)),
+        );
+        const sample = candidates.slice(0, sampleSize);
+        const misses: string[] = [];
+        const invalidOriginals: string[] = [];
+        let caught = 0;
+        let judged = 0;
+
+        if (candidates.length === 0) {
+          diagnostics.push({
+            level: "warning",
+            ruleId: rule.id,
+            message: "Mutant " + mutant.id + " matched no in-scope files.",
+          });
+        }
+
+        for (const item of sample) {
+          const original = await checkSourceInternal(
+            item.path,
+            item.source,
+            [rule.id],
+            false,
+            false,
+          );
+          mergeStats(stats, original.stats);
+          diagnostics.push(...original.diagnostics);
+
+          if (original.evaluations.some((evaluation) => evaluation.violates)) {
+            invalidOriginals.push(item.path);
+            continue;
+          }
+
+          const mutated = await checkSourceInternal(
+            item.path,
+            item.mutated,
+            [rule.id],
+            false,
+            false,
+          );
+          mergeStats(stats, mutated.stats);
+          diagnostics.push(...mutated.diagnostics);
+          judged += 1;
+
+          if (mutated.evaluations.some((evaluation) => evaluation.violates)) {
+            caught += 1;
+          } else {
+            misses.push(item.path);
+          }
+        }
+
+        mutants.push({
+          ruleId: rule.id,
+          mutantId: mutant.id,
+          candidateCount: candidates.length,
+          sampled: sample.length,
+          judged,
+          caught,
+          ...(judged > 0 ? { recall: caught / judged } : {}),
+          misses,
+          invalidOriginals,
+        });
+      }
+    }
+
+    const measured = mutants
+      .map((item) => item.recall)
+      .filter((value): value is number => value !== undefined);
+
+    return {
+      mutants,
+      ...(measured.length ? { weakestRecall: Math.min(...measured) } : {}),
+      diagnostics,
+      stats,
+    };
+  }
+
   async function checkSource(path: string, source: string, onlyRuleIds?: string[]): Promise<CheckResult> {
     return checkSourceInternal(path, source, onlyRuleIds);
   }
 
-  return { checkSource, checkSources, checkFiles, testFixtures };
+  return { checkSource, checkSources, checkFiles, testFixtures, recallFiles };
 }
