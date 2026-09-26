@@ -226,14 +226,14 @@ Drift deliberately bypasses jevcheck's answer cache so every fixture is re-asked
 
 - mean absolute probability movement across comparable fixtures
 - fixtures whose probability moved by at least the configured `driftThreshold` (default 0.10)
-- **STALE** fixtures whose semantic request hashes changed
+- **STALE** fixtures whose semantic request hashes or configured threshold changed
 - newly added fixtures
 - fixtures present in the recorded calibration but no longer in the current suite
 - before/after model labels when available
 
-Only semantically identical fixture requests are compared for drift. If fixture code, the rule question/criteria, focus, or model-visible context changes, jevcheck reports the calibration as **STALE** rather than mislabeling the change as model drift.
+Only fixtures with unchanged semantic request identities and threshold are compared for drift. If fixture code, the rule question/criteria, focus, model-visible context, or threshold changes, jevcheck reports the calibration as **STALE** rather than mixing a changed evaluation policy into the model-drift comparison.
 
-A fixture that still passes but sits less than 0.05 from its rule threshold is marked `THIN`. Thin margins are warning evidence. Significant drift, stale calibration, added/removed fixtures, ordinary fixture failures, or diagnostics make `test --drift` exit non-zero.
+A fixture that still passes but sits 0.05 or less from its rule threshold is marked `THIN`. Thin margins are warning evidence. Significant drift, stale calibration, added/removed fixtures, ordinary fixture failures, or diagnostics make `test --drift` exit non-zero.
 
 Calibration is not accuracy proof. It detects movement relative to labelled examples; fixture quality and representativeness still matter.
 
