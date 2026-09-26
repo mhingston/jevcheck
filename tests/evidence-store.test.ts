@@ -145,10 +145,12 @@ describe("persisted rule evidence", () => {
     const cwd = await mkdtemp(join(tmpdir(), "jevcheck-evidence-store-"));
     await mkdir(join(cwd, "fixtures"), { recursive: true });
     await mkdir(join(cwd, "src"), { recursive: true });
+    await mkdir(join(cwd, "docs"), { recursive: true });
     await writeFile(join(cwd, "fixtures", "valid.ts"), "console.log(redacted);");
     await writeFile(join(cwd, "fixtures", "invalid.ts"), "console.log(secret);");
     await writeFile(join(cwd, "src", "a.ts"), "console.log(redacted);");
     await writeFile(join(cwd, "src", "unrelated.ts"), "const value = 1;");
+    await writeFile(join(cwd, "docs", "security.md"), "# Logging\nDo not log secrets.\n");
 
     const shadow = rule("shadow");
     const snapshot = await collectCurrentFixtureEvidence([shadow], { cwd });
@@ -188,6 +190,7 @@ describe("persisted rule evidence", () => {
       },
       0.1,
       "typesafe:default",
+      cwd,
     );
 
     const recall: RecallRunResult = {
@@ -232,6 +235,24 @@ describe("persisted rule evidence", () => {
       modelNamespace: "typesafe:default",
     });
     expect(ready.reports[0]?.readyForOwned).toBe(true);
+
+    await writeFile(join(cwd, "docs", "security.md"), "# Logging\nNever emit credentials or secrets.\n");
+    const policyChanged = await evaluateConfiguredRuleEvidence(config, {
+      cwd,
+      modelNamespace: "typesafe:default",
+    });
+    expect(policyChanged.reports[0]?.readyForOwned).toBe(false);
+    expect(policyChanged.reports[0]?.checks.find((check) => check.id === "drift")?.message)
+      .toContain("persisted drift evidence is stale");
+    expect(policyChanged.reports[0]?.checks.find((check) => check.id === "mutation")?.message)
+      .toContain("persisted mutation recall evidence is stale");
+
+    await writeFile(join(cwd, "docs", "security.md"), "# Logging\nDo not log secrets.\n");
+    const restoredPolicy = await evaluateConfiguredRuleEvidence(config, {
+      cwd,
+      modelNamespace: "typesafe:default",
+    });
+    expect(restoredPolicy.reports[0]?.readyForOwned).toBe(true);
 
     const tampered = await readRuleEvidenceArtifact(evidenceFile);
     const tamperedMutant = tampered.mutation[0]?.mutants[0];
@@ -278,6 +299,34 @@ describe("persisted rule evidence", () => {
     expect(stale.reports[0]?.readyForOwned).toBe(false);
     expect(stale.reports[0]?.checks.find((check) => check.id === "mutation")?.message)
       .toContain("persisted mutation recall evidence is stale");
+  });
+
+  it("blocks owned readiness when a local policy source cannot be read", async () => {
+    const cwd = await mkdtemp(join(tmpdir(), "jevcheck-missing-source-"));
+    await mkdir(join(cwd, "fixtures"), { recursive: true });
+    await writeFile(join(cwd, "fixtures", "valid.ts"), "const safe = true;");
+    await writeFile(join(cwd, "fixtures", "invalid.ts"), "console.log(secret);");
+
+    const config: JevCheckConfig = {
+      rules: [{
+        ...rule("owned"),
+        source: "docs/missing.md#logging",
+        mutants: [],
+      }],
+      graduation: {
+        requireCurrentCalibration: false,
+        requireCleanDrift: false,
+        requireMutants: false,
+      },
+    };
+
+    const result = await evaluateConfiguredRuleEvidence(config, {
+      cwd,
+      modelNamespace: "typesafe:default",
+    });
+    const source = result.reports[0]?.checks.find((check) => check.id === "source");
+    expect(source?.status).toBe("block");
+    expect(source?.message).toContain("local rule source cannot be read");
   });
 
   it("rejects unsafe sample sizes before persisting mutation evidence", async () => {
