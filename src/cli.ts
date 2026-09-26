@@ -54,7 +54,7 @@ function usage(): string {
     "  --changed             Check working-tree changes and untracked files",
     "  --staged              Check the exact staged index snapshot",
     "  --base <ref>          With --changed, check base...HEAD",
-    "  --format <style>      stylish, json, or sarif (sarif is check-only)",
+    "  --format <style>      stylish, json, or sarif (sarif: check/replay only)",
     "  --provider <name>     Jev provider inherited from @mhingston5/jev-cli",
     "  --model <name>        Override the provider model",
     "  --no-cache            Disable the answer cache",
@@ -195,7 +195,10 @@ async function main(): Promise<void> {
   }
 
   const baselineFile = resolve(config.baselineFile ?? DEFAULT_BASELINE_FILE);
-  const baseline = args.command === "check" ? await readBaseline(baselineFile) : [];
+  const baseline =
+    args.command === "check" || args.command === "replay"
+      ? await readBaseline(baselineFile)
+      : [];
   const replayFile = resolve(config.replayFile ?? DEFAULT_REPLAY_FILE);
   const decisionStore =
     args.command === "record"

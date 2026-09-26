@@ -120,16 +120,17 @@ export class DiskSemanticDecisionStore implements SemanticDecisionStore {
 
   private async load(): Promise<void> {
     if (this.loaded) return;
-    this.loaded = true;
     try {
       const raw = await readFile(this.filePath, "utf8");
       this.decisions = parseReplayFile(raw).decisions;
+      this.loaded = true;
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") {
         if (this.readOnly) {
           throw new Error("replay file not found: " + this.filePath + "; run jevcheck record first");
         }
         this.decisions = {};
+        this.loaded = true;
         return;
       }
       throw error;

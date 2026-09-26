@@ -1,4 +1,4 @@
-import { mkdtemp } from "node:fs/promises";
+import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -120,6 +120,16 @@ describe("semantic replay", () => {
     const replay = new DiskSemanticDecisionStore(path, true);
     expect(await replay.count()).toBe(1);
     expect((await replay.get("a".repeat(64)))?.probability).toBe(0.42);
+  });
+
+  it("keeps corpus parse failures sticky instead of turning them into misses", async () => {
+    const cwd = await mkdtemp(join(tmpdir(), "jevcheck-replay-invalid-"));
+    const path = join(cwd, "replay.json");
+    await writeFile(path, "{ invalid json", "utf8");
+    const replay = new DiskSemanticDecisionStore(path, true);
+
+    await expect(replay.count()).rejects.toThrow();
+    await expect(replay.get("missing")).rejects.toThrow();
   });
 
   it("fails clearly when a read-only replay corpus does not exist", async () => {
