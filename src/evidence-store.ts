@@ -498,9 +498,6 @@ export async function persistDriftEvidence(
   driftThreshold: number,
   modelNamespace: string,
 ): Promise<void> {
-  if (!Number.isSafeInteger(sampleSize) || sampleSize < 1) {
-    throw new Error("mutation evidence sampleSize must be a positive safe integer");
-  }
   const artifact = await readRuleEvidenceArtifact(path);
   artifact.drift = rules.map((rule) => ({
     ruleId: rule.id,
@@ -525,6 +522,9 @@ export async function persistMutationEvidence(
   sampleSize: number,
   options: Omit<MutationIdentityOptions, "sampleSize">,
 ): Promise<void> {
+  if (!Number.isSafeInteger(sampleSize) || sampleSize < 1) {
+    throw new Error("mutation evidence sampleSize must be a positive safe integer");
+  }
   const artifact = await readRuleEvidenceArtifact(path);
   artifact.mutation = [];
 
