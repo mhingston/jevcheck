@@ -156,7 +156,7 @@ describe("fixture calibration", () => {
         maxProbability: 0.7,
         passed: false,
         margin: -0.1,
-        model: "jev-b",
+        model: "jev-a",
       },
       {
         ...baseTests[1]!,
@@ -179,6 +179,32 @@ describe("fixture calibration", () => {
     expect(drift.stale).toHaveLength(0);
     expect(drift.added.map((entry) => entry.path)).toEqual(["fixtures/new.ts"]);
     expect(drift.removed.map((entry) => entry.path)).toEqual(["fixtures/removed.ts"]);
+  });
+
+  it("marks model changes stale and requires requalification", () => {
+    const recorded = [{
+      ruleId: "rule/a",
+      path: "fixtures/a.ts",
+      expected: "invalid" as const,
+      probability: 0.91,
+      threshold: 0.8,
+      semanticKeys: ["semantic-a"],
+      model: "jev-a",
+    }];
+    const current: FixtureTestResult[] = [{
+      ...baseTests[0]!,
+      maxProbability: 0.9,
+      model: "jev-b",
+    }];
+
+    const drift = compareCalibration(recorded, current);
+    expect(drift.compared).toBe(0);
+    expect(drift.moved).toHaveLength(0);
+    expect(drift.stale[0]).toMatchObject({
+      reason: "model",
+      beforeModel: "jev-a",
+      afterModel: "jev-b",
+    });
   });
 
   it("marks threshold changes stale rather than model drift", () => {
