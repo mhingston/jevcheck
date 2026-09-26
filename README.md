@@ -302,7 +302,7 @@ For each mutant, jevcheck:
 
 If the mutant changes a file but the rule's deterministic candidate selection never asks Jev about it, that is a **recall miss**, not a skipped sample. This makes recall useful for detecting over-narrow prefilters and AST selectors as well as weak semantic questions.
 
-Repository files are never modified; mutations exist only in memory. The command reports candidate count, sampled files, invalid originals, misses, per-mutant recall, and weakest measured recall. This slice measures recall but does not yet decide whether a rule is allowed to become `owned`.
+Repository files are never modified; mutations exist only in memory. The command reports candidate count, sampled files, invalid originals, misses, per-mutant recall, and weakest measured recall. Full-scope recall is persisted as graduation evidence and is one of the deterministic requirements evaluated before a rule can run as `owned`.
 
 Because configuration is JSON-only, this first mutation slice deliberately supports declarative regex replacement rather than arbitrary code callbacks. AST-specific mutation helpers can be added later if real rules show the regex boundary is too limiting.
 
