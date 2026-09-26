@@ -24,6 +24,8 @@ import type {
   JevCheckRule,
   RecallMutantResult,
   RecallRunResult,
+  RobustnessCaseResult,
+  RobustnessRunResult,
   RuleEvidenceReport,
 } from "./types.js";
 
@@ -31,6 +33,7 @@ export const DEFAULT_EVIDENCE_FILE = ".jevcheck/evidence.json";
 export const RULE_EVIDENCE_FORMAT_VERSION = 1;
 const DRIFT_IDENTITY_VERSION = "v1";
 const MUTATION_IDENTITY_VERSION = "v2";
+const ROBUSTNESS_IDENTITY_VERSION = "v1";
 
 export const DEFAULT_SOURCE_INCLUDE = [
   "**/*.{js,jsx,ts,tsx,mjs,cjs,mts,cts,py,go,rs,java,cs,rb,php,vue,svelte}",
@@ -50,10 +53,18 @@ export interface PersistedMutationEvidence {
   mutants: RecallMutantResult[];
 }
 
+export interface PersistedRobustnessEvidence {
+  ruleId: string;
+  identity: string;
+  modelNamespace: string;
+  cases: RobustnessCaseResult[];
+}
+
 export interface RuleEvidenceArtifact {
   version: number;
   drift: PersistedDriftEvidence[];
   mutation: PersistedMutationEvidence[];
+  robustness: PersistedRobustnessEvidence[];
 }
 
 export interface ConfiguredEvidenceOptions {
@@ -76,6 +87,7 @@ function emptyArtifact(): RuleEvidenceArtifact {
     version: RULE_EVIDENCE_FORMAT_VERSION,
     drift: [],
     mutation: [],
+    robustness: [],
   };
 }
 
@@ -91,6 +103,18 @@ function nonNegativeInteger(value: unknown, field: string): number {
     throw new Error(field + " must be a non-negative safe integer");
   }
   return value as number;
+}
+
+function probability(value: unknown, field: string): number {
+  if (
+    typeof value !== "number" ||
+    !Number.isFinite(value) ||
+    value < 0 ||
+    value > 1
+  ) {
+    throw new Error(field + " must be between 0 and 1");
+  }
+  return value;
 }
 
 function stringArray(value: unknown, field: string): string[] {
@@ -179,6 +203,80 @@ function validateRecallMutant(
   };
 }
 
+function validateRobustnessCase(
+  value: unknown,
+  field: string,
+  parentRuleId: string,
+): RobustnessCaseResult {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(field + " must be an object");
+  }
+  const item = value as Record<string, unknown>;
+  const ruleId = nonEmptyString(item.ruleId, field + ".ruleId");
+  if (ruleId !== parentRuleId) {
+    throw new Error(field + ".ruleId must match parent ruleId " + parentRuleId);
+  }
+  const path = nonEmptyString(item.path, field + ".path");
+  if (item.expected !== "valid" && item.expected !== "invalid") {
+    throw new Error(field + ".expected must be valid or invalid");
+  }
+  if (
+    item.perturbation !== "direct-instruction" &&
+    item.perturbation !== "false-authority" &&
+    item.perturbation !== "irrelevant-context"
+  ) {
+    throw new Error(field + ".perturbation is not supported");
+  }
+
+  const baselineProbability = probability(
+    item.baselineProbability,
+    field + ".baselineProbability",
+  );
+  const perturbedProbability = probability(
+    item.perturbedProbability,
+    field + ".perturbedProbability",
+  );
+  const delta = probability(item.delta, field + ".delta");
+  const threshold = probability(item.threshold, field + ".threshold");
+  for (const booleanField of ["baselineViolated", "perturbedViolated", "flipped"] as const) {
+    if (typeof item[booleanField] !== "boolean") {
+      throw new Error(field + "." + booleanField + " must be a boolean");
+    }
+  }
+
+  const expectedDelta = Math.abs(perturbedProbability - baselineProbability);
+  if (Math.abs(delta - expectedDelta) > 1e-9) {
+    throw new Error(field + ".delta must equal |perturbedProbability - baselineProbability|");
+  }
+  if (item.baselineViolated !== (baselineProbability >= threshold)) {
+    throw new Error(field + ".baselineViolated is inconsistent with probability and threshold");
+  }
+  if (item.perturbedViolated !== (perturbedProbability >= threshold)) {
+    throw new Error(field + ".perturbedViolated is inconsistent with probability and threshold");
+  }
+  if (item.flipped !== (item.baselineViolated !== item.perturbedViolated)) {
+    throw new Error(field + ".flipped is inconsistent with the classifications");
+  }
+  if (item.model !== undefined && (typeof item.model !== "string" || !item.model.trim())) {
+    throw new Error(field + ".model must be a non-empty string");
+  }
+
+  return {
+    ruleId,
+    path,
+    expected: item.expected,
+    perturbation: item.perturbation,
+    baselineProbability,
+    perturbedProbability,
+    delta,
+    threshold,
+    baselineViolated: item.baselineViolated as boolean,
+    perturbedViolated: item.perturbedViolated as boolean,
+    flipped: item.flipped as boolean,
+    ...(item.model ? { model: item.model as string } : {}),
+  };
+}
+
 function validateArtifact(value: unknown): RuleEvidenceArtifact {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw new Error("rule evidence file must be an object");
@@ -195,6 +293,9 @@ function validateArtifact(value: unknown): RuleEvidenceArtifact {
   }
   if (!Array.isArray(file.drift) || !Array.isArray(file.mutation)) {
     throw new Error("rule evidence file must contain drift and mutation arrays");
+  }
+  if (file.robustness !== undefined && !Array.isArray(file.robustness)) {
+    throw new Error("rule evidence robustness must be an array when present");
   }
 
   const drift = file.drift.map((value, index): PersistedDriftEvidence => {
@@ -256,6 +357,34 @@ function validateArtifact(value: unknown): RuleEvidenceArtifact {
     };
   });
 
+  const robustness = (file.robustness ?? []).map(
+    (value, index): PersistedRobustnessEvidence => {
+      const field = "evidence.robustness[" + index + "]";
+      if (!value || typeof value !== "object" || Array.isArray(value)) {
+        throw new Error(field + " must be an object");
+      }
+      const item = value as Record<string, unknown>;
+      const ruleId = nonEmptyString(item.ruleId, field + ".ruleId");
+      const identity = nonEmptyString(item.identity, field + ".identity");
+      const modelNamespace = nonEmptyString(item.modelNamespace, field + ".modelNamespace");
+      if (!Array.isArray(item.cases)) {
+        throw new Error(field + ".cases must be an array");
+      }
+      const cases = item.cases.map((candidate, caseIndex) =>
+        validateRobustnessCase(candidate, field + ".cases[" + caseIndex + "]", ruleId),
+      );
+      const keys = new Set<string>();
+      for (const candidate of cases) {
+        const key = [candidate.path, candidate.expected, candidate.perturbation].join("\0");
+        if (keys.has(key)) {
+          throw new Error(field + ".cases contains duplicate case: " + key.replaceAll("\0", " / "));
+        }
+        keys.add(key);
+      }
+      return { ruleId, identity, modelNamespace, cases };
+    },
+  );
+
   const driftRuleIds = new Set<string>();
   for (const item of drift) {
     if (driftRuleIds.has(item.ruleId)) {
@@ -271,10 +400,19 @@ function validateArtifact(value: unknown): RuleEvidenceArtifact {
     mutationRuleIds.add(item.ruleId);
   }
 
+  const robustnessRuleIds = new Set<string>();
+  for (const item of robustness) {
+    if (robustnessRuleIds.has(item.ruleId)) {
+      throw new Error("evidence.robustness contains duplicate ruleId: " + item.ruleId);
+    }
+    robustnessRuleIds.add(item.ruleId);
+  }
+
   return {
     version: RULE_EVIDENCE_FORMAT_VERSION,
     drift: drift.sort((a, b) => a.ruleId.localeCompare(b.ruleId)),
     mutation: mutation.sort((a, b) => a.ruleId.localeCompare(b.ruleId)),
+    robustness: robustness.sort((a, b) => a.ruleId.localeCompare(b.ruleId)),
   };
 }
 
@@ -514,6 +652,72 @@ export async function persistDriftEvidence(
   await writeRuleEvidenceArtifact(path, artifact);
 }
 
+export function robustnessEvidenceIdentity(
+  ruleId: string,
+  fixtures: readonly CurrentFixtureEvidence[],
+  modelNamespace: string,
+  measurement: readonly RobustnessCaseResult[] = [],
+): string {
+  return hash(JSON.stringify({
+    version: ROBUSTNESS_IDENTITY_VERSION,
+    kind: "robustness",
+    ruleId,
+    fixtures: sortedFixtureEvidence(ruleId, fixtures),
+    modelNamespace,
+    measurement: measurement
+      .filter((item) => item.ruleId === ruleId)
+      .map((item) => ({
+        path: item.path,
+        expected: item.expected,
+        perturbation: item.perturbation,
+        baselineProbability: item.baselineProbability,
+        perturbedProbability: item.perturbedProbability,
+        delta: item.delta,
+        threshold: item.threshold,
+        baselineViolated: item.baselineViolated,
+        perturbedViolated: item.perturbedViolated,
+        flipped: item.flipped,
+        model: item.model ?? null,
+      }))
+      .sort(
+        (a, b) =>
+          a.path.localeCompare(b.path) ||
+          a.expected.localeCompare(b.expected) ||
+          a.perturbation.localeCompare(b.perturbation),
+      ),
+  }));
+}
+
+export async function persistRobustnessEvidence(
+  path: string,
+  rules: readonly JevCheckRule[],
+  currentFixtures: readonly CurrentFixtureEvidence[],
+  result: RobustnessRunResult,
+  modelNamespace: string,
+): Promise<void> {
+  const artifact = await readRuleEvidenceArtifact(path);
+  artifact.robustness = [];
+
+  for (const rule of rules) {
+    const cases = result.cases.filter((item) => item.ruleId === rule.id);
+    if (!cases.length) continue;
+    artifact.robustness.push({
+      ruleId: rule.id,
+      identity: robustnessEvidenceIdentity(
+        rule.id,
+        currentFixtures,
+        modelNamespace,
+        cases,
+      ),
+      modelNamespace,
+      cases,
+    });
+  }
+
+  artifact.robustness.sort((a, b) => a.ruleId.localeCompare(b.ruleId));
+  await writeRuleEvidenceArtifact(path, artifact);
+}
+
 export async function persistMutationEvidence(
   path: string,
   rules: readonly JevCheckRule[],
@@ -579,6 +783,7 @@ export async function evaluateConfiguredRuleEvidence(
   const sourcePaths = await discoverFiles(include, exclude, cwd);
   const persistedDrift = new Map(artifact.drift.map((item) => [item.ruleId, item]));
   const persistedMutation = new Map(artifact.mutation.map((item) => [item.ruleId, item]));
+  const persistedRobustness = new Map(artifact.robustness.map((item) => [item.ruleId, item]));
   const reports: RuleEvidenceReport[] = [];
 
   for (const rule of config.rules) {
@@ -630,6 +835,24 @@ export async function evaluateConfiguredRuleEvidence(
       }
     }
 
+    let robustness: RobustnessCaseResult[] | undefined;
+    let robustnessError: string | undefined;
+    const recordedRobustness = persistedRobustness.get(rule.id);
+    if (recordedRobustness) {
+      const expected = robustnessEvidenceIdentity(
+        rule.id,
+        snapshot.fixtures,
+        options.modelNamespace,
+        recordedRobustness.cases,
+      );
+      if (recordedRobustness.identity !== expected) {
+        robustnessError =
+          "persisted robustness evidence is stale; rerun jevcheck test --robustness";
+      } else {
+        robustness = recordedRobustness.cases;
+      }
+    }
+
     reports.push(
       evaluateRuleEvidence(
         rule,
@@ -642,6 +865,8 @@ export async function evaluateConfiguredRuleEvidence(
           driftError,
           mutation,
           mutationError,
+          robustness,
+          robustnessError,
         },
         config.graduation,
       ),
