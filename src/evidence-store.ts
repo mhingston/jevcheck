@@ -690,11 +690,12 @@ export async function persistDriftEvidence(
   drift: FixtureDriftResult,
   driftThreshold: number,
   modelNamespace: string,
+  cwd = process.cwd(),
 ): Promise<void> {
   const artifact = await readRuleEvidenceArtifact(path);
   artifact.drift = [];
   for (const rule of rules) {
-    const provenance = await ruleSourceProvenance(rule);
+    const provenance = await ruleSourceProvenance(rule, cwd);
     artifact.drift.push({
       ruleId: rule.id,
       identity: driftEvidenceIdentity(
@@ -758,6 +759,7 @@ export async function persistRobustnessEvidence(
   currentFixtures: readonly CurrentFixtureEvidence[],
   result: RobustnessRunResult,
   modelNamespace: string,
+  cwd = process.cwd(),
 ): Promise<void> {
   if (!result.complete || result.cases.length !== result.expectedCases) {
     throw new Error(
@@ -768,7 +770,7 @@ export async function persistRobustnessEvidence(
   artifact.robustness = [];
 
   for (const rule of rules) {
-    const provenance = await ruleSourceProvenance(rule);
+    const provenance = await ruleSourceProvenance(rule, cwd);
     const cases = result.cases.filter((item) => item.ruleId === rule.id);
     if (!cases.length) continue;
     artifact.robustness.push({
