@@ -183,8 +183,8 @@ function parseArgs(argv: string[]): CliOptions {
         break;
       case "--sample-size": {
         const value = Number(requireValue(args, i, arg));
-        if (!Number.isInteger(value) || value < 1) {
-          throw new Error("--sample-size must be a positive integer");
+        if (!Number.isSafeInteger(value) || value < 1) {
+          throw new Error("--sample-size must be a positive safe integer");
         }
         options.sampleSize = value;
         options.sampleSizeSet = true;
