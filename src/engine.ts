@@ -34,7 +34,7 @@ export const DEFAULT_CHUNK_CHARS = 6000;
 export const DEFAULT_OVERLAP_LINES = 4;
 export const DEFAULT_CONTEXT_LINES = 20;
 export const DEFAULT_THRESHOLD = 0.8;
-const CACHE_SEMANTICS_VERSION = "v4";
+const CACHE_SEMANTICS_VERSION = "v5";
 
 function hash(value: string): string {
   return createHash("sha256").update(value).digest("hex");
@@ -138,6 +138,7 @@ function cacheKey(
   focusEndColumn: number | undefined,
   focusKind: string | undefined,
   codeHash: string,
+  untrustedContext: string | undefined,
 ): string {
   return hash(
     [
@@ -153,6 +154,7 @@ function cacheKey(
       String(focusEndColumn ?? ""),
       focusKind ?? "",
       codeHash,
+      untrustedContext ?? "",
     ].join("\n"),
   );
 }
@@ -236,6 +238,7 @@ export function createJevCheck(options: JevCheckOptions): JevCheck {
           candidate.focusEndColumn,
           candidate.focusKind,
           codeHash,
+          untrustedContext,
         );
 
         const identityText = normalizedFindingText(
