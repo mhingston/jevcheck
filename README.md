@@ -31,7 +31,10 @@ The model does semantic judgment. Code owns everything deterministic.
 - all providers supported by jev-cli
 - Noul rules where YES always means violation
 - file globs, exclusions, regex prefilters, negative `unless` filters, and bounded chunking
-- ast-grep candidate selection for exact TypeScript/TSX constructs
+- ast-grep candidate selection with pattern, kind, or rule selectors
+- JavaScript/TypeScript/TSX/HTML/CSS language inference with explicit override
+- optional nearest-ancestor AST context while keeping the matched node as exact focus
+- precise AST line/column metadata in Jev state, stylish output, and SARIF
 - whole-file rules that skip rather than silently truncate oversized files
 - answer caching keyed by rule, code, location, and provider/model namespace
 - `shadow` and `owned` lifecycle semantics
@@ -80,12 +83,10 @@ Create `jevcheck.config.json`:
       "source": "docs/security.md#logging",
       "files": ["**/*.ts"],
       "ast": {
-        "language": "typescript",
-        "rule": {
-          "pattern": "console.$METHOD($ARG)"
-        },
-        "contextBefore": 3,
-        "contextAfter": 3
+        "pattern": "console.$METHOD($ARG)",
+        "context": {
+          "ancestor": { "kind": "function_declaration" }
+        }
       },
       "question": "Does this logging call expose a credential, token, API key, password, or other sensitive value?",
       "criteria": {
@@ -110,14 +111,41 @@ Narrow deterministically before spending a model request:
 
 - `files` chooses where a rule applies.
 - `exclude` removes known irrelevant paths.
-- `ast` uses an in-process ast-grep rule to select exact TypeScript/TSX nodes.
-- `prefilter` narrows regex candidates; with `ast`, it becomes an additional cheap filter over each selected candidate.
+- `ast` uses in-process ast-grep to select exact nodes.
+- `prefilter` is a cheap file-level gate before AST parsing and an additional filter over selected candidates.
 - `unless` drops candidates with a deterministic exemption.
 - `wholeFile` is for absence/global questions that genuinely require the complete file.
 
 An AST match or prefilter is not evidence of a violation. It only selects the code Jev is allowed to judge.
 
-AST candidates carry an exact focus line range plus optional bounded surrounding context. `ast` and `wholeFile` are mutually exclusive. Oversized AST nodes and whole-file candidates are skipped with a diagnostic rather than silently truncated.
+An `ast` selector defines exactly one of:
+
+~~~json
+{ "pattern": "console.log($A)" }
+{ "kind": "call_expression" }
+{ "rule": { "all": [{ "kind": "call_expression" }, { "has": { "pattern": "$A" } }] } }
+~~~
+
+Language is inferred for `.js`, `.jsx`, `.mjs`, `.cjs`, `.ts`, `.mts`, `.cts`, `.tsx`, `.html`, `.htm`, and `.css`. Set `ast.language` explicitly to `javascript`, `typescript`, `tsx`, `html`, or `css` when inference is not appropriate.
+
+The matched AST node remains the exact semantic focus. `ast.context.ancestor` can add the nearest matching ancestor as related context without widening the focus:
+
+~~~json
+{
+  "ast": {
+    "pattern": "await $CALL",
+    "context": {
+      "ancestor": { "kind": "function_declaration" }
+    }
+  }
+}
+~~~
+
+`contextBefore` and `contextAfter` can override surrounding context independently. If omitted, the rule-level `contextLines` value is used, then the checker-wide default. Context stays bounded by `chunkChars`; an oversized focus is skipped rather than truncated.
+
+AST findings carry precise 1-based line/column ranges and the matched AST kind. Those fields are sent to Jev as focus metadata and flow through JSON/SARIF output.
+
+`ast` and `wholeFile` are mutually exclusive.
 
 ### Baselines and suppressions
 
@@ -129,7 +157,7 @@ jevcheck baseline
 
 The default file is `.jevcheck/baseline.json`. It is intentionally commit-friendly; jevcheck's `.gitignore` ignores other `.jevcheck` state while allowing the baseline file.
 
-A baseline fingerprint covers the rule, path, and normalized focused source range. Unrelated edits outside the finding range do not invalidate it; changing the flagged code makes it report again.
+A baseline fingerprint covers the rule, path, normalized focused source range, and deterministic occurrence identity. Unrelated edits outside the finding range do not invalidate it; changing the flagged code makes it report again.
 
 For a specific intentional exception, put a comment on the finding or immediately above it and include a reason:
 
@@ -238,10 +266,8 @@ const checker = createJevCheck({
       status: "shadow",
       files: ["src/**/*.ts"],
       ast: {
-        language: "typescript",
-        rule: { pattern: "while ($COND) { $$$BODY }" },
-        contextBefore: 3,
-        contextAfter: 3
+        pattern: "while ($COND) { $$$BODY }",
+        context: { ancestor: { kind: "function_declaration" } }
       },
       question: "Can this retry loop continue without a meaningful bound?"
     }
@@ -280,7 +306,7 @@ Provider choice changes transport, not lint semantics. Domain policy stays in je
 
 The next useful reliability slice is replay/offline evaluation so rule changes can be tested without repeatedly calling a provider. After that:
 
-1. related-node AST context for cases where the evidence lives in another definition/caller
+1. related-node AST context across separate definitions/callers
 2. recorded fixture probabilities and drift checks
 3. mutation recall
 4. enforced shadow-to-owned graduation gates

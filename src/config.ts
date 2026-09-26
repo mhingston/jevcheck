@@ -2,7 +2,7 @@ import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { validateAstCandidate } from "./ast.js";
 import { compilePattern } from "./candidates.js";
-import type { AstCandidateConfig, AstSelector, JevCheckConfig, JevCheckRule } from "./types.js";
+import type { AstCandidateConfig, JevCheckConfig, JevCheckRule } from "./types.js";
 
 function nonEmptyStrings(value: unknown, field: string): string[] | undefined {
   if (value === undefined) return undefined;
