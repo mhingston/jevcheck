@@ -200,5 +200,21 @@ describe("createJevCheck", () => {
     const result = await checker.testFixtures(cwd);
     expect(result.tests).toHaveLength(2);
     expect(result.tests.every((test) => test.passed)).toBe(true);
+    expect(result.tests).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        expected: "valid",
+        maxProbability: 0.05,
+        margin: 0.75,
+        thinMargin: false,
+        model: "fake-jev",
+      }),
+      expect.objectContaining({
+        expected: "invalid",
+        maxProbability: 0.95,
+        margin: 0.15,
+        thinMargin: false,
+        model: "fake-jev",
+      }),
+    ]));
   });
 });

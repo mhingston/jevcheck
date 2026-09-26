@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { formatSarif, formatStylish } from "../src/format.js";
-import type { CheckResult } from "../src/types.js";
+import {
+  formatFixtureDriftStylish,
+  formatFixtureStylish,
+  formatSarif,
+  formatStylish,
+} from "../src/format.js";
+import type { CheckResult, FixtureRunResult } from "../src/types.js";
 
 function resultForPath(path: string, columns = false): CheckResult {
   return {
@@ -68,6 +73,57 @@ describe("formatting", () => {
       endColumn: 12,
     });
     expect(parsed.runs[0].results[0].properties.focusKind).toBe("call_expression");
+  });
+
+  it("surfaces thin fixture margins and drift without treating them as failures", () => {
+    const fixtures: FixtureRunResult = {
+      tests: [{
+        ruleId: "security/no-log",
+        path: "fixtures/a.ts",
+        expected: "invalid",
+        passed: true,
+        maxProbability: 0.82,
+        threshold: 0.8,
+        margin: 0.02,
+        thinMargin: true,
+        model: "jev-a",
+      }],
+      diagnostics: [],
+      stats: {
+        filesChecked: 1,
+        candidatesChecked: 1,
+        requests: 1,
+        cacheHits: 0,
+        replayHits: 0,
+        replayMisses: 0,
+        inputTokens: 10,
+        outputTokens: 1,
+      },
+    };
+    expect(formatFixtureStylish(fixtures)).toContain("THIN");
+    expect(formatFixtureStylish(fixtures)).toContain("0 failure(s), 1 thin margin(s)");
+
+    const drift = formatFixtureDriftStylish({
+      compared: 1,
+      meanAbsoluteDelta: 0.12,
+      moved: [{
+        ruleId: "security/no-log",
+        path: "fixtures/a.ts",
+        expected: "invalid",
+        before: 0.94,
+        after: 0.82,
+        delta: 0.12,
+        beforeThreshold: 0.8,
+        afterThreshold: 0.8,
+        beforeModel: "jev-a",
+        afterModel: "jev-b",
+      }],
+      added: [],
+      removed: [],
+      driftThreshold: 0.1,
+    });
+    expect(drift).toContain("mean |Δp| 0.120");
+    expect(drift).toContain("jev-a -> jev-b");
   });
 
   it("normalizes and URI-encodes artifact paths", () => {

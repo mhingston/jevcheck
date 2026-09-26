@@ -23,6 +23,15 @@ describe("parseConfig", () => {
     ).toThrow("replayFile must be a non-empty string");
   });
 
+  it("validates calibrationFile when configured", () => {
+    expect(() =>
+      parseConfig({
+        calibrationFile: "",
+        rules: [{ id: "example", question: "Is this a violation?" }],
+      }),
+    ).toThrow("calibrationFile must be a non-empty string");
+  });
+
   it("validates nested fixture pattern arrays", () => {
     expect(() =>
       parseConfig({

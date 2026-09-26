@@ -1,0 +1,120 @@
+import { mkdtemp } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { describe, expect, it } from "vitest";
+import {
+  compareCalibration,
+  readCalibration,
+  writeCalibration,
+} from "../src/calibration.js";
+import type { FixtureTestResult } from "../src/types.js";
+
+const baseTests: FixtureTestResult[] = [
+  {
+    ruleId: "rule/a",
+    path: "fixtures/a.ts",
+    expected: "invalid",
+    passed: true,
+    maxProbability: 0.91,
+    threshold: 0.8,
+    margin: 0.11,
+    thinMargin: false,
+    model: "jev-a",
+  },
+  {
+    ruleId: "rule/a",
+    path: "fixtures/b.ts",
+    expected: "valid",
+    passed: true,
+    maxProbability: 0.2,
+    threshold: 0.8,
+    margin: 0.6,
+    thinMargin: false,
+    model: "jev-a",
+  },
+];
+
+describe("fixture calibration", () => {
+  it("writes and reads a deterministic versioned calibration file", async () => {
+    const cwd = await mkdtemp(join(tmpdir(), "jevcheck-calibration-"));
+    const path = join(cwd, "calibration.json");
+
+    expect(await writeCalibration(path, [...baseTests].reverse())).toBe(2);
+    const recorded = await readCalibration(path);
+
+    expect(recorded).toEqual([
+      {
+        ruleId: "rule/a",
+        path: "fixtures/a.ts",
+        expected: "invalid",
+        probability: 0.91,
+        threshold: 0.8,
+        model: "jev-a",
+      },
+      {
+        ruleId: "rule/a",
+        path: "fixtures/b.ts",
+        expected: "valid",
+        probability: 0.2,
+        threshold: 0.8,
+        model: "jev-a",
+      },
+    ]);
+  });
+
+  it("reports probability drift, added fixtures, and removed fixtures", () => {
+    const recorded = [
+      {
+        ruleId: "rule/a",
+        path: "fixtures/a.ts",
+        expected: "invalid" as const,
+        probability: 0.91,
+        threshold: 0.8,
+        model: "jev-a",
+      },
+      {
+        ruleId: "rule/a",
+        path: "fixtures/removed.ts",
+        expected: "valid" as const,
+        probability: 0.1,
+        threshold: 0.8,
+        model: "jev-a",
+      },
+    ];
+    const current: FixtureTestResult[] = [
+      {
+        ...baseTests[0]!,
+        maxProbability: 0.7,
+        passed: false,
+        margin: -0.1,
+        model: "jev-b",
+      },
+      {
+        ...baseTests[1]!,
+        path: "fixtures/new.ts",
+      },
+    ];
+
+    const drift = compareCalibration(recorded, current);
+
+    expect(drift.compared).toBe(1);
+    expect(drift.meanAbsoluteDelta).toBeCloseTo(0.21);
+    expect(drift.moved).toHaveLength(1);
+    expect(drift.moved[0]).toMatchObject({
+      path: "fixtures/a.ts",
+      before: 0.91,
+      after: 0.7,
+      beforeModel: "jev-a",
+      afterModel: "jev-b",
+    });
+    expect(drift.added.map((entry) => entry.path)).toEqual(["fixtures/new.ts"]);
+    expect(drift.removed.map((entry) => entry.path)).toEqual(["fixtures/removed.ts"]);
+  });
+
+  it("fails clearly when drift has no recorded calibration", async () => {
+    const cwd = await mkdtemp(join(tmpdir(), "jevcheck-calibration-missing-"));
+    await expect(readCalibration(join(cwd, "missing.json"))).rejects.toThrow(
+      "run jevcheck test --record first",
+    );
+  });
+});
