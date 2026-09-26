@@ -174,7 +174,7 @@ describe("fixture calibration", () => {
       before: 0.91,
       after: 0.7,
       beforeModel: "jev-a",
-      afterModel: "jev-b",
+      afterModel: "jev-a",
     });
     expect(drift.stale).toHaveLength(0);
     expect(drift.added.map((entry) => entry.path)).toEqual(["fixtures/new.ts"]);
@@ -241,6 +241,7 @@ describe("fixture calibration", () => {
       probability: 0.91,
       threshold: 0.8,
       semanticKeys: ["semantic-a"],
+      model: "jev-a",
     }];
     const drift = compareCalibration(recorded, [baseTests[0]!], 0);
     expect(drift.compared).toBe(1);
