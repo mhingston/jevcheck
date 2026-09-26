@@ -126,6 +126,9 @@ export class DiskSemanticDecisionStore implements SemanticDecisionStore {
       this.decisions = parseReplayFile(raw).decisions;
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+        if (this.readOnly) {
+          throw new Error("replay file not found: " + this.filePath + "; run jevcheck record first");
+        }
         this.decisions = {};
         return;
       }
