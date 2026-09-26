@@ -167,7 +167,10 @@ export interface JevCheck {
   checkSource(path: string, source: string, onlyRuleIds?: string[]): Promise<CheckResult>;
   checkSources(sources: SourceInput[]): Promise<CheckResult>;
   checkFiles(paths: string[]): Promise<CheckResult>;
-  testFixtures(cwd?: string): Promise<FixtureRunResult>;
+  testFixtures(
+    cwd?: string,
+    fixtureSet?: "development" | "confirmation",
+  ): Promise<FixtureRunResult>;
   testRobustness(cwd?: string): Promise<RobustnessRunResult>;
   recallFiles(paths: string[], sampleSize?: number, cwd?: string): Promise<RecallRunResult>;
 }
@@ -409,15 +412,20 @@ export function createJevCheck(options: JevCheckOptions): JevCheck {
     return checkSources(sources);
   }
 
-  async function testFixtures(cwd = process.cwd()): Promise<FixtureRunResult> {
+  async function testFixtures(
+    cwd = process.cwd(),
+    fixtureSet: "development" | "confirmation" = "development",
+  ): Promise<FixtureRunResult> {
     const tests: FixtureTestResult[] = [];
     const diagnostics: FixtureRunResult["diagnostics"] = [];
     const stats = emptyStats();
 
     for (const rule of options.rules) {
+      const fixtureConfig =
+        fixtureSet === "confirmation" ? rule.fixtures?.confirmation : rule.fixtures;
       const groups: Array<["valid" | "invalid", string[] | undefined]> = [
-        ["valid", rule.fixtures?.valid],
-        ["invalid", rule.fixtures?.invalid],
+        ["valid", fixtureConfig?.valid],
+        ["invalid", fixtureConfig?.invalid],
       ];
 
       for (const [expected, patterns] of groups) {
