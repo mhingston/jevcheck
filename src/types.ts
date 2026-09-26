@@ -57,6 +57,7 @@ export interface JevCheckConfig {
   contextLines?: number;
   cacheFile?: string;
   baselineFile?: string;
+  replayFile?: string;
   suppressionMarker?: string;
   rules: JevCheckRule[];
 }
@@ -89,6 +90,7 @@ export interface Evaluation {
   threshold: number;
   model: string;
   cached: boolean;
+  replayed?: boolean;
   violates: boolean;
   ruleHash: string;
   codeHash: string;
@@ -128,6 +130,8 @@ export interface RunStats {
   candidatesChecked: number;
   requests: number;
   cacheHits: number;
+  replayHits: number;
+  replayMisses: number;
   inputTokens: number;
   outputTokens: number;
 }
@@ -150,8 +154,29 @@ export interface AnswerCache {
   set(key: string, value: CachedDecision): Promise<void>;
 }
 
+export interface RecordedSemanticDecision {
+  key: string;
+  semanticHash: string;
+  stateHash: string;
+  ruleId: string;
+  path: string;
+  startLine: number;
+  endLine: number;
+  startColumn?: number;
+  endColumn?: number;
+  focusKind?: string;
+  probability: number;
+  model: string;
+}
+
+export interface SemanticDecisionStore {
+  get(key: string): Promise<RecordedSemanticDecision | undefined>;
+  set(value: RecordedSemanticDecision): Promise<void>;
+  count?(): Promise<number>;
+}
+
 export interface JevCheckOptions {
-  client: SystemOneLikeClient;
+  client?: SystemOneLikeClient;
   rules: JevCheckRule[];
   cache?: AnswerCache;
   cacheNamespace?: string;
@@ -160,6 +185,8 @@ export interface JevCheckOptions {
   contextLines?: number;
   baseline?: BaselineEntry[];
   suppressionMarker?: string;
+  decisionStore?: SemanticDecisionStore;
+  replayOnly?: boolean;
 }
 
 export interface FixtureTestResult {
