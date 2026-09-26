@@ -276,7 +276,7 @@ async function main(): Promise<void> {
       overlapLines: config.overlapLines,
       contextLines: config.contextLines,
     });
-    let calibration;
+    let calibration: Awaited<ReturnType<typeof readCalibration>> | undefined;
     let calibrationError: string | undefined;
     try {
       calibration = await readCalibration(calibrationFile);
