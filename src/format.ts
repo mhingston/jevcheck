@@ -66,7 +66,11 @@ export function formatStylish(result: CheckResult): string {
       result.stats.requests +
       " request(s), " +
       result.stats.cacheHits +
-      " cache hit(s)",
+      " cache hit(s), " +
+      result.stats.replayHits +
+      " replay hit(s), " +
+      result.stats.replayMisses +
+      " replay miss(es)",
   );
 
   return lines.join("\n");

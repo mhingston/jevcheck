@@ -14,6 +14,15 @@ describe("parseConfig", () => {
     ).toThrow("example.criteria.true must be a non-empty string");
   });
 
+  it("validates replayFile when configured", () => {
+    expect(() =>
+      parseConfig({
+        replayFile: "",
+        rules: [{ id: "example", question: "Is this a violation?" }],
+      }),
+    ).toThrow("replayFile must be a non-empty string");
+  });
+
   it("validates nested fixture pattern arrays", () => {
     expect(() =>
       parseConfig({

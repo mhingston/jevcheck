@@ -31,6 +31,8 @@ function resultForPath(path: string, columns = false): CheckResult {
       candidatesChecked: 1,
       requests: 1,
       cacheHits: 0,
+      replayHits: 0,
+      replayMisses: 0,
       inputTokens: 10,
       outputTokens: 1,
     },

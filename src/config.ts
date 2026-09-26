@@ -178,6 +178,7 @@ export function parseConfig(value: unknown): JevCheckConfig {
     contextLines: config.contextLines as number | undefined,
     cacheFile: optionalNonEmptyString(config.cacheFile, "cacheFile"),
     baselineFile: optionalNonEmptyString(config.baselineFile, "baselineFile"),
+    replayFile: optionalNonEmptyString(config.replayFile, "replayFile"),
     suppressionMarker: optionalNonEmptyString(config.suppressionMarker, "suppressionMarker"),
     rules,
   };

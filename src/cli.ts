@@ -14,9 +14,10 @@ import { createJevCheck, ruleAppliesToFile } from "./engine.js";
 import { discoverFiles, filterFiles } from "./files.js";
 import { formatFixtureStylish, formatJson, formatSarif, formatStylish } from "./format.js";
 import { changedFiles, stagedSources } from "./git.js";
+import { DEFAULT_REPLAY_FILE, DiskSemanticDecisionStore } from "./replay.js";
 import type { SourceInput } from "./types.js";
 
-type Command = "check" | "test" | "list" | "baseline";
+type Command = "check" | "test" | "list" | "baseline" | "record" | "replay";
 type OutputFormat = "stylish" | "json" | "sarif";
 
 interface CliOptions {
@@ -45,17 +46,22 @@ function usage(): string {
     "  jevcheck test [options]",
     "  jevcheck list [options]",
     "  jevcheck baseline [patterns...] [options]",
+    "  jevcheck record [patterns...] [options]",
+    "  jevcheck replay [patterns...] [options]",
     "",
     "Options:",
     "  --config <path>       Config file (default: jevcheck.config.json)",
     "  --changed             Check working-tree changes and untracked files",
     "  --staged              Check the exact staged index snapshot",
     "  --base <ref>          With --changed, check base...HEAD",
-    "  --format <style>      stylish, json, or sarif (sarif is check-only)",
+    "  --format <style>      stylish, json, or sarif (sarif: check/replay only)",
     "  --provider <name>     Jev provider inherited from @mhingston5/jev-cli",
     "  --model <name>        Override the provider model",
     "  --no-cache            Disable the answer cache",
     "  -h, --help            Show help",
+    "",
+    "record captures semantic decisions to replayFile (default: .jevcheck/replay.json).",
+    "replay is strict and offline: missing decisions are errors and never reach a provider.",
     "",
     "Only owned error findings make the check command exit 1. Shadow findings are advisory.",
   ].join("\n");
@@ -70,7 +76,13 @@ function requireValue(argv: string[], index: number, flag: string): string {
 function parseArgs(argv: string[]): CliOptions {
   const args = [...argv];
   let command: Command = "check";
-  if (args[0] === "test" || args[0] === "list" || args[0] === "baseline") {
+  if (
+    args[0] === "test" ||
+    args[0] === "list" ||
+    args[0] === "baseline" ||
+    args[0] === "record" ||
+    args[0] === "replay"
+  ) {
     command = args.shift() as Command;
   }
 
@@ -139,8 +151,11 @@ function parseArgs(argv: string[]): CliOptions {
 
   if (options.changed && options.staged) throw new Error("choose either --changed or --staged");
   if (options.base && !options.changed) throw new Error("--base requires --changed");
-  if (options.format === "sarif" && options.command !== "check") {
-    throw new Error("--format sarif is only valid for check");
+  if (options.format === "sarif" && options.command !== "check" && options.command !== "replay") {
+    throw new Error("--format sarif is only valid for check or replay");
+  }
+  if (options.command === "replay" && (options.provider || options.model)) {
+    throw new Error("replay is offline; --provider and --model are not valid");
   }
   return options;
 }
@@ -180,10 +195,23 @@ async function main(): Promise<void> {
   }
 
   const baselineFile = resolve(config.baselineFile ?? DEFAULT_BASELINE_FILE);
-  const baseline = args.command === "check" ? await readBaseline(baselineFile) : [];
-  const client = createJevClient({ provider: args.provider, model: args.model });
+  const baseline =
+    args.command === "check" || args.command === "replay"
+      ? await readBaseline(baselineFile)
+      : [];
+  const replayFile = resolve(config.replayFile ?? DEFAULT_REPLAY_FILE);
+  const decisionStore =
+    args.command === "record"
+      ? new DiskSemanticDecisionStore(replayFile)
+      : args.command === "replay"
+        ? new DiskSemanticDecisionStore(replayFile, true)
+        : undefined;
+  const client =
+    args.command === "replay"
+      ? undefined
+      : createJevClient({ provider: args.provider, model: args.model });
   const cacheFile = resolve(config.cacheFile ?? ".jevcheck/cache.json");
-  const cache = args.cache ? new DiskAnswerCache(cacheFile) : undefined;
+  const cache = args.cache && args.command !== "replay" ? new DiskAnswerCache(cacheFile) : undefined;
   const checker = createJevCheck({
     client,
     rules: config.rules,
@@ -197,6 +225,8 @@ async function main(): Promise<void> {
     contextLines: config.contextLines,
     baseline,
     suppressionMarker: config.suppressionMarker,
+    decisionStore,
+    replayOnly: args.command === "replay",
   });
 
   if (args.command === "test") {
@@ -238,6 +268,8 @@ async function main(): Promise<void> {
         candidatesChecked: 0,
         requests: 0,
         cacheHits: 0,
+        replayHits: 0,
+        replayMisses: 0,
         inputTokens: 0,
         outputTokens: 0,
       },
@@ -249,6 +281,22 @@ async function main(): Promise<void> {
   }
 
   const result = stagedInputs ? await checker.checkSources(stagedInputs) : await checker.checkFiles(paths);
+
+  if (args.command === "record") {
+    await decisionStore?.flush?.();
+    const decisions = await decisionStore?.count?.() ?? result.evaluations.length;
+    console.log(
+      args.format === "json"
+        ? formatJson({ ...result, replay: { file: replayFile, decisions } })
+        : formatStylish(result) +
+          "\nReplay corpus: " +
+          decisions +
+          " decision(s) in " +
+          replayFile,
+    );
+    process.exitCode = result.diagnostics.some((item) => item.level === "error") ? 1 : 0;
+    return;
+  }
 
   if (args.command === "baseline") {
     const entries = result.findings.map(baselineEntry);
@@ -276,7 +324,12 @@ async function main(): Promise<void> {
         ? formatSarif(result)
         : formatStylish(result),
   );
-  process.exitCode = result.findings.some((finding) => finding.blocking) ? 1 : 0;
+  process.exitCode =
+    result.findings.some((finding) => finding.blocking) ||
+    result.stats.replayMisses > 0 ||
+    result.diagnostics.some((item) => item.level === "error")
+      ? 1
+      : 0;
 }
 
 main().catch((error: unknown) => {

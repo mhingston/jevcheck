@@ -3,4 +3,5 @@ dist/
 coverage/
 .jevcheck/*
 !.jevcheck/baseline.json
+!.jevcheck/replay.json
 *.tgz
