@@ -33,12 +33,14 @@ describe("parseConfig", () => {
   });
 
   it("validates driftThreshold when configured", () => {
-    expect(() =>
-      parseConfig({
-        driftThreshold: 1.1,
-        rules: [{ id: "example", question: "Is this a violation?" }],
-      }),
-    ).toThrow("driftThreshold must be between 0 and 1");
+    for (const driftThreshold of [1.1, -0.1, Number.NaN, Number.POSITIVE_INFINITY]) {
+      expect(() =>
+        parseConfig({
+          driftThreshold,
+          rules: [{ id: "example", question: "Is this a violation?" }],
+        }),
+      ).toThrow("driftThreshold must be between 0 and 1");
+    }
   });
 
   it("validates nested fixture pattern arrays", () => {
