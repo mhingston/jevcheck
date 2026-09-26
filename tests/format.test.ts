@@ -120,13 +120,40 @@ describe("formatting", () => {
         beforeModel: "jev-a",
         afterModel: "jev-b",
       }],
-      stale: [],
-      added: [],
-      removed: [],
+      stale: [{
+        ruleId: "security/no-log",
+        path: "fixtures/stale.ts",
+        expected: "invalid",
+        reason: "threshold",
+        beforeSemanticKeys: ["semantic-a"],
+        afterSemanticKeys: ["semantic-a"],
+        beforeThreshold: 0.8,
+        afterThreshold: 0.85,
+      }],
+      added: [{
+        ruleId: "security/no-log",
+        path: "fixtures/added.ts",
+        expected: "valid",
+        probability: 0.1,
+        threshold: 0.8,
+        semanticKeys: ["added"],
+      }],
+      removed: [{
+        ruleId: "security/no-log",
+        path: "fixtures/removed.ts",
+        expected: "valid",
+        probability: 0.1,
+        threshold: 0.8,
+        semanticKeys: ["removed"],
+      }],
       driftThreshold: 0.1,
     });
     expect(drift).toContain("mean |Δp| 0.120");
     expect(drift).toContain("jev-a -> jev-b");
+    expect(drift).toContain("STALE  security/no-log");
+    expect(drift).toContain("threshold changed 0.80 -> 0.85");
+    expect(drift).toContain("ADDED  security/no-log  valid  fixtures/added.ts");
+    expect(drift).toContain("REMOVED  security/no-log  valid  fixtures/removed.ts");
   });
 
   it("normalizes and URI-encodes artifact paths", () => {
