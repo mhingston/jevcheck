@@ -9,10 +9,22 @@ import {
   writeBaseline,
 } from "./baseline.js";
 import { DiskAnswerCache } from "./cache.js";
+import {
+  DEFAULT_CALIBRATION_FILE,
+  compareCalibration,
+  readCalibration,
+  writeCalibration,
+} from "./calibration.js";
 import { loadConfig } from "./config.js";
 import { createJevCheck, ruleAppliesToFile } from "./engine.js";
 import { discoverFiles, filterFiles } from "./files.js";
-import { formatFixtureStylish, formatJson, formatSarif, formatStylish } from "./format.js";
+import {
+  formatFixtureDriftStylish,
+  formatFixtureStylish,
+  formatJson,
+  formatSarif,
+  formatStylish,
+} from "./format.js";
 import { changedFiles, stagedSources } from "./git.js";
 import { DEFAULT_REPLAY_FILE, DiskSemanticDecisionStore } from "./replay.js";
 import type { SourceInput } from "./types.js";
@@ -30,6 +42,8 @@ interface CliOptions {
   provider?: JevProvider;
   model?: string;
   cache: boolean;
+  testRecord: boolean;
+  testDrift: boolean;
   patterns: string[];
 }
 
@@ -58,10 +72,13 @@ function usage(): string {
     "  --provider <name>     Jev provider inherited from @mhingston5/jev-cli",
     "  --model <name>        Override the provider model",
     "  --no-cache            Disable the answer cache",
+    "  --record              With test, record fixture probabilities",
+    "  --drift               With test, re-ask fixtures and compare calibration",
     "  -h, --help            Show help",
     "",
     "record captures semantic decisions to replayFile (default: .jevcheck/replay.json).",
     "replay is strict and offline: missing decisions are errors and never reach a provider.",
+    "test --record writes calibrationFile; test --drift bypasses the answer cache.",
     "",
     "Only owned error findings make the check command exit 1. Shadow findings are advisory.",
   ].join("\n");
@@ -93,6 +110,8 @@ function parseArgs(argv: string[]): CliOptions {
     changed: false,
     staged: false,
     cache: true,
+    testRecord: false,
+    testDrift: false,
     patterns: [],
   };
 
@@ -138,6 +157,12 @@ function parseArgs(argv: string[]): CliOptions {
       case "--no-cache":
         options.cache = false;
         break;
+      case "--record":
+        options.testRecord = true;
+        break;
+      case "--drift":
+        options.testDrift = true;
+        break;
       case "-h":
       case "--help":
         console.log(usage());
@@ -156,6 +181,12 @@ function parseArgs(argv: string[]): CliOptions {
   }
   if (options.command === "replay" && (options.provider || options.model)) {
     throw new Error("replay is offline; --provider and --model are not valid");
+  }
+  if ((options.testRecord || options.testDrift) && options.command !== "test") {
+    throw new Error("--record and --drift are only valid with test");
+  }
+  if (options.testRecord && options.testDrift) {
+    throw new Error("choose either test --record or test --drift");
   }
   return options;
 }
@@ -211,7 +242,12 @@ async function main(): Promise<void> {
       ? undefined
       : createJevClient({ provider: args.provider, model: args.model });
   const cacheFile = resolve(config.cacheFile ?? ".jevcheck/cache.json");
-  const cache = args.cache && args.command !== "replay" ? new DiskAnswerCache(cacheFile) : undefined;
+  const cache =
+    args.cache &&
+    args.command !== "replay" &&
+    !(args.command === "test" && args.testDrift)
+      ? new DiskAnswerCache(cacheFile)
+      : undefined;
   const checker = createJevCheck({
     client,
     rules: config.rules,
@@ -231,7 +267,39 @@ async function main(): Promise<void> {
 
   if (args.command === "test") {
     const result = await checker.testFixtures();
-    console.log(args.format === "json" ? formatJson(result) : formatFixtureStylish(result));
+    const calibrationFile = resolve(config.calibrationFile ?? DEFAULT_CALIBRATION_FILE);
+    let recorded: { file: string; fixtures: number } | undefined;
+    let drift;
+
+    if (args.testRecord) {
+      recorded = {
+        file: calibrationFile,
+        fixtures: await writeCalibration(calibrationFile, result.tests),
+      };
+    } else if (args.testDrift) {
+      drift = compareCalibration(await readCalibration(calibrationFile), result.tests);
+    }
+
+    if (args.format === "json") {
+      console.log(formatJson({
+        ...result,
+        ...(recorded ? { recorded } : {}),
+        ...(drift ? { drift } : {}),
+      }));
+    } else {
+      const sections = [formatFixtureStylish(result)];
+      if (recorded) {
+        sections.push(
+          "Recorded " +
+            recorded.fixtures +
+            " fixture probability/probabilities to " +
+            recorded.file,
+        );
+      }
+      if (drift) sections.push(formatFixtureDriftStylish(drift));
+      console.log(sections.join("\n\n"));
+    }
+
     const failed =
       result.tests.some((test) => !test.passed) ||
       result.diagnostics.some((item) => item.level === "error");
