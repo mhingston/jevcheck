@@ -118,6 +118,29 @@ Interpretation:
 
 Do not promote a rule to `owned` from fixture accuracy alone. Mutation recall is the evidence that the rule survives realistic repository context. This slice measures recall only; the later graduation gate should decide what minimum evidence is required.
 
+## Audit rule evidence
+
+Before treating a semantic rule as reviewer-of-record, inspect its evidence without making new model calls:
+
+~~~sh
+jevcheck rules audit
+jevcheck rules audit --format json
+~~~
+
+The audit distinguishes:
+
+- missing valid/invalid fixtures
+- failing fixture evidence
+- thin passing margins
+- missing versus stale calibration
+- drift evidence
+- mutation recall, including unmeasured or zero-judged mutants
+- rule source/provenance
+
+Current fixture semantic identities are recomputed deterministically. Do not treat process-local drift or recall results as current across runs unless a freshness-aware artifact proves that they still match the rule and source inputs. Missing evidence is preferable to silently reusing stale evidence.
+
+The audit is advisory: it does not change `shadow`/`owned` status or normal check behavior.
+
 ## Suppressing known findings
 
 Use a committed baseline for accepted existing backlog:
