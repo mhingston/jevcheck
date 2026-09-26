@@ -44,8 +44,8 @@ function resolveLanguage(path: string, config: AstCandidateConfig): Lang | undef
 }
 
 function matcherFor(selector: AstSelector, language: Lang): Matcher {
-  if ("pattern" in selector) return selector.pattern;
-  if ("kind" in selector) return kind(language, selector.kind);
+  if (selector.pattern !== undefined) return selector.pattern;
+  if (selector.kind !== undefined) return kind(language, selector.kind);
   return { rule: selector.rule as NapiConfig["rule"] };
 }
 
