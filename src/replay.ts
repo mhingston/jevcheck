@@ -104,11 +104,14 @@ export class MemorySemanticDecisionStore implements SemanticDecisionStore {
   async count(): Promise<number> {
     return this.decisions.size;
   }
+
+  async flush(): Promise<void> {}
 }
 
 export class DiskSemanticDecisionStore implements SemanticDecisionStore {
   private loaded = false;
   private decisions: Record<string, RecordedSemanticDecision> = {};
+  private dirty = false;
 
   constructor(
     private readonly filePath: string,
@@ -139,6 +142,12 @@ export class DiskSemanticDecisionStore implements SemanticDecisionStore {
     if (this.readOnly) throw new Error("cannot write to a read-only replay store");
     await this.load();
     this.decisions[value.key] = value;
+    this.dirty = true;
+  }
+
+  async flush(): Promise<void> {
+    if (this.readOnly || !this.dirty) return;
+    await this.load();
     await mkdir(dirname(this.filePath), { recursive: true });
     const temporary = this.filePath + ".tmp";
     const file: ReplayFile = {
@@ -149,6 +158,7 @@ export class DiskSemanticDecisionStore implements SemanticDecisionStore {
     };
     await writeFile(temporary, JSON.stringify(file, null, 2) + "\n", "utf8");
     await rename(temporary, this.filePath);
+    this.dirty = false;
   }
 
   async count(): Promise<number> {

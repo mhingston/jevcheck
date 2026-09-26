@@ -173,6 +173,7 @@ export interface SemanticDecisionStore {
   get(key: string): Promise<RecordedSemanticDecision | undefined>;
   set(value: RecordedSemanticDecision): Promise<void>;
   count?(): Promise<number>;
+  flush?(): Promise<void>;
 }
 
 export interface JevCheckOptions {
