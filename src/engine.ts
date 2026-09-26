@@ -339,6 +339,7 @@ export function createJevCheck(options: JevCheckOptions): JevCheck {
           model,
           cached,
           replayed,
+          semanticKey: replayIdentity.key,
           violates: probability >= threshold,
           ruleHash: rHash,
           codeHash,
@@ -470,6 +471,7 @@ export function createJevCheck(options: JevCheckOptions): JevCheck {
             threshold,
             margin,
             thinMargin: passed && margin < FIXTURE_THIN_MARGIN,
+            semanticKeys: [...new Set(fixtureResult.evaluations.map((item) => item.semanticKey))].sort(),
             model: strongest?.model,
           });
         }

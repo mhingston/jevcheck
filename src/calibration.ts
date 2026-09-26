@@ -4,6 +4,7 @@ import type {
   FixtureCalibrationEntry,
   FixtureDriftItem,
   FixtureDriftResult,
+  FixtureDriftStale,
   FixtureTestResult,
 } from "./types.js";
 
@@ -41,6 +42,14 @@ function validateEntry(value: unknown, index: number): FixtureCalibrationEntry {
       throw new Error("calibration.fixtures[" + index + "]." + field + " must be between 0 and 1");
     }
   }
+  if (!Array.isArray(entry.semanticKeys) || entry.semanticKeys.some(
+    (item) => typeof item !== "string" || !item.trim(),
+  )) {
+    throw new Error("calibration.fixtures[" + index + "].semanticKeys must be an array of non-empty strings");
+  }
+  if (new Set(entry.semanticKeys as string[]).size !== (entry.semanticKeys as string[]).length) {
+    throw new Error("calibration.fixtures[" + index + "].semanticKeys must not contain duplicates");
+  }
   if (entry.model !== undefined && (typeof entry.model !== "string" || !entry.model.trim())) {
     throw new Error("calibration.fixtures[" + index + "].model must be a non-empty string");
   }
@@ -51,6 +60,7 @@ function validateEntry(value: unknown, index: number): FixtureCalibrationEntry {
     expected: entry.expected as "valid" | "invalid",
     probability: entry.probability as number,
     threshold: entry.threshold as number,
+    semanticKeys: [...(entry.semanticKeys as string[])].sort(),
     ...(entry.model ? { model: entry.model as string } : {}),
   };
 }
@@ -102,6 +112,7 @@ export function calibrationEntries(tests: readonly FixtureTestResult[]): Fixture
       expected: test.expected,
       probability: Number(test.maxProbability.toFixed(6)),
       threshold: test.threshold,
+      semanticKeys: [...test.semanticKeys].sort(),
       ...(test.model ? { model: test.model } : {}),
     }))
     .sort(
@@ -136,10 +147,24 @@ export function compareCalibration(
   const beforeByKey = new Map(recorded.map((entry) => [fixtureCalibrationKey(entry), entry]));
   const afterByKey = new Map(current.map((entry) => [fixtureCalibrationKey(entry), entry]));
   const compared: FixtureDriftItem[] = [];
+  const stale: FixtureDriftStale[] = [];
 
   for (const after of current) {
     const before = beforeByKey.get(fixtureCalibrationKey(after));
     if (!before) continue;
+    if (
+      before.semanticKeys.length !== after.semanticKeys.length ||
+      before.semanticKeys.some((key, index) => key !== after.semanticKeys[index])
+    ) {
+      stale.push({
+        ruleId: after.ruleId,
+        path: after.path,
+        expected: after.expected,
+        beforeSemanticKeys: before.semanticKeys,
+        afterSemanticKeys: after.semanticKeys,
+      });
+      continue;
+    }
     const delta = Math.abs(after.probability - before.probability);
     compared.push({
       ruleId: after.ruleId,
@@ -164,6 +189,7 @@ export function compareCalibration(
     moved: compared
       .filter((item) => item.delta >= driftThreshold)
       .sort((a, b) => b.delta - a.delta || a.ruleId.localeCompare(b.ruleId) || a.path.localeCompare(b.path)),
+    stale: stale.sort((a, b) => a.ruleId.localeCompare(b.ruleId) || a.path.localeCompare(b.path)),
     added: current.filter((entry) => !beforeByKey.has(fixtureCalibrationKey(entry))),
     removed: recorded.filter((entry) => !afterByKey.has(fixtureCalibrationKey(entry))),
     driftThreshold,

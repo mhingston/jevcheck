@@ -92,6 +92,7 @@ export interface Evaluation {
   model: string;
   cached: boolean;
   replayed?: boolean;
+  semanticKey: string;
   violates: boolean;
   ruleHash: string;
   codeHash: string;
@@ -200,6 +201,7 @@ export interface FixtureTestResult {
   threshold: number;
   margin: number;
   thinMargin: boolean;
+  semanticKeys: string[];
   model?: string;
 }
 
@@ -209,6 +211,7 @@ export interface FixtureCalibrationEntry {
   expected: "valid" | "invalid";
   probability: number;
   threshold: number;
+  semanticKeys: string[];
   model?: string;
 }
 
@@ -225,10 +228,19 @@ export interface FixtureDriftItem {
   afterModel?: string;
 }
 
+export interface FixtureDriftStale {
+  ruleId: string;
+  path: string;
+  expected: "valid" | "invalid";
+  beforeSemanticKeys: string[];
+  afterSemanticKeys: string[];
+}
+
 export interface FixtureDriftResult {
   compared: number;
   meanAbsoluteDelta: number;
   moved: FixtureDriftItem[];
+  stale: FixtureDriftStale[];
   added: FixtureCalibrationEntry[];
   removed: FixtureCalibrationEntry[];
   driftThreshold: number;

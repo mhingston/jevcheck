@@ -222,6 +222,8 @@ export function formatFixtureDriftStylish(result: FixtureDriftResult): string {
       " moved >= " +
       result.driftThreshold.toFixed(2) +
       "; " +
+      result.stale.length +
+      " stale; " +
       result.added.length +
       " added; " +
       result.removed.length +
@@ -245,6 +247,18 @@ export function formatFixtureDriftStylish(result: FixtureDriftResult): string {
         (item.beforeModel || item.afterModel
           ? "  model=" + (item.beforeModel ?? "?") + " -> " + (item.afterModel ?? "?")
           : ""),
+    );
+  }
+
+  for (const item of result.stale) {
+    lines.push(
+      "  STALE  " +
+        item.ruleId +
+        "  " +
+        item.expected +
+        "  " +
+        item.path +
+        "  semantic inputs changed; re-record calibration",
     );
   }
 
