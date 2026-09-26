@@ -6,6 +6,7 @@ import {
   DEFAULT_CONFIRMATION_FILE,
   DEFAULT_DRIFT_THRESHOLD,
   readCalibration,
+  readCalibrationFile,
 } from "./calibration.js";
 import {
   collectCurrentFixtureEvidence,
@@ -873,11 +874,21 @@ export async function evaluateConfiguredRuleEvidence(
   let confirmationError: string | undefined;
   if (hasConfirmation) {
     try {
-      confirmation = await readCalibration(
+      const confirmationFile = await readCalibrationFile(
         confirmationPath,
         "confirmation",
         "run jevcheck test --confirm first",
       );
+      if (confirmationFile.modelNamespace !== options.modelNamespace) {
+        confirmationError =
+          "confirmation evidence model changed from " +
+          (confirmationFile.modelNamespace ?? "unknown") +
+          " to " +
+          options.modelNamespace +
+          "; rerun jevcheck test --confirm";
+      } else {
+        confirmation = confirmationFile.fixtures;
+      }
     } catch (error) {
       confirmationError = error instanceof Error ? error.message : String(error);
     }
