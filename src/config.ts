@@ -153,6 +153,18 @@ function validateRule(value: unknown, index: number): JevCheckRule {
     const fixtures = rule.fixtures as Record<string, unknown>;
     nonEmptyStrings(fixtures.valid, rule.id + ".fixtures.valid");
     nonEmptyStrings(fixtures.invalid, rule.id + ".fixtures.invalid");
+    if (fixtures.confirmation !== undefined) {
+      if (
+        !fixtures.confirmation ||
+        typeof fixtures.confirmation !== "object" ||
+        Array.isArray(fixtures.confirmation)
+      ) {
+        throw new Error(rule.id + ".fixtures.confirmation must be an object");
+      }
+      const confirmation = fixtures.confirmation as Record<string, unknown>;
+      nonEmptyStrings(confirmation.valid, rule.id + ".fixtures.confirmation.valid");
+      nonEmptyStrings(confirmation.invalid, rule.id + ".fixtures.confirmation.invalid");
+    }
   }
 
   if (rule.mutants !== undefined) {
@@ -236,6 +248,7 @@ export function parseConfig(value: unknown): JevCheckConfig {
     baselineFile: optionalNonEmptyString(config.baselineFile, "baselineFile"),
     replayFile: optionalNonEmptyString(config.replayFile, "replayFile"),
     calibrationFile: optionalNonEmptyString(config.calibrationFile, "calibrationFile"),
+    confirmationFile: optionalNonEmptyString(config.confirmationFile, "confirmationFile"),
     evidenceFile: optionalNonEmptyString(config.evidenceFile, "evidenceFile"),
     driftThreshold: config.driftThreshold as number | undefined,
     graduation: parseRuleEvidencePolicy(config.graduation),
