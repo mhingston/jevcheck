@@ -224,6 +224,17 @@ For non-AST rules:
 
 Keep semantic context bounded. Oversized focuses are skipped rather than silently truncated.
 
+### Context sufficiency and trust boundary
+
+Jev can only judge the evidence supplied to it. Give each rule the smallest deterministic context that is sufficient to answer its bounded question.
+
+- Include surrounding code only when it materially changes the judgement.
+- Do not send secrets, credentials, private keys, environment files, generated output, vendored code, or unrelated repository content.
+- Model-visible source and context are sent to the configured Jev provider. Treat that provider as part of the trust boundary for any code you submit.
+- If the selected candidate does not contain enough evidence for a defensible YES/NO judgement, improve the deterministic selector or bounded context, or do not apply the rule there.
+
+Do not solve insufficient context by turning a rule into an open-ended review prompt or by continuously widening its scope. A jevcheck rule should remain a narrow semantic question with stable meaning.
+
 ## A practical rule lifecycle
 
 A useful default workflow is:

@@ -34,6 +34,18 @@ Poor examples:
 9. Inspect false positives, false negatives, probability margins, and model drift before making it `owned`.
 10. Keep thresholds, CI behavior, suppressions, baselines, and other policy in code rather than asking the model to decide them.
 
+## Context sufficiency and trust boundary
+
+A semantic rule is only as defensible as the evidence supplied to it.
+
+- Send the smallest deterministic context that is sufficient to answer the bounded question.
+- Add ancestor or surrounding context only when it can materially affect the judgement.
+- Never send secrets, credentials, private keys, environment files, generated output, vendored code, or unrelated repository content.
+- Remember that model-visible code and context leave the local process for the configured Jev provider.
+- If a candidate does not contain enough evidence for a defensible YES/NO answer, improve deterministic selection/context or do not apply the rule there.
+
+Do not compensate for missing evidence by broadening the question into general code review or by continually increasing context.
+
 ## AST-aware narrowing
 
 Use `ast` when a candidate can be identified structurally. Supported selectors are:
@@ -224,3 +236,17 @@ jevcheck --changed --base origin/main --format sarif > jevcheck.sarif
 A shadow finding is advisory. Only an owned error finding is blocking. Suppressed findings remain visible in JSON output for auditability.
 
 Do not treat a high Jev probability as proof. It is a semantic signal that should be evaluated against labelled fixtures and real review outcomes.
+
+## Stop rule
+
+Stop refining a rule when its bounded meaning is clear, representative valid and invalid cases are covered, current evidence is healthy, and another change would mainly optimize the measured signal rather than improve the rule.
+
+Do not:
+
+- widen context simply to move probabilities
+- tune a threshold merely to make fixtures pass when labelled ranges overlap
+- weaken graduation policy to make an owned rule admissible
+- add speculative exclusions or suppressions just to improve measured results
+- broaden an atomic semantic question into a general quality judgement
+
+If a rule needs repeated exceptions, very broad context, or unstable threshold tuning to work, split it into narrower rules, redesign its deterministic candidate selection, or leave it in shadow instead of forcing graduation.
