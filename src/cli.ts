@@ -17,12 +17,14 @@ import {
 } from "./calibration.js";
 import { loadConfig } from "./config.js";
 import { createJevCheck, ruleAppliesToFile } from "./engine.js";
+import { collectCurrentFixtureEvidence, evaluateRuleEvidence } from "./evidence.js";
 import { discoverFiles, filterFiles } from "./files.js";
 import {
   formatFixtureDriftStylish,
   formatFixtureStylish,
   formatJson,
   formatRecallStylish,
+  formatRuleEvidenceStylish,
   formatSarif,
   formatStylish,
 } from "./format.js";
@@ -30,7 +32,7 @@ import { changedFiles, stagedSources } from "./git.js";
 import { DEFAULT_REPLAY_FILE, DiskSemanticDecisionStore } from "./replay.js";
 import type { SourceInput } from "./types.js";
 
-type Command = "check" | "test" | "list" | "baseline" | "record" | "replay" | "recall";
+type Command = "check" | "test" | "list" | "baseline" | "record" | "replay" | "recall" | "rules-audit";
 type OutputFormat = "stylish" | "json" | "sarif";
 
 interface CliOptions {
@@ -66,6 +68,7 @@ function usage(): string {
     "  jevcheck record [patterns...] [options]",
     "  jevcheck replay [patterns...] [options]",
     "  jevcheck recall [patterns...] [options]",
+    "  jevcheck rules audit [options]",
     "",
     "Options:",
     "  --config <path>       Config file (default: jevcheck.config.json)",
@@ -99,7 +102,10 @@ function requireValue(argv: string[], index: number, flag: string): string {
 function parseArgs(argv: string[]): CliOptions {
   const args = [...argv];
   let command: Command = "check";
-  if (
+  if (args[0] === "rules" && args[1] === "audit") {
+    command = "rules-audit";
+    args.splice(0, 2);
+  } else if (
     args[0] === "test" ||
     args[0] === "list" ||
     args[0] === "baseline" ||
@@ -201,6 +207,15 @@ function parseArgs(argv: string[]): CliOptions {
   if (options.command === "replay" && (options.provider || options.model)) {
     throw new Error("replay is offline; --provider and --model are not valid");
   }
+  if (options.command === "rules-audit" && (options.provider || options.model)) {
+    throw new Error("rules audit is provider-free; --provider and --model are not valid");
+  }
+  if (
+    options.command === "rules-audit" &&
+    (options.changed || options.staged || options.base || options.patterns.length > 0)
+  ) {
+    throw new Error("rules audit does not accept file patterns, --changed, --staged, or --base");
+  }
   if ((options.testRecord || options.testDrift) && options.command !== "test") {
     throw new Error("--record and --drift are only valid with test");
   }
@@ -254,6 +269,37 @@ async function main(): Promise<void> {
   }
 
   const calibrationFile = resolve(config.calibrationFile ?? DEFAULT_CALIBRATION_FILE);
+
+  if (args.command === "rules-audit") {
+    const snapshot = await collectCurrentFixtureEvidence(config.rules, {
+      chunkChars: config.chunkChars,
+      overlapLines: config.overlapLines,
+      contextLines: config.contextLines,
+    });
+    let calibration;
+    let calibrationError: string | undefined;
+    try {
+      calibration = await readCalibration(calibrationFile);
+    } catch (error) {
+      calibrationError = error instanceof Error ? error.message : String(error);
+    }
+
+    const reports = config.rules.map((rule) =>
+      evaluateRuleEvidence(rule, {
+        fixtures: snapshot.fixtures,
+        fixtureDiagnostics: snapshot.diagnostics,
+        calibration,
+        calibrationError,
+      }),
+    );
+
+    console.log(
+      args.format === "json"
+        ? formatJson(reports)
+        : formatRuleEvidenceStylish(reports),
+    );
+    return;
+  }
   const recordedCalibration =
     args.command === "test" && args.testDrift
       ? await readCalibration(calibrationFile)
