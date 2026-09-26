@@ -57,6 +57,7 @@ export interface PersistedRobustnessEvidence {
   ruleId: string;
   identity: string;
   modelNamespace: string;
+  expectedCases: number;
   cases: RobustnessCaseResult[];
 }
 
@@ -367,12 +368,16 @@ function validateArtifact(value: unknown): RuleEvidenceArtifact {
       const ruleId = nonEmptyString(item.ruleId, field + ".ruleId");
       const identity = nonEmptyString(item.identity, field + ".identity");
       const modelNamespace = nonEmptyString(item.modelNamespace, field + ".modelNamespace");
+      const expectedCases = nonNegativeInteger(item.expectedCases, field + ".expectedCases");
       if (!Array.isArray(item.cases)) {
         throw new Error(field + ".cases must be an array");
       }
       const cases = item.cases.map((candidate, caseIndex) =>
         validateRobustnessCase(candidate, field + ".cases[" + caseIndex + "]", ruleId),
       );
+      if (cases.length !== expectedCases) {
+        throw new Error(field + ".cases length must equal expectedCases");
+      }
       const keys = new Set<string>();
       for (const candidate of cases) {
         const key = [candidate.path, candidate.expected, candidate.perturbation].join("\0");
@@ -381,7 +386,7 @@ function validateArtifact(value: unknown): RuleEvidenceArtifact {
         }
         keys.add(key);
       }
-      return { ruleId, identity, modelNamespace, cases };
+      return { ruleId, identity, modelNamespace, expectedCases, cases };
     },
   );
 
@@ -656,6 +661,7 @@ export function robustnessEvidenceIdentity(
   ruleId: string,
   fixtures: readonly CurrentFixtureEvidence[],
   modelNamespace: string,
+  expectedCases: number,
   measurement: readonly RobustnessCaseResult[] = [],
 ): string {
   return hash(JSON.stringify({
@@ -664,6 +670,7 @@ export function robustnessEvidenceIdentity(
     ruleId,
     fixtures: sortedFixtureEvidence(ruleId, fixtures),
     modelNamespace,
+    expectedCases,
     measurement: measurement
       .filter((item) => item.ruleId === ruleId)
       .map((item) => ({
@@ -695,6 +702,11 @@ export async function persistRobustnessEvidence(
   result: RobustnessRunResult,
   modelNamespace: string,
 ): Promise<void> {
+  if (!result.complete || result.cases.length !== result.expectedCases) {
+    throw new Error(
+      "robustness evidence is incomplete; rerun jevcheck test --robustness after resolving diagnostics",
+    );
+  }
   const artifact = await readRuleEvidenceArtifact(path);
   artifact.robustness = [];
 
@@ -707,9 +719,11 @@ export async function persistRobustnessEvidence(
         rule.id,
         currentFixtures,
         modelNamespace,
+        cases.length,
         cases,
       ),
       modelNamespace,
+      expectedCases: cases.length,
       cases,
     });
   }
@@ -843,6 +857,7 @@ export async function evaluateConfiguredRuleEvidence(
         rule.id,
         snapshot.fixtures,
         options.modelNamespace,
+        recordedRobustness.expectedCases,
         recordedRobustness.cases,
       );
       if (recordedRobustness.identity !== expected) {
