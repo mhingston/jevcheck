@@ -279,7 +279,11 @@ async function main(): Promise<void> {
     let recorded: { file: string; fixtures: number } | undefined;
     let drift;
 
-    if (args.testRecord && !fixtureFailed && result.tests.length > 0) {
+    const calibrationReady =
+      result.tests.length > 0 &&
+      result.tests.every((test) => test.semanticKeys.length > 0);
+
+    if (args.testRecord && !fixtureFailed && calibrationReady) {
       recorded = {
         file: calibrationFile,
         fixtures: await writeCalibration(calibrationFile, result.tests),
@@ -297,7 +301,13 @@ async function main(): Promise<void> {
         ...result,
         ...(recorded ? { recorded } : {}),
         ...(args.testRecord && !recorded
-          ? { calibrationNotRecorded: fixtureFailed ? "fixture failures" : "no fixtures" }
+          ? {
+              calibrationNotRecorded: fixtureFailed
+                ? "fixture failures"
+                : result.tests.length === 0
+                  ? "no fixtures"
+                  : "fixtures with no semantic evaluations",
+            }
           : {}),
         ...(drift ? { drift } : {}),
       }));
@@ -313,7 +323,11 @@ async function main(): Promise<void> {
       } else if (args.testRecord) {
         sections.push(
           "Calibration not recorded: " +
-            (fixtureFailed ? "fixture failures must be fixed first." : "no fixtures were evaluated."),
+            (fixtureFailed
+              ? "fixture failures must be fixed first."
+              : result.tests.length === 0
+                ? "no fixtures were evaluated."
+                : "every fixture must produce at least one semantic evaluation."),
         );
       }
       if (drift) sections.push(formatFixtureDriftStylish(drift));
