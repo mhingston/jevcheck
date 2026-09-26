@@ -258,8 +258,22 @@ export function formatFixtureDriftStylish(result: FixtureDriftResult): string {
         item.expected +
         "  " +
         item.path +
-        "  semantic inputs changed; re-record calibration",
+        "  " +
+        (item.reason === "threshold"
+          ? "threshold changed " +
+            item.beforeThreshold.toFixed(2) +
+            " -> " +
+            item.afterThreshold.toFixed(2)
+          : "semantic inputs changed") +
+        "; re-record calibration",
     );
+  }
+
+  for (const item of result.added) {
+    lines.push("  ADDED  " + item.ruleId + "  " + item.expected + "  " + item.path);
+  }
+  for (const item of result.removed) {
+    lines.push("  REMOVED  " + item.ruleId + "  " + item.expected + "  " + item.path);
   }
 
   return lines.join("\n");
