@@ -1,4 +1,11 @@
-import type { CheckResult, FixtureDriftResult, FixtureRunResult, RecallRunResult, RuleEvidenceReport } from "./types.js";
+import type {
+  CheckResult,
+  FixtureDriftResult,
+  FixtureRunResult,
+  RecallRunResult,
+  RobustnessRunResult,
+  RuleEvidenceReport,
+} from "./types.js";
 
 export function formatStylish(result: CheckResult): string {
   const lines: string[] = [];
@@ -276,6 +283,54 @@ export function formatFixtureDriftStylish(result: FixtureDriftResult): string {
     lines.push("  REMOVED  " + item.ruleId + "  " + item.expected + "  " + item.path);
   }
 
+  return lines.join("\n");
+}
+
+
+export function formatRobustnessStylish(result: RobustnessRunResult): string {
+  const lines: string[] = [];
+
+  for (const item of result.cases) {
+    lines.push(
+      (item.flipped ? "FLIP" : "PASS") +
+        "  " +
+        item.ruleId +
+        "  " +
+        item.expected +
+        "  " +
+        item.path +
+        "  " +
+        item.perturbation +
+        "  " +
+        item.baselineProbability.toFixed(3) +
+        " -> " +
+        item.perturbedProbability.toFixed(3) +
+        "  |Δp|=" +
+        item.delta.toFixed(3),
+    );
+  }
+
+  for (const diagnostic of result.diagnostics) {
+    lines.push(
+      diagnostic.level.toUpperCase() +
+        "  " +
+        (diagnostic.ruleId ? diagnostic.ruleId + "  " : "") +
+        (diagnostic.path ? diagnostic.path + "  " : "") +
+        diagnostic.message,
+    );
+  }
+
+  if (!result.cases.length) lines.push("No robustness cases measured.");
+  lines.push(
+    result.cases.length +
+      " robustness case(s), " +
+      result.flips +
+      " classification flip(s), max |Δp|=" +
+      result.maxDelta.toFixed(3) +
+      "; " +
+      result.stats.requests +
+      " request(s)",
+  );
   return lines.join("\n");
 }
 
