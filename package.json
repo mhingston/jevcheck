@@ -1,6 +1,6 @@
 {
   "name": "@mhingston5/jevcheck",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Provider-agnostic semantic linting for bounded code-review questions using Jev",
   "license": "MIT",
   "author": "Mark Hingston",
