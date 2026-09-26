@@ -389,9 +389,11 @@ export function evaluateRuleEvidence(
         .filter((item) => item.ruleId === rule.id)
         .map((item) => [item.mutantId, item]),
     );
+    const missingMeasurements = configuredMutants.filter((id) => !byMutant.has(id));
+    const zeroJudged = configuredMutants.filter((id) => byMutant.get(id)?.judged === 0);
     const unmeasured = configuredMutants.filter((id) => {
       const result = byMutant.get(id);
-      return !result || result.judged === 0 || result.recall === undefined;
+      return result !== undefined && result.judged > 0 && result.recall === undefined;
     });
     const measured = configuredMutants
       .map((id) => byMutant.get(id))
@@ -402,11 +404,18 @@ export function evaluateRuleEvidence(
     const weakest = measured.length
       ? Math.min(...measured.map((item) => item.recall!))
       : undefined;
-    const misses = measured.reduce((sum, item) => sum + item.misses.length, 0);
+    const missPaths = measured.flatMap((item) => item.misses);
+    const misses = missPaths.length;
 
     const mutationProblems: string[] = [];
+    if (missingMeasurements.length) {
+      mutationProblems.push("missing recall measurements: " + missingMeasurements.join(", "));
+    }
+    if (zeroJudged.length) {
+      mutationProblems.push("zero judged samples: " + zeroJudged.join(", "));
+    }
     if (unmeasured.length) {
-      mutationProblems.push("unmeasured mutants: " + unmeasured.join(", "));
+      mutationProblems.push("unmeasured recall: " + unmeasured.join(", "));
     }
     if (weakest !== undefined && weakest < policy.minMutationRecall) {
       mutationProblems.push(
@@ -417,20 +426,27 @@ export function evaluateRuleEvidence(
       );
     }
 
-    checks.push({
-      id: "mutation",
-      status: mutationProblems.length ? statusFor(policy.requireMutants) : "pass",
-      message: mutationProblems.length
-        ? mutationProblems.join("; ")
-        : "weakest recall=" +
-          weakest!.toFixed(2) +
+    const summary =
+      (weakest !== undefined
+        ? "weakest recall=" +
+          weakest.toFixed(2) +
           " across " +
           measured.length +
           "/" +
           configuredMutants.length +
-          " mutant(s); " +
-          misses +
-          " miss(es)",
+          " mutant(s)"
+        : "no measured recall") +
+      "; " +
+      misses +
+      " miss(es)" +
+      (missPaths.length ? ": " + missPaths.join(", ") : "");
+
+    checks.push({
+      id: "mutation",
+      status: mutationProblems.length ? statusFor(policy.requireMutants) : "pass",
+      message: mutationProblems.length
+        ? mutationProblems.join("; ") + "; " + summary
+        : summary,
     });
   }
 
