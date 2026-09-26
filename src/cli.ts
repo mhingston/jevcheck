@@ -290,8 +290,9 @@ async function main(): Promise<void> {
       ? await readCalibration(calibrationFile)
       : undefined;
 
+  const hasOwnedRules = config.rules.some((rule) => (rule.status ?? "shadow") === "owned");
   const ruleEvidenceReports =
-    args.command === "check" || args.command === "replay"
+    (args.command === "check" || args.command === "replay") && hasOwnedRules
       ? (await evaluateConfiguredRuleEvidence(config, { modelNamespace })).reports
       : undefined;
 
