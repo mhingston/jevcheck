@@ -11,6 +11,7 @@ import {
 } from "./baseline.js";
 import { buildCandidates } from "./candidates.js";
 import { discoverFiles } from "./files.js";
+import { semanticDecisionKey } from "./replay.js";
 import type {
   AnswerCache,
   CheckResult,
@@ -70,6 +71,8 @@ function emptyStats(): RunStats {
     candidatesChecked: 0,
     requests: 0,
     cacheHits: 0,
+    replayHits: 0,
+    replayMisses: 0,
     inputTokens: 0,
     outputTokens: 0,
   };
@@ -90,6 +93,8 @@ function mergeStats(target: RunStats, source: RunStats): void {
   target.candidatesChecked += source.candidatesChecked;
   target.requests += source.requests;
   target.cacheHits += source.cacheHits;
+  target.replayHits += source.replayHits;
+  target.replayMisses += source.replayMisses;
   target.inputTokens += source.inputTokens;
   target.outputTokens += source.outputTokens;
 }
@@ -165,6 +170,12 @@ export function createJevCheck(options: JevCheckOptions): JevCheck {
   const contextLines = options.contextLines ?? DEFAULT_CONTEXT_LINES;
   const namespace = options.cacheNamespace ?? "default";
   const cache: AnswerCache | undefined = options.cache;
+  if (options.replayOnly && !options.decisionStore) {
+    throw new Error("replayOnly requires a semantic decision store");
+  }
+  if (!options.replayOnly && !options.client) {
+    throw new Error("a Jev client is required unless replayOnly is enabled");
+  }
   const suppressionMarker = options.suppressionMarker ?? DEFAULT_SUPPRESSION_MARKER;
   const baseline = new Set(
     (options.baseline ?? []).map((entry) => baselineKey(entry.ruleId, entry.path, entry.fingerprint)),
@@ -223,54 +234,95 @@ export function createJevCheck(options: JevCheckOptions): JevCheck {
         const occurrence = occurrenceCounts.get(identityText) ?? 0;
         occurrenceCounts.set(identityText, occurrence + 1);
 
+        const focusRange =
+          candidate.focusStartColumn !== undefined && candidate.focusEndColumn !== undefined
+            ? {
+                start: {
+                  line: candidate.focusStartLine,
+                  column: candidate.focusStartColumn,
+                },
+                end: {
+                  line: candidate.focusEndLine,
+                  column: candidate.focusEndColumn,
+                },
+              }
+            : undefined;
+        const state = {
+          path,
+          lineRange: [candidate.startLine, candidate.endLine],
+          focusLineRange: [candidate.focusStartLine, candidate.focusEndLine],
+          ...(focusRange ? { focusRange } : {}),
+          ...(candidate.focusKind ? { focusKind: candidate.focusKind } : {}),
+          code: candidate.text,
+        };
+        const question = noul(focusedQuestion(rule), labelsFor(rule));
+        const replayIdentity = semanticDecisionKey(question, state);
+
         let probability: number;
         let model: string;
         let cached = false;
-        const cachedDecision = cache ? await cache.get(key) : undefined;
+        let replayed = false;
 
-        if (cachedDecision) {
-          probability = cachedDecision.probability;
-          model = cachedDecision.model;
-          cached = true;
-          result.stats.cacheHits += 1;
-        } else {
-          const focusRange =
-            candidate.focusStartColumn !== undefined && candidate.focusEndColumn !== undefined
-              ? {
-                  start: {
-                    line: candidate.focusStartLine,
-                    column: candidate.focusStartColumn,
-                  },
-                  end: {
-                    line: candidate.focusEndLine,
-                    column: candidate.focusEndColumn,
-                  },
-                }
-              : undefined;
-          const response = await options.client.systemOne({
-            state: {
+        if (options.replayOnly) {
+          const recorded = await options.decisionStore!.get(replayIdentity.key);
+          if (!recorded) {
+            result.stats.replayMisses += 1;
+            result.diagnostics.push({
+              level: "error",
               path,
-              lineRange: [candidate.startLine, candidate.endLine],
-              focusLineRange: [candidate.focusStartLine, candidate.focusEndLine],
-              ...(focusRange ? { focusRange } : {}),
-              ...(candidate.focusKind ? { focusKind: candidate.focusKind } : {}),
-              code: candidate.text,
-            },
-            questions: {
-              violation: noul(focusedQuestion(rule), labelsFor(rule)),
-            },
-          });
-          const answer = response.answers.violation;
-          if (!answer || answer.type !== "noul") {
-            throw new Error("Rule " + rule.id + " expected a Noul answer");
+              ruleId: rule.id,
+              message:
+                "Replay miss for semantic request " +
+                replayIdentity.key.slice(0, 12) +
+                "; run jevcheck record with the same code and semantic rule inputs.",
+            });
+            continue;
+          }
+          probability = recorded.probability;
+          model = recorded.model;
+          replayed = true;
+          result.stats.replayHits += 1;
+        } else {
+          const cachedDecision = cache ? await cache.get(key) : undefined;
+          if (cachedDecision) {
+            probability = cachedDecision.probability;
+            model = cachedDecision.model;
+            cached = true;
+            result.stats.cacheHits += 1;
+          } else {
+            const response = await options.client!.systemOne({
+              state,
+              questions: { violation: question },
+            });
+            const answer = response.answers.violation;
+            if (!answer || answer.type !== "noul") {
+              throw new Error("Rule " + rule.id + " expected a Noul answer");
+            }
+
+            probability = answer.noul;
+            model = response.model;
+            result.stats.requests += 1;
+            result.stats.inputTokens += response.usage?.input_tokens ?? 0;
+            result.stats.outputTokens += response.usage?.output_tokens ?? 0;
+            if (cache) await cache.set(key, { probability, model });
           }
 
-          probability = answer.noul;
-          model = response.model;
-          result.stats.requests += 1;
-          result.stats.inputTokens += response.usage?.input_tokens ?? 0;
-          result.stats.outputTokens += response.usage?.output_tokens ?? 0;
-          if (cache) await cache.set(key, { probability, model });
+          if (options.decisionStore) {
+            await options.decisionStore.set({
+              key: replayIdentity.key,
+              semanticHash: replayIdentity.semanticHash,
+              stateHash: replayIdentity.stateHash,
+              ruleId: rule.id,
+              path,
+              startLine: candidate.focusStartLine,
+              endLine: candidate.focusEndLine,
+              startColumn: candidate.focusStartColumn,
+              endColumn: candidate.focusEndColumn,
+              focusKind: candidate.focusKind,
+              probability,
+              model,
+            });
+          }
         }
 
         const evaluation: Evaluation = {
@@ -285,6 +337,7 @@ export function createJevCheck(options: JevCheckOptions): JevCheck {
           threshold,
           model,
           cached,
+          replayed,
           violates: probability >= threshold,
           ruleHash: rHash,
           codeHash,
