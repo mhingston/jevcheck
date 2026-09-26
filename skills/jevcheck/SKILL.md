@@ -118,6 +118,22 @@ Interpretation:
 
 Do not promote a rule to `owned` from fixture accuracy alone. Mutation recall is evidence that the rule survives realistic repository context. Full-scope recall is persisted and evaluated by the graduation gate, whose default minimum recall is 0.90.
 
+## Probe semantic robustness
+
+Use robustness testing to check whether model-visible text that should not change the label can still move the judgement:
+
+~~~sh
+jevcheck test --robustness
+~~~
+
+The probe inserts deterministic comments immediately beside the semantic focus for labelled fixtures. It currently tests direct instruction injection, false approval/authority claims, and unrelated nearby context. Inspect both probability movement and classification flips.
+
+Robustness complements mutation recall:
+- mutation recall asks whether meaningful semantic changes are detected
+- robustness asks whether label-preserving changes are ignored
+
+The result is persisted in `.jevcheck/evidence.json` with a freshness identity. It is advisory rather than a graduation blocker: a flip should be investigated, but do not weaken the rule or threshold merely to make the probe green. Unsupported fixture languages are skipped with a diagnostic instead of applying a potentially semantic-changing transform.
+
 ## Audit rule evidence
 
 Before treating a semantic rule as reviewer-of-record, inspect its evidence without making new model calls:
@@ -129,6 +145,8 @@ jevcheck rules audit --format json
 
 The audit distinguishes:
 
+- threshold separation across current labelled fixture probabilities; if valid and invalid ranges overlap, no single threshold can fix the rule
+- persisted robustness results and stale robustness evidence
 - missing valid/invalid fixtures
 - failing fixture evidence
 - thin passing margins
@@ -150,11 +168,12 @@ Keep new rules in `shadow` while evidence is being built:
 ~~~sh
 jevcheck test --record
 jevcheck test --drift
+jevcheck test --robustness
 jevcheck recall
 jevcheck rules audit
 ~~~
 
-Only change `status` to `owned` when audit reports `Ready for owned: yes`. Normal checks and replay fail closed if an owned rule's required evidence is missing, stale, or failing.
+Only change `status` to `owned` when audit reports `Ready for owned: yes`. Normal checks and replay fail closed if an owned rule's required evidence is missing, stale, or failing. Robustness warnings are deliberately advisory and therefore do not change `Ready for owned` yet.
 
 Default policy requires valid and invalid fixtures, current calibration, no thin margins, clean drift, mutants with at least 0.90 recall and non-zero judged samples, and `source` provenance. Global `graduation` config can adjust those explicit requirements; do not weaken them merely to make CI pass.
 
