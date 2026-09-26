@@ -32,6 +32,15 @@ describe("parseConfig", () => {
     ).toThrow("calibrationFile must be a non-empty string");
   });
 
+  it("validates driftThreshold when configured", () => {
+    expect(() =>
+      parseConfig({
+        driftThreshold: 1.1,
+        rules: [{ id: "example", question: "Is this a violation?" }],
+      }),
+    ).toThrow("driftThreshold must be between 0 and 1");
+  });
+
   it("validates nested fixture pattern arrays", () => {
     expect(() =>
       parseConfig({

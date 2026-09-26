@@ -206,6 +206,7 @@ describe("createJevCheck", () => {
         maxProbability: 0.05,
         margin: 0.75,
         thinMargin: false,
+        semanticKeys: [expect.any(String)],
         model: "fake-jev",
       }),
       expect.objectContaining({
@@ -213,6 +214,7 @@ describe("createJevCheck", () => {
         maxProbability: 0.95,
         margin: 0.15,
         thinMargin: false,
+        semanticKeys: [expect.any(String)],
         model: "fake-jev",
       }),
     ]));

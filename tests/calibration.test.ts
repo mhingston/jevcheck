@@ -19,6 +19,7 @@ const baseTests: FixtureTestResult[] = [
     threshold: 0.8,
     margin: 0.11,
     thinMargin: false,
+    semanticKeys: ["semantic-a"],
     model: "jev-a",
   },
   {
@@ -30,6 +31,7 @@ const baseTests: FixtureTestResult[] = [
     threshold: 0.8,
     margin: 0.6,
     thinMargin: false,
+    semanticKeys: ["semantic-b"],
     model: "jev-a",
   },
 ];
@@ -49,6 +51,7 @@ describe("fixture calibration", () => {
         expected: "invalid",
         probability: 0.91,
         threshold: 0.8,
+        semanticKeys: ["semantic-a"],
         model: "jev-a",
       },
       {
@@ -57,6 +60,7 @@ describe("fixture calibration", () => {
         expected: "valid",
         probability: 0.2,
         threshold: 0.8,
+        semanticKeys: ["semantic-b"],
         model: "jev-a",
       },
     ]);
@@ -70,6 +74,7 @@ describe("fixture calibration", () => {
         expected: "invalid" as const,
         probability: 0.91,
         threshold: 0.8,
+        semanticKeys: ["semantic-a"],
         model: "jev-a",
       },
       {
@@ -78,6 +83,7 @@ describe("fixture calibration", () => {
         expected: "valid" as const,
         probability: 0.1,
         threshold: 0.8,
+        semanticKeys: ["semantic-removed"],
         model: "jev-a",
       },
     ];
@@ -107,8 +113,38 @@ describe("fixture calibration", () => {
       beforeModel: "jev-a",
       afterModel: "jev-b",
     });
+    expect(drift.stale).toHaveLength(0);
     expect(drift.added.map((entry) => entry.path)).toEqual(["fixtures/new.ts"]);
     expect(drift.removed.map((entry) => entry.path)).toEqual(["fixtures/removed.ts"]);
+  });
+
+  it("marks changed semantic inputs as stale rather than model drift", () => {
+    const recorded = [{
+      ruleId: "rule/a",
+      path: "fixtures/a.ts",
+      expected: "invalid" as const,
+      probability: 0.91,
+      threshold: 0.8,
+      semanticKeys: ["old-semantic"],
+      model: "jev-a",
+    }];
+    const current: FixtureTestResult[] = [{
+      ...baseTests[0]!,
+      maxProbability: 0.5,
+      semanticKeys: ["new-semantic"],
+    }];
+
+    const drift = compareCalibration(recorded, current);
+
+    expect(drift.compared).toBe(0);
+    expect(drift.moved).toHaveLength(0);
+    expect(drift.stale).toEqual([
+      expect.objectContaining({
+        path: "fixtures/a.ts",
+        beforeSemanticKeys: ["old-semantic"],
+        afterSemanticKeys: ["new-semantic"],
+      }),
+    ]);
   });
 
   it("fails clearly when drift has no recorded calibration", async () => {
