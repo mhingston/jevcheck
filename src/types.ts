@@ -25,9 +25,13 @@ export interface RuleCriteria {
   false?: string;
 }
 
-export interface RuleFixtures {
+export interface RuleFixtureGroup {
   valid?: string[];
   invalid?: string[];
+}
+
+export interface RuleFixtures extends RuleFixtureGroup {
+  confirmation?: RuleFixtureGroup;
 }
 
 export interface RuleMutant {
@@ -95,6 +99,7 @@ export interface JevCheckConfig {
   baselineFile?: string;
   replayFile?: string;
   calibrationFile?: string;
+  confirmationFile?: string;
   evidenceFile?: string;
   driftThreshold?: number;
   graduation?: Partial<RuleEvidencePolicy>;
@@ -273,11 +278,13 @@ export interface FixtureDriftStale {
   ruleId: string;
   path: string;
   expected: "valid" | "invalid";
-  reason: "semantic-inputs" | "threshold";
+  reason: "semantic-inputs" | "threshold" | "model";
   beforeSemanticKeys: string[];
   afterSemanticKeys: string[];
   beforeThreshold: number;
   afterThreshold: number;
+  beforeModel?: string;
+  afterModel?: string;
 }
 
 export interface FixtureDriftResult {
