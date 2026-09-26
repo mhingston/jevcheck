@@ -5,4 +5,5 @@ coverage/
 !.jevcheck/baseline.json
 !.jevcheck/replay.json
 !.jevcheck/calibration.json
+!.jevcheck/evidence.json
 *.tgz
