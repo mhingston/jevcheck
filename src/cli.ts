@@ -24,6 +24,7 @@ import {
   evaluateConfiguredRuleEvidence,
   persistDriftEvidence,
   persistMutationEvidence,
+  persistRobustnessEvidence,
 } from "./evidence-store.js";
 import { discoverFiles, filterFiles } from "./files.js";
 import {
@@ -31,6 +32,7 @@ import {
   formatFixtureStylish,
   formatJson,
   formatRecallStylish,
+  formatRobustnessStylish,
   formatRuleEvidenceStylish,
   formatSarif,
   formatStylish,
@@ -54,6 +56,7 @@ interface CliOptions {
   cache: boolean;
   testRecord: boolean;
   testDrift: boolean;
+  testRobustness: boolean;
   sampleSize: number;
   sampleSizeSet: boolean;
   patterns: string[];
@@ -84,12 +87,14 @@ function usage(): string {
     "  --no-cache            Disable the answer cache",
     "  --record              With test, record fixture probabilities",
     "  --drift               With test, re-ask fixtures and compare calibration",
+    "  --robustness          With test, probe label-preserving adversarial context",
     "  --sample-size <n>     With recall, files sampled per mutant (default: 12)",
     "  -h, --help            Show help",
     "",
     "record captures semantic decisions to replayFile (default: .jevcheck/replay.json).",
     "replay is strict and offline: missing decisions are errors and never reach a provider.",
-    "test --record writes calibrationFile; test --drift bypasses the answer cache.",
+    "test --record writes calibrationFile; test --drift and test --robustness bypass the answer cache.",
+    "robustness probes fixture judgments with nearby comments that should not change the label.",
     "recall mutates sampled real files in memory; repository files are never modified.",
     "",
     "Only owned error findings make the check command exit 1. Shadow findings are advisory.",
@@ -128,6 +133,7 @@ function parseArgs(argv: string[]): CliOptions {
     cache: true,
     testRecord: false,
     testDrift: false,
+    testRobustness: false,
     sampleSize: 12,
     sampleSizeSet: false,
     patterns: [],
@@ -181,6 +187,9 @@ function parseArgs(argv: string[]): CliOptions {
       case "--drift":
         options.testDrift = true;
         break;
+      case "--robustness":
+        options.testRobustness = true;
+        break;
       case "--sample-size": {
         const value = Number(requireValue(args, i, arg));
         if (!Number.isSafeInteger(value) || value < 1) {
@@ -216,11 +225,17 @@ function parseArgs(argv: string[]): CliOptions {
   ) {
     throw new Error("rules audit does not accept file patterns, --changed, --staged, or --base");
   }
-  if ((options.testRecord || options.testDrift) && options.command !== "test") {
-    throw new Error("--record and --drift are only valid with test");
+  if (
+    (options.testRecord || options.testDrift || options.testRobustness) &&
+    options.command !== "test"
+  ) {
+    throw new Error("--record, --drift, and --robustness are only valid with test");
   }
-  if (options.testRecord && options.testDrift) {
-    throw new Error("choose either test --record or test --drift");
+  if (
+    [options.testRecord, options.testDrift, options.testRobustness]
+      .filter(Boolean).length > 1
+  ) {
+    throw new Error("choose only one of test --record, test --drift, or test --robustness");
   }
   if (options.sampleSizeSet && options.command !== "recall") {
     throw new Error("--sample-size is only valid with recall");
@@ -316,7 +331,10 @@ async function main(): Promise<void> {
   const cache =
     args.cache &&
     args.command !== "replay" &&
-    !(args.command === "test" && (args.testRecord || args.testDrift))
+    !(
+      args.command === "test" &&
+      (args.testRecord || args.testDrift || args.testRobustness)
+    )
       ? new DiskAnswerCache(cacheFile)
       : undefined;
   const checker = createJevCheck({
@@ -334,6 +352,52 @@ async function main(): Promise<void> {
     mode: args.command === "check" || args.command === "replay" ? "enforce" : "measure",
     ruleEvidenceReports,
   });
+
+  if (args.command === "test" && args.testRobustness) {
+    const result = await checker.testRobustness();
+    let recorded = false;
+
+    if (result.complete) {
+      const current = await collectCurrentFixtureEvidence(config.rules, {
+        chunkChars: config.chunkChars,
+        overlapLines: config.overlapLines,
+        contextLines: config.contextLines,
+      });
+      await persistRobustnessEvidence(
+        evidenceFile,
+        config.rules,
+        current.fixtures,
+        result,
+        modelNamespace,
+      );
+      recorded = true;
+    }
+
+    if (args.format === "json") {
+      console.log(formatJson({
+        ...result,
+        ...(recorded
+          ? { evidenceFile }
+          : {
+              evidenceNotRecorded:
+                "robustness run was incomplete; resolve diagnostics and rerun",
+            }),
+      }));
+    } else {
+      console.log(
+        formatRobustnessStylish(result) +
+          (recorded
+            ? "\nRecorded current robustness evidence to " + evidenceFile
+            : "\nRobustness evidence not recorded: run was incomplete; resolve diagnostics and rerun."),
+      );
+    }
+
+    process.exitCode =
+      !result.complete || result.diagnostics.some((item) => item.level === "error")
+        ? 1
+        : 0;
+    return;
+  }
 
   if (args.command === "test") {
     const result = await checker.testFixtures();

@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import {
   compareCalibration,
   readCalibration,
+  thresholdDiagnostics,
   writeCalibration,
 } from "../src/calibration.js";
 import type { FixtureTestResult } from "../src/types.js";
@@ -63,6 +64,68 @@ describe("fixture calibration", () => {
         semanticKeys: ["semantic-b"],
         model: "jev-a",
       },
+    ]);
+  });
+
+  it("reports the labelled fixture threshold separation", () => {
+    const diagnostics = thresholdDiagnostics([
+      {
+        ruleId: "rule/a",
+        path: "fixtures/valid-a.ts",
+        expected: "valid",
+        probability: 0.21,
+        threshold: 0.8,
+        semanticKeys: ["valid-a"],
+      },
+      {
+        ruleId: "rule/a",
+        path: "fixtures/valid-b.ts",
+        expected: "valid",
+        probability: 0.35,
+        threshold: 0.8,
+        semanticKeys: ["valid-b"],
+      },
+      {
+        ruleId: "rule/a",
+        path: "fixtures/invalid.ts",
+        expected: "invalid",
+        probability: 0.86,
+        threshold: 0.8,
+        semanticKeys: ["invalid"],
+      },
+      {
+        ruleId: "rule/b",
+        path: "fixtures/valid.ts",
+        expected: "valid",
+        probability: 0.74,
+        threshold: 0.8,
+        semanticKeys: ["valid"],
+      },
+      {
+        ruleId: "rule/b",
+        path: "fixtures/invalid.ts",
+        expected: "invalid",
+        probability: 0.69,
+        threshold: 0.8,
+        semanticKeys: ["invalid"],
+      },
+    ]);
+
+    expect(diagnostics).toEqual([
+      expect.objectContaining({
+        ruleId: "rule/a",
+        validMax: 0.35,
+        invalidMin: 0.86,
+        separation: 0.51,
+        separable: true,
+      }),
+      expect.objectContaining({
+        ruleId: "rule/b",
+        validMax: 0.74,
+        invalidMin: 0.69,
+        separation: -0.05,
+        separable: false,
+      }),
     ]);
   });
 

@@ -100,6 +100,20 @@ describe("rule evidence", () => {
       ],
       drift: cleanDrift,
       mutation: [mutation(1)],
+      robustness: [{
+        ruleId: rule.id,
+        path: "fixtures/invalid/a.ts",
+        expected: "invalid",
+        perturbation: "irrelevant-context",
+        baselineProbability: 0.95,
+        perturbedProbability: 0.94,
+        delta: 0.01,
+        threshold: 0.8,
+        baselineViolated: true,
+        perturbedViolated: true,
+        flipped: false,
+        model: "jev",
+      }],
     });
 
     expect(report.readyForOwned).toBe(true);

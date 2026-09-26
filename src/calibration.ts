@@ -6,6 +6,7 @@ import type {
   FixtureDriftResult,
   FixtureDriftStale,
   FixtureTestResult,
+  RuleThresholdDiagnostic,
 } from "./types.js";
 
 export const DEFAULT_CALIBRATION_FILE = ".jevcheck/calibration.json";
@@ -68,6 +69,44 @@ function validateEntry(value: unknown, index: number): FixtureCalibrationEntry {
     semanticKeys: [...(entry.semanticKeys as string[])].sort(),
     ...(entry.model ? { model: entry.model as string } : {}),
   };
+}
+
+export function thresholdDiagnostics(
+  entries: readonly FixtureCalibrationEntry[],
+): RuleThresholdDiagnostic[] {
+  const byRule = new Map<string, FixtureCalibrationEntry[]>();
+  for (const entry of entries) {
+    const existing = byRule.get(entry.ruleId) ?? [];
+    existing.push(entry);
+    byRule.set(entry.ruleId, existing);
+  }
+
+  return [...byRule.entries()]
+    .map(([ruleId, ruleEntries]) => {
+      const valid = ruleEntries.filter((entry) => entry.expected === "valid");
+      const invalid = ruleEntries.filter((entry) => entry.expected === "invalid");
+      const validMax = valid.length
+        ? Math.max(...valid.map((entry) => entry.probability))
+        : undefined;
+      const invalidMin = invalid.length
+        ? Math.min(...invalid.map((entry) => entry.probability))
+        : undefined;
+      const currentThreshold = ruleEntries[0]?.threshold;
+      const separation =
+        validMax !== undefined && invalidMin !== undefined
+          ? Number((invalidMin - validMax).toFixed(6))
+          : undefined;
+
+      return {
+        ruleId,
+        ...(validMax !== undefined ? { validMax } : {}),
+        ...(invalidMin !== undefined ? { invalidMin } : {}),
+        ...(separation !== undefined ? { separation } : {}),
+        ...(currentThreshold !== undefined ? { currentThreshold } : {}),
+        separable: separation !== undefined && separation > 0,
+      };
+    })
+    .sort((a, b) => a.ruleId.localeCompare(b.ruleId));
 }
 
 export async function readCalibration(path: string): Promise<FixtureCalibrationEntry[]> {

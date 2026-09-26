@@ -1,6 +1,10 @@
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
-import { FIXTURE_THIN_MARGIN, fixtureCalibrationKey } from "./calibration.js";
+import {
+  FIXTURE_THIN_MARGIN,
+  fixtureCalibrationKey,
+  thresholdDiagnostics,
+} from "./calibration.js";
 import { buildCandidates } from "./candidates.js";
 import {
   DEFAULT_CHUNK_CHARS,
@@ -16,6 +20,7 @@ import type {
   JevCheckRule,
   RecallMutantResult,
   RecallRunResult,
+  RobustnessCaseResult,
   RuleEvidenceCheck,
   RuleEvidenceCheckStatus,
   RuleEvidencePolicy,
@@ -61,6 +66,8 @@ export interface RuleEvidenceInputs {
   driftError?: string;
   mutation?: readonly RecallMutantResult[];
   mutationError?: string;
+  robustness?: readonly RobustnessCaseResult[];
+  robustnessError?: string;
 }
 
 export const DEFAULT_RULE_EVIDENCE_POLICY: RuleEvidencePolicy = {
@@ -391,6 +398,49 @@ export function evaluateRuleEvidence(
         : "current for all " + fixtures.length + " fixture(s)",
   });
 
+  const thresholdDiagnostic = thresholdDiagnostics(
+    currentCalibration.map(({ calibration }) => calibration),
+  ).find((item) => item.ruleId === rule.id);
+  if (
+    !thresholdDiagnostic ||
+    thresholdDiagnostic.validMax === undefined ||
+    thresholdDiagnostic.invalidMin === undefined
+  ) {
+    checks.push({
+      id: "threshold-separation",
+      status: "warn",
+      message: "unavailable until current valid and invalid calibration evidence exists",
+    });
+  } else if (!thresholdDiagnostic.separable) {
+    checks.push({
+      id: "threshold-separation",
+      status: "warn",
+      message:
+        "fixture probabilities overlap: valid max=" +
+        thresholdDiagnostic.validMax.toFixed(3) +
+        ", invalid min=" +
+        thresholdDiagnostic.invalidMin.toFixed(3) +
+        "; no single threshold separates the labelled fixtures",
+    });
+  } else {
+    checks.push({
+      id: "threshold-separation",
+      status: "pass",
+      message:
+        "valid max=" +
+        thresholdDiagnostic.validMax.toFixed(3) +
+        ", invalid min=" +
+        thresholdDiagnostic.invalidMin.toFixed(3) +
+        ", separation=" +
+        thresholdDiagnostic.separation!.toFixed(3) +
+        "; separating interval (" +
+        thresholdDiagnostic.validMax.toFixed(3) +
+        ", " +
+        thresholdDiagnostic.invalidMin.toFixed(3) +
+        "]",
+    });
+  }
+
   if (evidence.driftError) {
     checks.push({
       id: "drift",
@@ -500,6 +550,40 @@ export function evaluateRuleEvidence(
       message: mutationProblems.length
         ? mutationProblems.join("; ") + "; " + summary
         : summary,
+    });
+  }
+
+  if (evidence.robustnessError) {
+    checks.push({
+      id: "robustness",
+      status: "warn",
+      message: evidence.robustnessError,
+    });
+  } else if (!evidence.robustness) {
+    checks.push({
+      id: "robustness",
+      status: "warn",
+      message: "no persisted robustness evidence available; run jevcheck test --robustness",
+    });
+  } else {
+    const cases = evidence.robustness.filter((item) => item.ruleId === rule.id);
+    const flips = cases.filter((item) => item.flipped);
+    const maxDelta = cases.length ? Math.max(...cases.map((item) => item.delta)) : 0;
+    checks.push({
+      id: "robustness",
+      status: flips.length ? "warn" : "pass",
+      message:
+        cases.length +
+        " case(s), " +
+        flips.length +
+        " classification flip(s), max |Δp|=" +
+        maxDelta.toFixed(3) +
+        (flips.length
+          ? ": " +
+            flips
+              .map((item) => item.path + " (" + item.perturbation + ")")
+              .join(", ")
+          : ""),
     });
   }
 

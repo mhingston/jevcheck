@@ -21,6 +21,7 @@ export function semanticRequestForCandidate(
   rule: JevCheckRule,
   path: string,
   candidate: Candidate,
+  untrustedContext?: string,
 ) {
   const focusRange =
     candidate.focusStartColumn !== undefined && candidate.focusEndColumn !== undefined
@@ -43,6 +44,7 @@ export function semanticRequestForCandidate(
     ...(focusRange ? { focusRange } : {}),
     ...(candidate.focusKind ? { focusKind: candidate.focusKind } : {}),
     code: candidate.text,
+    ...(untrustedContext ? { untrustedContext } : {}),
   };
   const question = noul(focusedQuestion(rule), labelsFor(rule));
 

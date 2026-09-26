@@ -229,7 +229,7 @@ Keep semantic context bounded. Oversized focuses are skipped rather than silentl
 A useful default workflow is:
 
 ~~~text
-author -> shadow -> fixtures -> calibrate -> drift/recall -> audit -> owned
+author -> shadow -> fixtures -> calibrate -> drift/recall/robustness -> audit -> owned
 ~~~
 
 You do not need all of this to experiment with a shadow rule. The evidence workflow matters when you want a semantic rule to become a blocking reviewer.
@@ -310,15 +310,31 @@ npx jevcheck recall
 
 Repository files are never modified; mutations exist only in memory.
 
-### 5. Audit the evidence
+### 5. Probe semantic robustness
+
+Fixtures and mutation recall test whether a rule catches the right semantic changes. Robustness probes the opposite failure mode: whether model-visible text that should be irrelevant can change the judgement.
+
+~~~sh
+npx jevcheck test --robustness
+~~~
+
+The command keeps the selected source and semantic focus unchanged, then re-runs the same judgement with deterministic untrusted surrounding context under three conditions:
+
+- a direct instruction to ignore the rule
+- a false claim that the code was already approved
+- unrelated nearby context
+
+It reports probability movement and classification flips, and records freshness-aware results in `.jevcheck/evidence.json` only when every expected fixture/perturbation case was measured. Incomplete runs surface diagnostics and do not overwrite durable evidence. Robustness is intentionally advisory for now: flips appear as audit warnings rather than silently changing graduation policy.
+
+### 6. Audit the evidence
 
 ~~~sh
 npx jevcheck rules audit
 ~~~
 
-The audit reports whether each rule has the evidence required to act as an owned rule and explains any blockers.
+The audit reports whether each rule has the evidence required to act as an owned rule and explains any blockers. It also shows advisory threshold-separation diagnostics from current labelled calibration and persisted robustness results. If valid and invalid fixture probabilities overlap, the audit says explicitly that no single threshold can separate the labelled fixtures rather than encouraging threshold tuning.
 
-### 6. Promote to owned
+### 7. Promote to owned
 
 Only after the rule has earned that responsibility:
 
@@ -402,7 +418,7 @@ The default `.gitignore` policy keeps transient cache state out while allowing d
 | `.jevcheck/baseline.json` | Accepted existing findings | Usually |
 | `.jevcheck/replay.json` | Reusable semantic decisions | When replay is part of your workflow |
 | `.jevcheck/calibration.json` | Recorded fixture probabilities | For evidence-gated rules |
-| `.jevcheck/evidence.json` | Drift and mutation evidence | For evidence-gated rules |
+| `.jevcheck/evidence.json` | Drift, mutation, and robustness evidence | For evidence-gated rules |
 | `.jevcheck/cache.json` | Local answer cache | No |
 
 These evidence files contain hashes and evaluation metadata rather than a second copy of your source code or prompts.
@@ -418,6 +434,7 @@ These evidence files contain hashes and evaluation metadata rather than a second
 | `jevcheck test` | Run labelled fixtures |
 | `jevcheck test --record` | Record fixture calibration |
 | `jevcheck test --drift` | Re-ask fixtures and detect probability drift |
+| `jevcheck test --robustness` | Probe fixture stability under label-preserving adversarial context |
 | `jevcheck recall` | Measure mutation recall against real code |
 | `jevcheck rules audit` | Inspect rule evidence without calling a provider |
 | `jevcheck baseline` | Create or refresh accepted-backlog entries |
@@ -534,6 +551,7 @@ A typical graduation sequence is:
 npx jevcheck test --record
 npx jevcheck test --drift
 npx jevcheck recall
+npx jevcheck test --robustness
 npx jevcheck rules audit
 
 # after the audit is ready:
