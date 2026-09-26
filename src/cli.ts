@@ -355,30 +355,47 @@ async function main(): Promise<void> {
 
   if (args.command === "test" && args.testRobustness) {
     const result = await checker.testRobustness();
-    const current = await collectCurrentFixtureEvidence(config.rules, {
-      chunkChars: config.chunkChars,
-      overlapLines: config.overlapLines,
-      contextLines: config.contextLines,
-    });
-    await persistRobustnessEvidence(
-      evidenceFile,
-      config.rules,
-      current.fixtures,
-      result,
-      modelNamespace,
-    );
+    let recorded = false;
+
+    if (result.complete) {
+      const current = await collectCurrentFixtureEvidence(config.rules, {
+        chunkChars: config.chunkChars,
+        overlapLines: config.overlapLines,
+        contextLines: config.contextLines,
+      });
+      await persistRobustnessEvidence(
+        evidenceFile,
+        config.rules,
+        current.fixtures,
+        result,
+        modelNamespace,
+      );
+      recorded = true;
+    }
 
     if (args.format === "json") {
-      console.log(formatJson({ ...result, evidenceFile }));
+      console.log(formatJson({
+        ...result,
+        ...(recorded
+          ? { evidenceFile }
+          : {
+              evidenceNotRecorded:
+                "robustness run was incomplete; resolve diagnostics and rerun",
+            }),
+      }));
     } else {
       console.log(
         formatRobustnessStylish(result) +
-          "\nRecorded current robustness evidence to " +
-          evidenceFile,
+          (recorded
+            ? "\nRecorded current robustness evidence to " + evidenceFile
+            : "\nRobustness evidence not recorded: run was incomplete; resolve diagnostics and rerun."),
       );
     }
 
-    process.exitCode = result.diagnostics.some((item) => item.level === "error") ? 1 : 0;
+    process.exitCode =
+      !result.complete || result.diagnostics.some((item) => item.level === "error")
+        ? 1
+        : 0;
     return;
   }
 
