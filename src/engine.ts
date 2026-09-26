@@ -11,6 +11,7 @@ import {
 import { FIXTURE_THIN_MARGIN } from "./calibration.js";
 import { buildCandidates } from "./candidates.js";
 import { discoverFiles } from "./files.js";
+import { assertOwnedRuleEvidence } from "./graduation.js";
 import { applyMutation, stableMutationOrder } from "./mutate.js";
 import { semanticRequestForCandidate } from "./semantic.js";
 import type {
@@ -153,6 +154,11 @@ export interface JevCheck {
 }
 
 export function createJevCheck(options: JevCheckOptions): JevCheck {
+  const mode = options.mode ?? "enforce";
+  if (mode === "enforce") {
+    assertOwnedRuleEvidence(options.rules, options.ruleEvidenceReports);
+  }
+
   const chunkChars = options.chunkChars ?? DEFAULT_CHUNK_CHARS;
   const overlapLines = options.overlapLines ?? DEFAULT_OVERLAP_LINES;
   const contextLines = options.contextLines ?? DEFAULT_CONTEXT_LINES;
@@ -328,7 +334,7 @@ export function createJevCheck(options: JevCheckOptions): JevCheck {
             ...evaluation,
             severity,
             status,
-            blocking: status === "owned" && severity === "error",
+            blocking: mode === "enforce" && status === "owned" && severity === "error",
             fingerprint,
             why: rule.why,
             source: rule.source,
