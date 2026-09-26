@@ -10,13 +10,15 @@ import type {
 } from "./types.js";
 
 export const DEFAULT_CALIBRATION_FILE = ".jevcheck/calibration.json";
+export const DEFAULT_CONFIRMATION_FILE = ".jevcheck/confirmation.json";
 export const CALIBRATION_FORMAT_VERSION = 1;
 export const DEFAULT_DRIFT_THRESHOLD = 0.1;
 export const FIXTURE_THIN_MARGIN = 0.05;
 
-interface CalibrationFile {
+export interface CalibrationFile {
   version: number;
   fixtures: FixtureCalibrationEntry[];
+  modelNamespace?: string;
 }
 
 export function fixtureCalibrationKey(
@@ -109,13 +111,17 @@ export function thresholdDiagnostics(
     .sort((a, b) => a.ruleId.localeCompare(b.ruleId));
 }
 
-export async function readCalibration(path: string): Promise<FixtureCalibrationEntry[]> {
+export async function readCalibrationFile(
+  path: string,
+  artifactName = "calibration",
+  missingHint = "run jevcheck test --record first",
+): Promise<CalibrationFile> {
   let raw: string;
   try {
     raw = await readFile(path, "utf8");
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-      throw new Error("calibration file not found: " + path + "; run jevcheck test --record first");
+      throw new Error(artifactName + " file not found: " + path + "; " + missingHint);
     }
     throw error;
   }
@@ -137,6 +143,12 @@ export async function readCalibration(path: string): Promise<FixtureCalibrationE
   if (!Array.isArray(file.fixtures)) {
     throw new Error("calibration.fixtures must be an array");
   }
+  if (
+    file.modelNamespace !== undefined &&
+    (typeof file.modelNamespace !== "string" || !file.modelNamespace.trim())
+  ) {
+    throw new Error("calibration.modelNamespace must be a non-empty string");
+  }
 
   const fixtures = file.fixtures.map(validateEntry);
   const seen = new Set<string>();
@@ -145,7 +157,19 @@ export async function readCalibration(path: string): Promise<FixtureCalibrationE
     if (seen.has(key)) throw new Error("duplicate calibration fixture: " + key.replaceAll("\0", " / "));
     seen.add(key);
   }
-  return fixtures;
+  return {
+    version: CALIBRATION_FORMAT_VERSION,
+    fixtures,
+    ...(file.modelNamespace ? { modelNamespace: file.modelNamespace as string } : {}),
+  };
+}
+
+export async function readCalibration(
+  path: string,
+  artifactName = "calibration",
+  missingHint = "run jevcheck test --record first",
+): Promise<FixtureCalibrationEntry[]> {
+  return (await readCalibrationFile(path, artifactName, missingHint)).fixtures;
 }
 
 export function calibrationEntries(tests: readonly FixtureTestResult[]): FixtureCalibrationEntry[] {
@@ -181,10 +205,12 @@ export function calibrationEntries(tests: readonly FixtureTestResult[]): Fixture
 export async function writeCalibration(
   path: string,
   tests: readonly FixtureTestResult[],
+  modelNamespace?: string,
 ): Promise<number> {
   const file: CalibrationFile = {
     version: CALIBRATION_FORMAT_VERSION,
     fixtures: calibrationEntries(tests),
+    ...(modelNamespace ? { modelNamespace } : {}),
   };
   await mkdir(dirname(path), { recursive: true });
   const temporary = path + ".tmp";
@@ -211,16 +237,23 @@ export function compareCalibration(
       before.semanticKeys.length !== after.semanticKeys.length ||
       before.semanticKeys.some((key, index) => key !== after.semanticKeys[index]);
     const thresholdChanged = before.threshold !== after.threshold;
-    if (semanticInputsChanged || thresholdChanged) {
+    const modelChanged = before.model !== after.model;
+    if (semanticInputsChanged || thresholdChanged || modelChanged) {
       stale.push({
         ruleId: after.ruleId,
         path: after.path,
         expected: after.expected,
-        reason: semanticInputsChanged ? "semantic-inputs" : "threshold",
+        reason: semanticInputsChanged
+          ? "semantic-inputs"
+          : thresholdChanged
+            ? "threshold"
+            : "model",
         beforeSemanticKeys: before.semanticKeys,
         afterSemanticKeys: after.semanticKeys,
         beforeThreshold: before.threshold,
         afterThreshold: after.threshold,
+        beforeModel: before.model,
+        afterModel: after.model,
       });
       continue;
     }

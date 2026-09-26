@@ -13,6 +13,7 @@ import {
   DEFAULT_THRESHOLD,
 } from "./engine.js";
 import { discoverFiles } from "./files.js";
+import { confirmationFixtureOverlaps } from "./fixtures.js";
 import { semanticRequestForCandidate } from "./semantic.js";
 import type {
   Diagnostic,
@@ -46,6 +47,7 @@ export interface FixtureEvidenceOptions {
   chunkChars?: number;
   overlapLines?: number;
   contextLines?: number;
+  fixtureSet?: "development" | "confirmation";
 }
 
 export interface RuleDriftEvidence {
@@ -62,6 +64,10 @@ export interface RuleEvidenceInputs {
   fixtureDiagnostics?: readonly Diagnostic[];
   calibration?: readonly FixtureCalibrationEntry[];
   calibrationError?: string;
+  confirmationFixtures?: readonly CurrentFixtureEvidence[];
+  confirmationFixtureDiagnostics?: readonly Diagnostic[];
+  confirmation?: readonly FixtureCalibrationEntry[];
+  confirmationError?: string;
   drift?: RuleDriftEvidence;
   driftError?: string;
   mutation?: readonly RecallMutantResult[];
@@ -172,9 +178,26 @@ export async function collectCurrentFixtureEvidence(
   const diagnostics: Diagnostic[] = [];
 
   for (const rule of rules) {
+    if (options.fixtureSet === "confirmation") {
+      const overlaps = await confirmationFixtureOverlaps(rule, cwd);
+      if (overlaps.length) {
+        diagnostics.push({
+          level: "error",
+          ruleId: rule.id,
+          message:
+            "Confirmation fixtures overlap development fixtures: " +
+            overlaps.join(", ") +
+            ". Move each case to exactly one fixture set before using confirmation evidence.",
+        });
+        continue;
+      }
+    }
+
+    const fixtureConfig =
+      options.fixtureSet === "confirmation" ? rule.fixtures?.confirmation : rule.fixtures;
     const groups: Array<["valid" | "invalid", string[] | undefined]> = [
-      ["valid", rule.fixtures?.valid],
-      ["invalid", rule.fixtures?.invalid],
+      ["valid", fixtureConfig?.valid],
+      ["invalid", fixtureConfig?.invalid],
     ];
 
     for (const [expected, patterns] of groups) {
@@ -399,6 +422,87 @@ export function evaluateRuleEvidence(
           (extraCalibration.length === 1 ? "y" : "ies")
         : "current for all " + fixtures.length + " fixture(s)",
   });
+
+  if (rule.fixtures?.confirmation) {
+    const confirmationFixtures = (evidence.confirmationFixtures ?? [])
+      .filter((item) => item.ruleId === rule.id);
+    const confirmationValid = confirmationFixtures.filter((item) => item.expected === "valid");
+    const confirmationInvalid = confirmationFixtures.filter((item) => item.expected === "invalid");
+    const confirmationErrors = (evidence.confirmationFixtureDiagnostics ?? []).filter(
+      (item) => item.ruleId === rule.id && item.level === "error",
+    );
+    const confirmationCurrentByKey = new Map(
+      confirmationFixtures.map((fixture) => [fixtureCalibrationKey(fixture), fixture]),
+    );
+    const extraConfirmation = (evidence.confirmation ?? []).filter(
+      (entry) =>
+        entry.ruleId === rule.id &&
+        !confirmationCurrentByKey.has(fixtureCalibrationKey(entry)),
+    );
+    const confirmationProblems: string[] = [];
+
+    if (!rule.fixtures.confirmation.valid?.length) {
+      confirmationProblems.push("no valid confirmation fixtures configured");
+    } else if (confirmationValid.length === 0) {
+      confirmationProblems.push("valid confirmation fixture patterns match no files");
+    }
+    if (!rule.fixtures.confirmation.invalid?.length) {
+      confirmationProblems.push("no invalid confirmation fixtures configured");
+    } else if (confirmationInvalid.length === 0) {
+      confirmationProblems.push("invalid confirmation fixture patterns match no files");
+    }
+    if (confirmationErrors.length) {
+      confirmationProblems.push(...confirmationErrors.map((item) => item.message));
+    }
+
+    if (evidence.confirmationError) {
+      confirmationProblems.push(evidence.confirmationError);
+    } else if (!evidence.confirmation) {
+      confirmationProblems.push("confirmation evidence is missing");
+    } else {
+      const confirmationByKey = new Map(
+        evidence.confirmation.map((entry) => [fixtureCalibrationKey(entry), entry]),
+      );
+      for (const fixture of confirmationFixtures) {
+        const recorded = confirmationByKey.get(fixtureCalibrationKey(fixture));
+        if (!recorded) {
+          confirmationProblems.push("confirmation fixture missing from evidence: " + fixture.path);
+          continue;
+        }
+        if (recorded.threshold !== fixture.threshold) {
+          confirmationProblems.push("stale confirmation: " + fixture.path + " (threshold)");
+          continue;
+        }
+        if (!sameStrings(recorded.semanticKeys, fixture.semanticKeys)) {
+          confirmationProblems.push("stale confirmation: " + fixture.path + " (semantic-inputs)");
+          continue;
+        }
+        if (!calibratedPass(fixture, recorded)) {
+          confirmationProblems.push("confirmation fixture failed: " + fixture.path);
+        }
+      }
+      if (extraConfirmation.length) {
+        confirmationProblems.push(
+          extraConfirmation.length +
+            " obsolete confirmation entr" +
+            (extraConfirmation.length === 1 ? "y" : "ies") +
+            ": " +
+            extraConfirmation.map((entry) => entry.path).join(", "),
+        );
+      }
+    }
+
+    checks.push({
+      id: "confirmation",
+      status: confirmationProblems.length ? "block" : "pass",
+      message: confirmationProblems.length
+        ? confirmationProblems.join("; ")
+        : confirmationValid.length +
+          " valid + " +
+          confirmationInvalid.length +
+          " invalid untouched confirmation fixture(s) passing",
+    });
+  }
 
   const thresholdDiagnostic = thresholdDiagnostics(
     currentCalibration.map(({ calibration }) => calibration),

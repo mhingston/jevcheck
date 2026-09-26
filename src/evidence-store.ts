@@ -1,7 +1,13 @@
 import { createHash } from "node:crypto";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
-import { DEFAULT_CALIBRATION_FILE, DEFAULT_DRIFT_THRESHOLD, readCalibration } from "./calibration.js";
+import {
+  DEFAULT_CALIBRATION_FILE,
+  DEFAULT_CONFIRMATION_FILE,
+  DEFAULT_DRIFT_THRESHOLD,
+  readCalibration,
+  readCalibrationFile,
+} from "./calibration.js";
 import {
   collectCurrentFixtureEvidence,
   evaluateRuleEvidence,
@@ -836,6 +842,7 @@ export async function evaluateConfiguredRuleEvidence(
 ): Promise<ConfiguredEvidenceResult> {
   const cwd = options.cwd ?? process.cwd();
   const calibrationPath = resolve(cwd, config.calibrationFile ?? DEFAULT_CALIBRATION_FILE);
+  const confirmationPath = resolve(cwd, config.confirmationFile ?? DEFAULT_CONFIRMATION_FILE);
   const evidencePath = resolve(cwd, config.evidenceFile ?? DEFAULT_EVIDENCE_FILE);
   const snapshot = await collectCurrentFixtureEvidence(config.rules, {
     cwd,
@@ -850,6 +857,41 @@ export async function evaluateConfiguredRuleEvidence(
     calibration = await readCalibration(calibrationPath);
   } catch (error) {
     calibrationError = error instanceof Error ? error.message : String(error);
+  }
+
+  const hasConfirmation = config.rules.some((rule) => rule.fixtures?.confirmation !== undefined);
+  const confirmationSnapshot = hasConfirmation
+    ? await collectCurrentFixtureEvidence(config.rules, {
+        cwd,
+        chunkChars: config.chunkChars,
+        overlapLines: config.overlapLines,
+        contextLines: config.contextLines,
+        fixtureSet: "confirmation",
+      })
+    : { fixtures: [], diagnostics: [] };
+
+  let confirmation: FixtureCalibrationEntry[] | undefined;
+  let confirmationError: string | undefined;
+  if (hasConfirmation) {
+    try {
+      const confirmationFile = await readCalibrationFile(
+        confirmationPath,
+        "confirmation",
+        "run jevcheck test --confirm first",
+      );
+      if (confirmationFile.modelNamespace !== options.modelNamespace) {
+        confirmationError =
+          "confirmation evidence model changed from " +
+          (confirmationFile.modelNamespace ?? "unknown") +
+          " to " +
+          options.modelNamespace +
+          "; rerun jevcheck test --confirm";
+      } else {
+        confirmation = confirmationFile.fixtures;
+      }
+    } catch (error) {
+      confirmationError = error instanceof Error ? error.message : String(error);
+    }
   }
 
   const artifact = await readRuleEvidenceArtifact(evidencePath);
@@ -948,6 +990,10 @@ export async function evaluateConfiguredRuleEvidence(
           fixtureDiagnostics: snapshot.diagnostics,
           calibration,
           calibrationError,
+          confirmationFixtures: confirmationSnapshot.fixtures,
+          confirmationFixtureDiagnostics: confirmationSnapshot.diagnostics,
+          confirmation,
+          confirmationError,
           drift,
           driftError,
           mutation,
