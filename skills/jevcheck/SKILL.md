@@ -137,9 +137,28 @@ The audit distinguishes:
 - mutation recall, including unmeasured or zero-judged mutants
 - rule source/provenance
 
-Current fixture semantic identities are recomputed deterministically. Do not treat process-local drift or recall results as current across runs unless a freshness-aware artifact proves that they still match the rule and source inputs. Missing evidence is preferable to silently reusing stale evidence.
+Current fixture semantic identities are recomputed deterministically. Drift and full-scope recall measurements are persisted in `.jevcheck/evidence.json` with freshness identities. If rule semantics, calibration, relevant mutation inputs, sample size, or provider/model identity changes, expect the audit to report stale evidence rather than silently reuse it.
 
-The audit is advisory: it does not change `shadow`/`owned` status or normal check behavior.
+The audit is advisory, but normal checks and replay enforce the same blockers for `owned` rules. Status is never rewritten automatically.
+
+## Graduate a rule to owned
+
+Keep new rules in `shadow` while evidence is being built:
+
+~~~sh
+jevcheck test --record
+jevcheck test --drift
+jevcheck recall
+jevcheck rules audit
+~~~
+
+Only change `status` to `owned` when audit reports `Ready for owned: yes`. Normal checks and replay fail closed if an owned rule's required evidence is missing, stale, or failing.
+
+Default policy requires valid and invalid fixtures, current calibration, no thin margins, clean drift, mutants with at least 0.90 recall and non-zero judged samples, and `source` provenance. Global `graduation` config can adjust those explicit requirements; do not weaken them merely to make CI pass.
+
+A scoped recall such as `jevcheck recall src/foo.ts` is exploratory and is not persisted as graduation evidence. Run full-scope `jevcheck recall` to refresh the committed evidence artifact.
+
+Measurement commands can still run while an owned rule is blocked so evidence can be repaired. They preserve the configured status but do not let it act as a blocking reviewer during measurement.
 
 ## Suppressing known findings
 
