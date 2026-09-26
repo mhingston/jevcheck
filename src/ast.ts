@@ -53,9 +53,8 @@ function nodeMatches(node: SgNode, selector: AstSelector, language: Lang): boole
   return node.matches(matcherFor(selector, language));
 }
 
-function utf16Column(line: string, byteColumn: number): number {
-  const prefix = Buffer.from(line, "utf8").subarray(0, byteColumn).toString("utf8");
-  return prefix.length + 1;
+function oneBasedColumn(column: number): number {
+  return column + 1;
 }
 
 function normalizedEnd(
@@ -68,7 +67,7 @@ function normalizedEnd(
   }
   return {
     line: range.end.line,
-    column: utf16Column(lines[range.end.line] ?? "", range.end.column),
+    column: oneBasedColumn(range.end.column),
   };
 }
 
@@ -215,7 +214,7 @@ export function astCandidates(
       endLine: context.end + 1,
       focusStartLine: focusStart + 1,
       focusEndLine: focusEnd + 1,
-      focusStartColumn: utf16Column(lines[focusStart] ?? "", range.start.column),
+      focusStartColumn: oneBasedColumn(range.start.column),
       focusEndColumn: end.column,
       focusKind: String(node.kind()),
     });
