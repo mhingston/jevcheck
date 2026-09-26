@@ -137,7 +137,9 @@ The audit distinguishes:
 - mutation recall, including unmeasured or zero-judged mutants
 - rule source/provenance
 
-Current fixture semantic identities are recomputed deterministically. Drift and full-scope recall measurements are persisted in `.jevcheck/evidence.json` with freshness identities. If rule semantics, calibration, relevant mutation inputs, sample size, or provider/model identity changes, expect the audit to report stale evidence rather than silently reuse it.
+Current fixture semantic identities are recomputed deterministically. Drift and full-scope recall measurements are persisted in `.jevcheck/evidence.json` with freshness identities. Mutation identities also bind the recorded per-mutant outcomes, so partial or inconsistent artifact edits fail closed. If rule semantics, calibration, relevant mutation inputs, sample size, provider/model identity, or recorded outcomes change without a fresh measurement, expect the audit to report stale evidence rather than silently reuse it.
+
+Treat these hashes as freshness/integrity checks, not cryptographic signatures. Config and committed evidence live inside the same repository trust boundary.
 
 The audit is advisory, but normal checks and replay enforce the same blockers for `owned` rules. Status is never rewritten automatically.
 

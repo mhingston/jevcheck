@@ -461,8 +461,8 @@ export function createJevCheck(options: JevCheckOptions): JevCheck {
     sampleSize = 12,
     cwd = process.cwd(),
   ): Promise<RecallRunResult> {
-    if (!Number.isInteger(sampleSize) || sampleSize < 1) {
-      throw new Error("recall sampleSize must be a positive integer");
+    if (!Number.isSafeInteger(sampleSize) || sampleSize < 1) {
+      throw new Error("recall sampleSize must be a positive safe integer");
     }
 
     const mutants: RecallRunResult["mutants"] = [];
