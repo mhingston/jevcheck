@@ -23,6 +23,15 @@ describe("parseConfig", () => {
     ).toThrow("replayFile must be a non-empty string");
   });
 
+  it("validates confirmationFile when configured", () => {
+    expect(() =>
+      parseConfig({
+        confirmationFile: "",
+        rules: [{ id: "example", question: "Is this a violation?" }],
+      }),
+    ).toThrow("confirmationFile must be a non-empty string");
+  });
+
   it("validates calibrationFile when configured", () => {
     expect(() =>
       parseConfig({
@@ -110,6 +119,22 @@ describe("parseConfig", () => {
         }],
       }),
     ).toThrow("pattern is not a valid regular expression");
+  });
+
+  it("validates nested confirmation fixture pattern arrays", () => {
+    expect(() =>
+      parseConfig({
+        rules: [{
+          id: "example",
+          question: "Is this a violation?",
+          fixtures: {
+            confirmation: { valid: "fixtures/confirmation/valid/**/*.ts" },
+          },
+        }],
+      }),
+    ).toThrow(
+      "example.fixtures.confirmation.valid must be an array of non-empty strings",
+    );
   });
 
   it("validates nested fixture pattern arrays", () => {
