@@ -63,6 +63,15 @@ function calibration(
   };
 }
 
+const cleanDrift = {
+  significantMovers: [],
+  stale: [],
+  added: [],
+  removed: [],
+  fixtureFailures: [],
+  thinMargins: [],
+};
+
 function mutation(recall: number, judged = 10): RecallMutantResult {
   return {
     ruleId: rule.id,
@@ -89,7 +98,7 @@ describe("rule evidence", () => {
         calibration("fixtures/valid/a.ts", "valid", "valid-key", 0.1),
         calibration("fixtures/invalid/a.ts", "invalid", "invalid-key", 0.95),
       ],
-      drift: { significantMovers: [], stale: [], added: [], removed: [] },
+      drift: cleanDrift,
       mutation: [mutation(1)],
     });
 
@@ -128,7 +137,7 @@ describe("rule evidence", () => {
         calibration("fixtures/valid/a.ts", "valid", "old-valid-key", 0.1),
         calibration("fixtures/invalid/a.ts", "invalid", "invalid-key", 0.95, 0.75),
       ],
-      drift: { significantMovers: [], stale: [], added: [], removed: [] },
+      drift: cleanDrift,
       mutation: [mutation(1)],
     });
 
@@ -152,10 +161,10 @@ describe("rule evidence", () => {
         calibration("fixtures/invalid/a.ts", "invalid", "invalid-key", 0.81),
       ],
       drift: {
+        ...cleanDrift,
         significantMovers: ["fixtures/invalid/a.ts"],
-        stale: [],
-        added: [],
-        removed: [],
+        fixtureFailures: ["fixtures/valid/a.ts"],
+        thinMargins: ["fixtures/invalid/a.ts"],
       },
       mutation: [mutation(0.5)],
     });
@@ -165,6 +174,69 @@ describe("rule evidence", () => {
     expect(report.checks.find((check) => check.id === "drift")?.status).toBe("block");
     expect(report.checks.find((check) => check.id === "mutation")?.message)
       .toContain("0.50 < required 0.90");
+  });
+
+  it("blocks zero-judged mutation evidence explicitly", () => {
+    const fixtures = [
+      currentFixture("fixtures/valid/a.ts", "valid", "valid-key"),
+      currentFixture("fixtures/invalid/a.ts", "invalid", "invalid-key"),
+    ];
+    const report = evaluateRuleEvidence(rule, {
+      fixtures,
+      calibration: [
+        calibration("fixtures/valid/a.ts", "valid", "valid-key", 0.1),
+        calibration("fixtures/invalid/a.ts", "invalid", "invalid-key", 0.95),
+      ],
+      drift: cleanDrift,
+      mutation: [mutation(0, 0)],
+    });
+
+    expect(report.checks.find((check) => check.id === "mutation")?.status).toBe("block");
+    expect(report.checks.find((check) => check.id === "mutation")?.message)
+      .toContain("zero judged samples");
+  });
+
+  it("blocks missing provenance when required", () => {
+    const report = evaluateRuleEvidence(
+      { ...rule, source: undefined },
+      {
+        fixtures: [
+          currentFixture("fixtures/valid/a.ts", "valid", "valid-key"),
+          currentFixture("fixtures/invalid/a.ts", "invalid", "invalid-key"),
+        ],
+        calibration: [
+          calibration("fixtures/valid/a.ts", "valid", "valid-key", 0.1),
+          calibration("fixtures/invalid/a.ts", "invalid", "invalid-key", 0.95),
+        ],
+        drift: cleanDrift,
+        mutation: [mutation(1)],
+      },
+    );
+
+    expect(report.checks.find((check) => check.id === "source")?.status).toBe("block");
+  });
+
+  it("allows thin margins only when policy explicitly permits them", () => {
+    const fixtures = [
+      currentFixture("fixtures/valid/a.ts", "valid", "valid-key"),
+      currentFixture("fixtures/invalid/a.ts", "invalid", "invalid-key"),
+    ];
+    const report = evaluateRuleEvidence(
+      rule,
+      {
+        fixtures,
+        calibration: [
+          calibration("fixtures/valid/a.ts", "valid", "valid-key", 0.77),
+          calibration("fixtures/invalid/a.ts", "invalid", "invalid-key", 0.95),
+        ],
+        drift: { ...cleanDrift, thinMargins: ["fixtures/valid/a.ts"] },
+        mutation: [mutation(1)],
+      },
+      { allowThinMargins: true },
+    );
+
+    expect(report.checks.find((check) => check.id === "thin-margins")?.status).toBe("warn");
+    expect(report.readyForOwned).toBe(true);
   });
 
   it("recomputes fixture semantic identity without calling a provider", async () => {

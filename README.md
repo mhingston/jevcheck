@@ -257,9 +257,11 @@ jevcheck rules audit --format json
 
 The audit recomputes current fixture semantic identities deterministically and compares them with committed calibration, so missing calibration, threshold changes, semantic-input changes, fixture failures, and thin margins are distinguishable.
 
-Drift and mutation recall are represented explicitly, but jevcheck does not invent a "latest" value for process-local measurements. Until freshness-aware evidence persistence is added, the CLI reports those dimensions as missing rather than treating an old run as current. The exported `evaluateRuleEvidence` API accepts explicit drift and mutation evidence for callers that already hold current results.
+Drift and mutation recall are persisted in the versioned, commit-friendly `.jevcheck/evidence.json` artifact. `test --drift` refreshes drift evidence and a full-scope `recall` refreshes mutation evidence. Scoped recall runs remain exploratory and do not overwrite graduation evidence.
 
-Audit is advisory in this slice: it does not rewrite rule status and does not change normal check behavior.
+Freshness is deterministic. Drift evidence is tied to current fixture semantic identities, calibration, drift threshold, and provider/model namespace. Mutation evidence is tied to rule/candidate semantics, mutant definitions, the mutation candidate population, sampled source hashes, sample size, and provider/model namespace. Material changes make the evidence stale and require remeasurement.
+
+Audit remains advisory: it reports the exact blockers that normal owned-rule admission enforces, but it never rewrites rule status.
 
 ### Mutation recall
 
@@ -399,9 +401,46 @@ Credentials use the same environment variables as jev-cli.
 
 `owned` means the rule is intended to act as reviewer-of-record. An owned error finding exits with code 1. Owned warnings remain non-blocking.
 
-This is intentionally conservative: a new probabilistic rule cannot accidentally become a merge gate just because it was added to configuration.
+Owned admission is evidence-gated. Before a normal check or replay can run an `owned` rule, jevcheck evaluates the same evidence model used by `rules audit`. Missing, stale, or failing required evidence is a configuration/runtime error; jevcheck does **not** silently downgrade the rule to shadow.
 
-Fixture coverage, fresh probability calibration, thin-margin evidence, semantic-aware drift checks, and mutation recall now exist. A later slice should combine them into explicit evidence gates before `owned` status is accepted.
+The default graduation policy requires:
+
+- at least one valid and invalid fixture
+- current passing calibration with no thin margins
+- clean current drift evidence
+- configured and measured mutants
+- minimum mutation recall of 0.90 with no zero-judged mutants
+- rule `source` provenance
+
+Override only the global policy fields you intentionally want to change:
+
+~~~json
+{
+  "graduation": {
+    "minMutationRecall": 0.95,
+    "allowThinMargins": false,
+    "requireSource": true
+  }
+}
+~~~
+
+The supported policy stays deliberately small; there is no per-rule policy DSL.
+
+A typical graduation workflow is:
+
+~~~sh
+# keep the rule shadow while building evidence
+jevcheck test --record
+jevcheck test --drift
+jevcheck recall
+jevcheck rules audit
+
+# only after audit is ready:
+# edit status to "owned"
+jevcheck
+~~~
+
+Changing `status` from shadow to owned does not itself stale semantic evidence. Changes to the question/criteria, threshold, deterministic candidate semantics, relevant mutation population/sampled source, mutant definitions, calibration, or provider/model identity do.
 
 ## Exit codes
 
@@ -466,11 +505,12 @@ Provider choice changes transport, not lint semantics. Domain policy stays in je
 
 ## Next slices
 
-The remaining useful slices are:
+The core reliability architecture is now complete through evidence-gated shadow-to-owned graduation.
 
-1. enforced shadow-to-owned graduation gates reusing the rule evidence evaluator
-2. related-node AST context across separate definitions/callers
-3. optional AST-specific mutation helpers, only if declarative regex mutants prove insufficient
+Optional capability extensions remain:
+
+1. related-node AST context across separate definitions/callers, only when a real rule needs it
+2. AST-specific mutation helpers, only if declarative regex mutants prove insufficient
 
 Generated code fixes remain intentionally out of scope. Findings should feed a coding agent or deterministic refactoring tool rather than letting the semantic judge edit code itself.
 

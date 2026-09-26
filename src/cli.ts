@@ -17,7 +17,14 @@ import {
 } from "./calibration.js";
 import { loadConfig } from "./config.js";
 import { createJevCheck, ruleAppliesToFile } from "./engine.js";
-import { collectCurrentFixtureEvidence, evaluateRuleEvidence } from "./evidence.js";
+import { collectCurrentFixtureEvidence } from "./evidence.js";
+import {
+  DEFAULT_EVIDENCE_FILE,
+  DEFAULT_SOURCE_INCLUDE,
+  evaluateConfiguredRuleEvidence,
+  persistDriftEvidence,
+  persistMutationEvidence,
+} from "./evidence-store.js";
 import { discoverFiles, filterFiles } from "./files.js";
 import {
   formatFixtureDriftStylish,
@@ -51,10 +58,6 @@ interface CliOptions {
   sampleSizeSet: boolean;
   patterns: string[];
 }
-
-const DEFAULT_INCLUDE = [
-  "**/*.{js,jsx,ts,tsx,mjs,cjs,mts,cts,py,go,rs,java,cs,rb,php,vue,svelte}",
-];
 
 function usage(): string {
   return [
@@ -207,9 +210,6 @@ function parseArgs(argv: string[]): CliOptions {
   if (options.command === "replay" && (options.provider || options.model)) {
     throw new Error("replay is offline; --provider and --model are not valid");
   }
-  if (options.command === "rules-audit" && (options.provider || options.model)) {
-    throw new Error("rules audit is provider-free; --provider and --model are not valid");
-  }
   if (
     options.command === "rules-audit" &&
     (options.changed || options.staged || options.base || options.patterns.length > 0)
@@ -234,6 +234,11 @@ function parseArgs(argv: string[]): CliOptions {
 async function main(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
   const config = await loadConfig(args.config);
+
+  const modelNamespace = [
+    args.provider ?? process.env.JEV_PROVIDER ?? "typesafe",
+    args.model ?? process.env.JEV_MODEL ?? "default",
+  ].join(":");
 
   if (args.command === "list") {
     const value = config.rules.map((rule) => ({
@@ -269,40 +274,26 @@ async function main(): Promise<void> {
   }
 
   const calibrationFile = resolve(config.calibrationFile ?? DEFAULT_CALIBRATION_FILE);
+  const evidenceFile = resolve(config.evidenceFile ?? DEFAULT_EVIDENCE_FILE);
 
   if (args.command === "rules-audit") {
-    const snapshot = await collectCurrentFixtureEvidence(config.rules, {
-      chunkChars: config.chunkChars,
-      overlapLines: config.overlapLines,
-      contextLines: config.contextLines,
-    });
-    let calibration: Awaited<ReturnType<typeof readCalibration>> | undefined;
-    let calibrationError: string | undefined;
-    try {
-      calibration = await readCalibration(calibrationFile);
-    } catch (error) {
-      calibrationError = error instanceof Error ? error.message : String(error);
-    }
-
-    const reports = config.rules.map((rule) =>
-      evaluateRuleEvidence(rule, {
-        fixtures: snapshot.fixtures,
-        fixtureDiagnostics: snapshot.diagnostics,
-        calibration,
-        calibrationError,
-      }),
-    );
-
+    const evaluated = await evaluateConfiguredRuleEvidence(config, { modelNamespace });
     console.log(
       args.format === "json"
-        ? formatJson(reports)
-        : formatRuleEvidenceStylish(reports),
+        ? formatJson(evaluated.reports)
+        : formatRuleEvidenceStylish(evaluated.reports),
     );
     return;
   }
   const recordedCalibration =
     args.command === "test" && args.testDrift
       ? await readCalibration(calibrationFile)
+      : undefined;
+
+  const hasOwnedRules = config.rules.some((rule) => (rule.status ?? "shadow") === "owned");
+  const ruleEvidenceReports =
+    (args.command === "check" || args.command === "replay") && hasOwnedRules
+      ? (await evaluateConfiguredRuleEvidence(config, { modelNamespace })).reports
       : undefined;
 
   const baselineFile = resolve(config.baselineFile ?? DEFAULT_BASELINE_FILE);
@@ -332,10 +323,7 @@ async function main(): Promise<void> {
     client,
     rules: config.rules,
     cache,
-    cacheNamespace: [
-      args.provider ?? process.env.JEV_PROVIDER ?? "typesafe",
-      args.model ?? process.env.JEV_MODEL ?? "default",
-    ].join(":"),
+    cacheNamespace: modelNamespace,
     chunkChars: config.chunkChars,
     overlapLines: config.overlapLines,
     contextLines: config.contextLines,
@@ -343,6 +331,8 @@ async function main(): Promise<void> {
     suppressionMarker: config.suppressionMarker,
     decisionStore,
     replayOnly: args.command === "replay",
+    mode: args.command === "check" || args.command === "replay" ? "enforce" : "measure",
+    ruleEvidenceReports,
   });
 
   if (args.command === "test") {
@@ -368,6 +358,21 @@ async function main(): Promise<void> {
         result.tests,
         config.driftThreshold ?? undefined,
       );
+      const current = await collectCurrentFixtureEvidence(config.rules, {
+        chunkChars: config.chunkChars,
+        overlapLines: config.overlapLines,
+        contextLines: config.contextLines,
+      });
+      await persistDriftEvidence(
+        evidenceFile,
+        config.rules,
+        current.fixtures,
+        recordedCalibration!,
+        result,
+        drift,
+        config.driftThreshold ?? drift.driftThreshold,
+        modelNamespace,
+      );
     }
 
     if (args.format === "json") {
@@ -383,7 +388,7 @@ async function main(): Promise<void> {
                   : "fixtures with no semantic evaluations",
             }
           : {}),
-        ...(drift ? { drift } : {}),
+        ...(drift ? { drift, evidenceFile } : {}),
       }));
     } else {
       const sections = [formatFixtureStylish(result)];
@@ -404,7 +409,10 @@ async function main(): Promise<void> {
                 : "every fixture must produce at least one semantic evaluation."),
         );
       }
-      if (drift) sections.push(formatFixtureDriftStylish(drift));
+      if (drift) {
+        sections.push(formatFixtureDriftStylish(drift));
+        sections.push("Recorded current drift evidence to " + evidenceFile);
+      }
       console.log(sections.join("\n\n"));
     }
 
@@ -423,7 +431,7 @@ async function main(): Promise<void> {
     return;
   }
 
-  const includes = config.include ?? DEFAULT_INCLUDE;
+  const includes = config.include ?? DEFAULT_SOURCE_INCLUDE;
   let paths: string[];
   let stagedInputs: SourceInput[] | undefined;
   if (args.staged) {
@@ -443,7 +451,43 @@ async function main(): Promise<void> {
 
   if (args.command === "recall") {
     const result = await checker.recallFiles(paths, args.sampleSize);
-    console.log(args.format === "json" ? formatJson(result) : formatRecallStylish(result));
+    const fullScope =
+      !args.changed &&
+      !args.staged &&
+      !args.base &&
+      args.patterns.length === 0;
+
+    if (fullScope) {
+      await persistMutationEvidence(
+        evidenceFile,
+        config.rules,
+        result,
+        paths,
+        args.sampleSize,
+        {
+          chunkChars: config.chunkChars,
+          overlapLines: config.overlapLines,
+          contextLines: config.contextLines,
+          include: includes,
+          exclude: config.exclude ?? [],
+          modelNamespace,
+        },
+      );
+    }
+
+    if (args.format === "json") {
+      console.log(formatJson({
+        ...result,
+        ...(fullScope
+          ? { evidenceFile }
+          : { evidenceNotRecorded: "scoped recall runs are not graduation evidence" }),
+      }));
+    } else {
+      const suffix = fullScope
+        ? "\nRecorded current mutation recall evidence to " + evidenceFile
+        : "\nMutation evidence not recorded: scoped recall runs are exploratory only.";
+      console.log(formatRecallStylish(result) + suffix);
+    }
     process.exitCode = result.diagnostics.some((item) => item.level === "error") ? 1 : 0;
     return;
   }

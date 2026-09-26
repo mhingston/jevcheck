@@ -43,6 +43,40 @@ describe("parseConfig", () => {
     }
   });
 
+  it("validates graduation policy", () => {
+    for (const minMutationRecall of [-0.1, 1.1, Number.NaN, Number.POSITIVE_INFINITY]) {
+      expect(() =>
+        parseConfig({
+          graduation: { minMutationRecall },
+          rules: [{ id: "example", question: "Is this a violation?" }],
+        }),
+      ).toThrow("graduation.minMutationRecall must be between 0 and 1");
+    }
+
+    expect(() =>
+      parseConfig({
+        graduation: { requireSource: "yes" },
+        rules: [{ id: "example", question: "Is this a violation?" }],
+      }),
+    ).toThrow("graduation.requireSource must be a boolean");
+
+    expect(() =>
+      parseConfig({
+        graduation: { magic: true },
+        rules: [{ id: "example", question: "Is this a violation?" }],
+      }),
+    ).toThrow("graduation contains unknown field(s): magic");
+  });
+
+  it("validates evidenceFile when configured", () => {
+    expect(() =>
+      parseConfig({
+        evidenceFile: "",
+        rules: [{ id: "example", question: "Is this a violation?" }],
+      }),
+    ).toThrow("evidenceFile must be a non-empty string");
+  });
+
   it("validates declarative mutants", () => {
     expect(() =>
       parseConfig({

@@ -43,6 +43,7 @@ describe("semantic replay", () => {
       client,
       rules: [rule],
       decisionStore: store,
+      mode: "measure",
     });
     const recorded = await live.checkSource("src/a.ts", source);
 
@@ -54,6 +55,7 @@ describe("semantic replay", () => {
       rules: [{ ...rule, threshold: 0.99, status: "shadow" }],
       decisionStore: store,
       replayOnly: true,
+      mode: "measure",
     });
     const result = await replay.checkSource("src/a.ts", source);
 
@@ -78,12 +80,14 @@ describe("semantic replay", () => {
       client,
       rules: [rule],
       decisionStore: store,
+      mode: "measure",
     }).checkSource("src/a.ts", source);
 
     const replay = createJevCheck({
       rules: [{ ...rule, question: "Does this logging call expose a credential?" }],
       decisionStore: store,
       replayOnly: true,
+      mode: "measure",
     });
     const result = await replay.checkSource("src/a.ts", source);
 

@@ -37,6 +37,34 @@ export interface RuleMutant {
   replaceAll?: boolean;
 }
 
+export interface RuleEvidencePolicy {
+  requireValidFixture: boolean;
+  requireInvalidFixture: boolean;
+  allowThinMargins: boolean;
+  requireCurrentCalibration: boolean;
+  requireCleanDrift: boolean;
+  requireMutants: boolean;
+  minMutationRecall: number;
+  requireSource: boolean;
+}
+
+export type RuleEvidenceCheckStatus = "pass" | "warn" | "block";
+
+export interface RuleEvidenceCheck {
+  id: string;
+  status: RuleEvidenceCheckStatus;
+  message: string;
+}
+
+export interface RuleEvidenceReport {
+  ruleId: string;
+  currentStatus: RuleStatus;
+  checks: RuleEvidenceCheck[];
+  blockers: string[];
+  warnings: string[];
+  readyForOwned: boolean;
+}
+
 export interface JevCheckRule {
   id: string;
   question: string;
@@ -67,7 +95,9 @@ export interface JevCheckConfig {
   baselineFile?: string;
   replayFile?: string;
   calibrationFile?: string;
+  evidenceFile?: string;
   driftThreshold?: number;
+  graduation?: Partial<RuleEvidencePolicy>;
   suppressionMarker?: string;
   rules: JevCheckRule[];
 }
@@ -199,6 +229,8 @@ export interface JevCheckOptions {
   suppressionMarker?: string;
   decisionStore?: SemanticDecisionStore;
   replayOnly?: boolean;
+  mode?: "enforce" | "measure";
+  ruleEvidenceReports?: readonly RuleEvidenceReport[];
 }
 
 export interface FixtureTestResult {
