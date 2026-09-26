@@ -3,6 +3,7 @@ import {
   formatFixtureDriftStylish,
   formatFixtureStylish,
   formatRecallStylish,
+  formatRuleEvidenceStylish,
   formatSarif,
   formatStylish,
 } from "../src/format.js";
@@ -188,6 +189,25 @@ describe("formatting", () => {
     expect(output).toContain("MISS     src/miss.ts");
     expect(output).toContain("INVALID  src/already-bad.ts");
     expect(output).toContain("Weakest measured recall: 0.50");
+  });
+
+  it("formats rule evidence blockers and readiness", () => {
+    const output = formatRuleEvidenceStylish([{
+      ruleId: "security/no-log",
+      currentStatus: "shadow",
+      checks: [
+        { id: "fixtures", status: "pass", message: "2 fixtures" },
+        { id: "mutation", status: "block", message: "weakest recall 0.80 < required 0.90" },
+      ],
+      blockers: ["weakest recall 0.80 < required 0.90"],
+      warnings: [],
+      readyForOwned: false,
+    }]);
+
+    expect(output).toContain("security/no-log  shadow");
+    expect(output).toContain("mutation");
+    expect(output).toContain("BLOCKER: weakest recall 0.80 < required 0.90");
+    expect(output).toContain("Ready for owned: no");
   });
 
   it("normalizes and URI-encodes artifact paths", () => {
