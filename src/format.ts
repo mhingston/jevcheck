@@ -1,5 +1,4 @@
-import type { RuleEvidenceReport } from "./evidence.js";
-import type { CheckResult, FixtureDriftResult, FixtureRunResult, RecallRunResult } from "./types.js";
+import type { CheckResult, FixtureDriftResult, FixtureRunResult, RecallRunResult, RuleEvidenceReport } from "./types.js";
 
 export function formatStylish(result: CheckResult): string {
   const lines: string[] = [];
