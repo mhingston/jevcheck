@@ -8,6 +8,13 @@ import type {
   SystemOneResponse,
 } from "@mhingston5/jev-cli";
 import { createJevCheck } from "../src/engine.js";
+import { collectCurrentFixtureEvidence } from "../src/evidence.js";
+import {
+  evaluateConfiguredRuleEvidence,
+  persistRobustnessEvidence,
+  readRuleEvidenceArtifact,
+} from "../src/evidence-store.js";
+import type { JevCheckRule } from "../src/types.js";
 
 class RobustnessClient implements SystemOneLikeClient {
   states: unknown[] = [];
@@ -70,5 +77,60 @@ describe("fixture robustness", () => {
         (state as { code: string }).code.includes("security team approved this code"),
       ),
     ).toBe(true);
+  });
+
+  it("persists freshness-aware robustness evidence without making it a blocker", async () => {
+    const cwd = await mkdtemp(join(tmpdir(), "jevcheck-robustness-evidence-"));
+    await mkdir(join(cwd, "fixtures"), { recursive: true });
+    await writeFile(join(cwd, "fixtures", "invalid.ts"), "console.log(secret);\n");
+
+    const rule: JevCheckRule = {
+      id: "security/no-secret-log",
+      question: "Does this code log a secret?",
+      threshold: 0.8,
+      ast: { pattern: "console.log($A)", contextBefore: 1, contextAfter: 1 },
+      fixtures: { invalid: ["fixtures/invalid.ts"] },
+    };
+    const checker = createJevCheck({
+      client: new RobustnessClient(),
+      mode: "measure",
+      rules: [rule],
+    });
+    const result = await checker.testRobustness(cwd);
+    const snapshot = await collectCurrentFixtureEvidence([rule], { cwd });
+    const evidenceFile = join(cwd, ".jevcheck", "evidence.json");
+
+    await persistRobustnessEvidence(
+      evidenceFile,
+      [rule],
+      snapshot.fixtures,
+      result,
+      "fake:default",
+    );
+
+    const artifact = await readRuleEvidenceArtifact(evidenceFile);
+    expect(artifact.robustness).toHaveLength(1);
+
+    const evaluated = await evaluateConfiguredRuleEvidence(
+      { evidenceFile, rules: [rule] },
+      { cwd, modelNamespace: "fake:default" },
+    );
+    const robustness = evaluated.reports[0]?.checks.find(
+      (check) => check.id === "robustness",
+    );
+    expect(robustness?.status).toBe("warn");
+    expect(robustness?.message).toContain("2 classification flip(s)");
+
+    await writeFile(
+      join(cwd, "fixtures", "invalid.ts"),
+      "console.log(secret); // semantic input changed\n",
+    );
+    const stale = await evaluateConfiguredRuleEvidence(
+      { evidenceFile, rules: [rule] },
+      { cwd, modelNamespace: "fake:default" },
+    );
+    expect(
+      stale.reports[0]?.checks.find((check) => check.id === "robustness")?.message,
+    ).toContain("persisted robustness evidence is stale");
   });
 });
