@@ -246,6 +246,21 @@ A fixture that still passes but sits 0.05 or less from its rule threshold is mar
 
 Calibration is not accuracy proof. It detects movement relative to labelled examples; fixture quality and representativeness still matter.
 
+### Rule evidence audit
+
+`jevcheck rules audit` evaluates the evidence currently available for every rule without calling a provider:
+
+~~~sh
+jevcheck rules audit
+jevcheck rules audit --format json
+~~~
+
+The audit recomputes current fixture semantic identities deterministically and compares them with committed calibration, so missing calibration, threshold changes, semantic-input changes, fixture failures, and thin margins are distinguishable.
+
+Drift and mutation recall are represented explicitly, but jevcheck does not invent a "latest" value for process-local measurements. Until freshness-aware evidence persistence is added, the CLI reports those dimensions as missing rather than treating an old run as current. The exported `evaluateRuleEvidence` API accepts explicit drift and mutation evidence for callers that already hold current results.
+
+Audit is advisory in this slice: it does not rewrite rule status and does not change normal check behavior.
+
 ### Mutation recall
 
 Fixtures show that a rule can distinguish curated valid/invalid examples. Mutation recall asks a stronger question: does the rule catch a known violation when that violation is injected into **real repository code**?
@@ -453,10 +468,9 @@ Provider choice changes transport, not lint semantics. Domain policy stays in je
 
 The remaining useful slices are:
 
-1. enforced shadow-to-owned graduation gates using fixture/margin/drift/recall evidence
-2. a `rules audit` command exposing evidence and blockers
-3. related-node AST context across separate definitions/callers
-4. optional AST-specific mutation helpers, only if declarative regex mutants prove insufficient
+1. enforced shadow-to-owned graduation gates reusing the rule evidence evaluator
+2. related-node AST context across separate definitions/callers
+3. optional AST-specific mutation helpers, only if declarative regex mutants prove insufficient
 
 Generated code fixes remain intentionally out of scope. Findings should feed a coding agent or deterministic refactoring tool rather than letting the semantic judge edit code itself.
 
