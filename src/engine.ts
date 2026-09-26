@@ -11,6 +11,7 @@ import {
 import { FIXTURE_THIN_MARGIN } from "./calibration.js";
 import { buildCandidates } from "./candidates.js";
 import { discoverFiles } from "./files.js";
+import { confirmationFixtureOverlaps } from "./fixtures.js";
 import { assertOwnedRuleEvidence } from "./graduation.js";
 import { applyMutation, stableMutationOrder } from "./mutate.js";
 import { semanticRequestForCandidate } from "./semantic.js";
@@ -421,6 +422,21 @@ export function createJevCheck(options: JevCheckOptions): JevCheck {
     const stats = emptyStats();
 
     for (const rule of options.rules) {
+      if (fixtureSet === "confirmation") {
+        const overlaps = await confirmationFixtureOverlaps(rule, cwd);
+        if (overlaps.length) {
+          diagnostics.push({
+            level: "error",
+            ruleId: rule.id,
+            message:
+              "Confirmation fixtures overlap development fixtures: " +
+              overlaps.join(", ") +
+              ". Move each case to exactly one fixture set before recording confirmation evidence.",
+          });
+          continue;
+        }
+      }
+
       const fixtureConfig =
         fixtureSet === "confirmation" ? rule.fixtures?.confirmation : rule.fixtures;
       const groups: Array<["valid" | "invalid", string[] | undefined]> = [
