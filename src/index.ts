@@ -10,3 +10,4 @@ export * from "./files.js";
 export * from "./format.js";
 export * from "./git.js";
 export * from "./replay.js";
+export * from "./mutate.js";
