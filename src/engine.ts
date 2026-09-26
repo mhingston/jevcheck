@@ -470,7 +470,7 @@ export function createJevCheck(options: JevCheckOptions): JevCheck {
             maxProbability,
             threshold,
             margin,
-            thinMargin: passed && margin < FIXTURE_THIN_MARGIN,
+            thinMargin: passed && margin <= FIXTURE_THIN_MARGIN,
             semanticKeys: [...new Set(fixtureResult.evaluations.map((item) => item.semanticKey))].sort(),
             model: strongest?.model,
           });
