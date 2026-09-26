@@ -296,6 +296,26 @@ export interface FixtureRunResult {
   stats: RunStats;
 }
 
+export interface RobustnessResultItem {
+  ruleId: string;
+  path: string;
+  expected: "valid" | "invalid";
+  perturbation: string;
+  baselineProbability: number;
+  perturbedProbability: number;
+  delta: number;
+  baselineViolated: boolean;
+  perturbedViolated: boolean;
+  baselinePassed: boolean;
+  flipped: boolean;
+}
+
+export interface RobustnessRunResult {
+  items: RobustnessResultItem[];
+  diagnostics: Diagnostic[];
+  stats: RunStats;
+}
+
 export interface RecallMutantResult {
   ruleId: string;
   mutantId: string;
