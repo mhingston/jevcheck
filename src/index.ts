@@ -1,6 +1,7 @@
 export * from "./types.js";
 export * from "./ast.js";
 export * from "./baseline.js";
+export * from "./calibration.js";
 export * from "./cache.js";
 export * from "./candidates.js";
 export * from "./config.js";

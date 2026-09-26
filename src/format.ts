@@ -1,4 +1,4 @@
-import type { CheckResult, FixtureRunResult } from "./types.js";
+import type { CheckResult, FixtureDriftResult, FixtureRunResult } from "./types.js";
 
 export function formatStylish(result: CheckResult): string {
   const lines: string[] = [];
@@ -182,7 +182,10 @@ export function formatFixtureStylish(result: FixtureRunResult): string {
       "  max p=" +
       test.maxProbability.toFixed(2) +
       " threshold=" +
-      test.threshold.toFixed(2)
+      test.threshold.toFixed(2) +
+      " margin=" +
+      test.margin.toFixed(2) +
+      (test.thinMargin ? " THIN" : "")
     );
   });
 
@@ -196,6 +199,54 @@ export function formatFixtureStylish(result: FixtureRunResult): string {
   }
 
   const failures = result.tests.filter((test) => !test.passed).length;
-  lines.push(result.tests.length + " fixture(s), " + failures + " failure(s)");
+  const thin = result.tests.filter((test) => test.thinMargin).length;
+  lines.push(
+    result.tests.length +
+      " fixture(s), " +
+      failures +
+      " failure(s), " +
+      thin +
+      " thin margin(s)",
+  );
+  return lines.join("\n");
+}
+
+export function formatFixtureDriftStylish(result: FixtureDriftResult): string {
+  const lines = [
+    "Drift: mean |Δp| " +
+      result.meanAbsoluteDelta.toFixed(3) +
+      " across " +
+      result.compared +
+      " fixture(s); " +
+      result.moved.length +
+      " moved >= " +
+      result.driftThreshold.toFixed(2) +
+      "; " +
+      result.added.length +
+      " added; " +
+      result.removed.length +
+      " removed",
+  ];
+
+  for (const item of result.moved) {
+    lines.push(
+      "  " +
+        item.ruleId +
+        "  " +
+        item.expected +
+        "  " +
+        item.path +
+        "  " +
+        item.before.toFixed(3) +
+        " -> " +
+        item.after.toFixed(3) +
+        "  |Δp|=" +
+        item.delta.toFixed(3) +
+        (item.beforeModel || item.afterModel
+          ? "  model=" + (item.beforeModel ?? "?") + " -> " + (item.afterModel ?? "?")
+          : ""),
+    );
+  }
+
   return lines.join("\n");
 }

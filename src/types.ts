@@ -58,6 +58,7 @@ export interface JevCheckConfig {
   cacheFile?: string;
   baselineFile?: string;
   replayFile?: string;
+  calibrationFile?: string;
   suppressionMarker?: string;
   rules: JevCheckRule[];
 }
@@ -197,6 +198,40 @@ export interface FixtureTestResult {
   passed: boolean;
   maxProbability: number;
   threshold: number;
+  margin: number;
+  thinMargin: boolean;
+  model?: string;
+}
+
+export interface FixtureCalibrationEntry {
+  ruleId: string;
+  path: string;
+  expected: "valid" | "invalid";
+  probability: number;
+  threshold: number;
+  model?: string;
+}
+
+export interface FixtureDriftItem {
+  ruleId: string;
+  path: string;
+  expected: "valid" | "invalid";
+  before: number;
+  after: number;
+  delta: number;
+  beforeThreshold: number;
+  afterThreshold: number;
+  beforeModel?: string;
+  afterModel?: string;
+}
+
+export interface FixtureDriftResult {
+  compared: number;
+  meanAbsoluteDelta: number;
+  moved: FixtureDriftItem[];
+  added: FixtureCalibrationEntry[];
+  removed: FixtureCalibrationEntry[];
+  driftThreshold: number;
 }
 
 export interface FixtureRunResult {

@@ -179,6 +179,7 @@ export function parseConfig(value: unknown): JevCheckConfig {
     cacheFile: optionalNonEmptyString(config.cacheFile, "cacheFile"),
     baselineFile: optionalNonEmptyString(config.baselineFile, "baselineFile"),
     replayFile: optionalNonEmptyString(config.replayFile, "replayFile"),
+    calibrationFile: optionalNonEmptyString(config.calibrationFile, "calibrationFile"),
     suppressionMarker: optionalNonEmptyString(config.suppressionMarker, "suppressionMarker"),
     rules,
   };
