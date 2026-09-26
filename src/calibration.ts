@@ -10,6 +10,7 @@ import type {
 } from "./types.js";
 
 export const DEFAULT_CALIBRATION_FILE = ".jevcheck/calibration.json";
+export const DEFAULT_CONFIRMATION_FILE = ".jevcheck/confirmation.json";
 export const CALIBRATION_FORMAT_VERSION = 1;
 export const DEFAULT_DRIFT_THRESHOLD = 0.1;
 export const FIXTURE_THIN_MARGIN = 0.05;
@@ -109,13 +110,17 @@ export function thresholdDiagnostics(
     .sort((a, b) => a.ruleId.localeCompare(b.ruleId));
 }
 
-export async function readCalibration(path: string): Promise<FixtureCalibrationEntry[]> {
+export async function readCalibration(
+  path: string,
+  artifactName = "calibration",
+  missingHint = "run jevcheck test --record first",
+): Promise<FixtureCalibrationEntry[]> {
   let raw: string;
   try {
     raw = await readFile(path, "utf8");
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-      throw new Error("calibration file not found: " + path + "; run jevcheck test --record first");
+      throw new Error(artifactName + " file not found: " + path + "; " + missingHint);
     }
     throw error;
   }
@@ -211,16 +216,23 @@ export function compareCalibration(
       before.semanticKeys.length !== after.semanticKeys.length ||
       before.semanticKeys.some((key, index) => key !== after.semanticKeys[index]);
     const thresholdChanged = before.threshold !== after.threshold;
-    if (semanticInputsChanged || thresholdChanged) {
+    const modelChanged = before.model !== after.model;
+    if (semanticInputsChanged || thresholdChanged || modelChanged) {
       stale.push({
         ruleId: after.ruleId,
         path: after.path,
         expected: after.expected,
-        reason: semanticInputsChanged ? "semantic-inputs" : "threshold",
+        reason: semanticInputsChanged
+          ? "semantic-inputs"
+          : thresholdChanged
+            ? "threshold"
+            : "model",
         beforeSemanticKeys: before.semanticKeys,
         afterSemanticKeys: after.semanticKeys,
         beforeThreshold: before.threshold,
         afterThreshold: after.threshold,
+        beforeModel: before.model,
+        afterModel: after.model,
       });
       continue;
     }
