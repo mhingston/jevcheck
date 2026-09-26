@@ -314,6 +314,57 @@ async function main(): Promise<void> {
     );
     return;
   }
+  if (args.command === "inspect") {
+    const includes = config.include ?? DEFAULT_SOURCE_INCLUDE;
+    let paths: string[];
+    let stagedInputs: SourceInput[] | undefined;
+    if (args.staged) {
+      const staged = await stagedSources();
+      paths = filterFiles(
+        staged.map((item) => item.path),
+        includes,
+        config.exclude ?? [],
+      );
+      const byPath = new Map(staged.map((item) => [item.path.replaceAll("\\", "/"), item]));
+      stagedInputs = paths
+        .map((path) => byPath.get(path))
+        .filter((item): item is SourceInput => item !== undefined);
+    } else if (args.changed) {
+      paths = filterFiles(await changedFiles(args.base), includes, config.exclude ?? []);
+    } else {
+      paths = await discoverFiles(
+        args.patterns.length ? args.patterns : includes,
+        config.exclude ?? [],
+      );
+    }
+
+    const selectedRules = args.inspectRule
+      ? config.rules.filter((rule) => rule.id === args.inspectRule)
+      : config.rules;
+    if (args.inspectRule && selectedRules.length === 0) {
+      throw new Error("unknown rule id: " + args.inspectRule);
+    }
+
+    const inputs = stagedInputs ?? await Promise.all(
+      paths.map(async (path): Promise<SourceInput> => ({
+        path,
+        source: await readFile(resolve(path), "utf8"),
+      })),
+    );
+    const inspected = inspectSources(inputs, selectedRules, {
+      chunkChars: config.chunkChars,
+      overlapLines: config.overlapLines,
+      contextLines: config.contextLines,
+    });
+    console.log(
+      args.format === "json"
+        ? formatJson(inspected)
+        : formatInspectionStylish(inspected),
+    );
+    process.exitCode = inspected.diagnostics.some((item) => item.level === "error") ? 1 : 0;
+    return;
+  }
+
   const recordedCalibration =
     args.command === "test" && args.testDrift
       ? await readCalibration(calibrationFile)
@@ -338,7 +389,7 @@ async function main(): Promise<void> {
         ? new DiskSemanticDecisionStore(replayFile, true)
         : undefined;
   const client =
-    args.command === "replay" || args.command === "inspect"
+    args.command === "replay"
       ? undefined
       : createJevClient({ provider: args.provider, model: args.model });
   const cacheFile = resolve(config.cacheFile ?? ".jevcheck/cache.json");
@@ -525,29 +576,6 @@ async function main(): Promise<void> {
     paths = filterFiles(await changedFiles(args.base), includes, config.exclude ?? []);
   } else {
     paths = await discoverFiles(args.patterns.length ? args.patterns : includes, config.exclude ?? []);
-  }
-
-  if (args.command === "inspect") {
-    const selectedRules = args.inspectRule
-      ? config.rules.filter((rule) => rule.id === args.inspectRule)
-      : config.rules;
-    if (args.inspectRule && selectedRules.length === 0) {
-      throw new Error("unknown rule id: " + args.inspectRule);
-    }
-    const inputs = stagedInputs ?? await Promise.all(
-      paths.map(async (path): Promise<SourceInput> => ({
-        path,
-        source: await readFile(resolve(path), "utf8"),
-      })),
-    );
-    const inspected = inspectSources(inputs, selectedRules, {
-      chunkChars: config.chunkChars,
-      overlapLines: config.overlapLines,
-      contextLines: config.contextLines,
-    });
-    console.log(args.format === "json" ? formatJson(inspected) : formatInspectionStylish(inspected));
-    process.exitCode = inspected.diagnostics.some((item) => item.level === "error") ? 1 : 0;
-    return;
   }
 
   if (args.command === "recall") {
