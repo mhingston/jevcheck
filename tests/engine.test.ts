@@ -281,6 +281,25 @@ describe("createJevCheck", () => {
     expect(result.weakestRecall).toBe(1);
   });
 
+  it("rejects unsafe recall sample sizes before sampling", async () => {
+    const checker = createJevCheck({
+      client: new FakeClient(),
+      rules: [{
+        id: "security/no-secret-log",
+        question: "Does this code log a secret?",
+        mutants: [{
+          id: "redacted-to-secret",
+          pattern: "/redacted/g",
+          replacement: "secret",
+          replaceAll: true,
+        }],
+      }],
+    });
+
+    await expect(checker.recallFiles([], Number.MAX_SAFE_INTEGER + 1))
+      .rejects.toThrow("recall sampleSize must be a positive safe integer");
+  });
+
   it("counts a mutated file with no semantic candidate as a recall miss", async () => {
     const cwd = await mkdtemp(join(tmpdir(), "jevcheck-recall-miss-"));
     const src = join(cwd, "src");
