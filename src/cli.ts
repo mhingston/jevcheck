@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { createJevClient, JEV_PROVIDERS, type JevProvider } from "@mhingston5/jev-cli";
 import {
@@ -38,10 +39,11 @@ import {
   formatStylish,
 } from "./format.js";
 import { changedFiles, stagedSources } from "./git.js";
+import { formatInspectionStylish, inspectSources } from "./inspect.js";
 import { DEFAULT_REPLAY_FILE, DiskSemanticDecisionStore } from "./replay.js";
 import type { SourceInput } from "./types.js";
 
-type Command = "check" | "test" | "list" | "baseline" | "record" | "replay" | "recall" | "rules-audit";
+type Command = "check" | "test" | "list" | "inspect" | "baseline" | "record" | "replay" | "recall" | "rules-audit";
 type OutputFormat = "stylish" | "json" | "sarif";
 
 interface CliOptions {
@@ -59,6 +61,7 @@ interface CliOptions {
   testRobustness: boolean;
   sampleSize: number;
   sampleSizeSet: boolean;
+  inspectRule?: string;
   patterns: string[];
 }
 
@@ -70,6 +73,7 @@ function usage(): string {
     "  jevcheck [patterns...] [options]",
     "  jevcheck test [options]",
     "  jevcheck list [options]",
+    "  jevcheck inspect [patterns...] [options]",
     "  jevcheck baseline [patterns...] [options]",
     "  jevcheck record [patterns...] [options]",
     "  jevcheck replay [patterns...] [options]",
@@ -89,6 +93,7 @@ function usage(): string {
     "  --drift               With test, re-ask fixtures and compare calibration",
     "  --robustness          With test, probe label-preserving adversarial context",
     "  --sample-size <n>     With recall, files sampled per mutant (default: 12)",
+    "  --rule <id>            With inspect, preview only one configured rule",
     "  -h, --help            Show help",
     "",
     "record captures semantic decisions to replayFile (default: .jevcheck/replay.json).",
@@ -96,6 +101,7 @@ function usage(): string {
     "test --record writes calibrationFile; test --drift and test --robustness bypass the answer cache.",
     "robustness probes fixture judgments with nearby comments that should not change the label.",
     "recall mutates sampled real files in memory; repository files are never modified.",
+    "inspect is provider-free and prints the exact state/question request Jev would receive.",
     "",
     "Only owned error findings make the check command exit 1. Shadow findings are advisory.",
   ].join("\n");
@@ -116,6 +122,7 @@ function parseArgs(argv: string[]): CliOptions {
   } else if (
     args[0] === "test" ||
     args[0] === "list" ||
+    args[0] === "inspect" ||
     args[0] === "baseline" ||
     args[0] === "record" ||
     args[0] === "replay" ||
@@ -190,6 +197,10 @@ function parseArgs(argv: string[]): CliOptions {
       case "--robustness":
         options.testRobustness = true;
         break;
+      case "--rule":
+        options.inspectRule = requireValue(args, i, arg);
+        i += 1;
+        break;
       case "--sample-size": {
         const value = Number(requireValue(args, i, arg));
         if (!Number.isSafeInteger(value) || value < 1) {
@@ -239,6 +250,9 @@ function parseArgs(argv: string[]): CliOptions {
   }
   if (options.sampleSizeSet && options.command !== "recall") {
     throw new Error("--sample-size is only valid with recall");
+  }
+  if (options.inspectRule && options.command !== "inspect") {
+    throw new Error("--rule is only valid with inspect");
   }
   if (options.command === "recall" && options.staged) {
     throw new Error("recall operates on working-tree files; --staged is not supported");
@@ -324,7 +338,7 @@ async function main(): Promise<void> {
         ? new DiskSemanticDecisionStore(replayFile, true)
         : undefined;
   const client =
-    args.command === "replay"
+    args.command === "replay" || args.command === "inspect"
       ? undefined
       : createJevClient({ provider: args.provider, model: args.model });
   const cacheFile = resolve(config.cacheFile ?? ".jevcheck/cache.json");
@@ -511,6 +525,29 @@ async function main(): Promise<void> {
     paths = filterFiles(await changedFiles(args.base), includes, config.exclude ?? []);
   } else {
     paths = await discoverFiles(args.patterns.length ? args.patterns : includes, config.exclude ?? []);
+  }
+
+  if (args.command === "inspect") {
+    const selectedRules = args.inspectRule
+      ? config.rules.filter((rule) => rule.id === args.inspectRule)
+      : config.rules;
+    if (args.inspectRule && selectedRules.length === 0) {
+      throw new Error("unknown rule id: " + args.inspectRule);
+    }
+    const inputs = stagedInputs ?? await Promise.all(
+      paths.map(async (path): Promise<SourceInput> => ({
+        path,
+        source: await readFile(resolve(path), "utf8"),
+      })),
+    );
+    const inspected = inspectSources(inputs, selectedRules, {
+      chunkChars: config.chunkChars,
+      overlapLines: config.overlapLines,
+      contextLines: config.contextLines,
+    });
+    console.log(args.format === "json" ? formatJson(inspected) : formatInspectionStylish(inspected));
+    process.exitCode = inspected.diagnostics.some((item) => item.level === "error") ? 1 : 0;
+    return;
   }
 
   if (args.command === "recall") {
