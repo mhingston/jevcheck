@@ -232,8 +232,10 @@ Jev can only judge the evidence supplied to it. Give each rule the smallest dete
 - Do not send secrets, credentials, private keys, environment files, generated output, vendored code, or unrelated repository content.
 - Model-visible source and context are sent to the configured Jev provider. Treat that provider as part of the trust boundary for any code you submit.
 - If the selected candidate does not contain enough evidence for a defensible YES/NO judgement, improve the deterministic selector or bounded context, or do not apply the rule there.
+- Do not add a second model judgement that asks whether the first judgement is applicable.
 
 Do not solve insufficient context by turning a rule into an open-ended review prompt or by continuously widening its scope. A jevcheck rule should remain a narrow semantic question with stable meaning.
+Context is evidence, not permission to broaden the question. Nearby code may help interpret the exact focus, but must not become an independent reason to report a violation.
 
 ## A practical rule lifecycle
 
@@ -358,6 +360,14 @@ Only after the rule has earned that responsibility:
 An owned `error` finding is blocking. An owned `warning` remains non-blocking.
 
 Normal checks and replay fail closed if an owned rule's required evidence is missing, stale, or failing. `jevcheck` never silently downgrades it back to shadow.
+
+### Stop when the rule is good enough
+
+The evidence lifecycle exists to establish that a bounded rule is useful and stable, not to maximize a model probability or benchmark score.
+
+Once the semantic boundary is clear, labelled evidence separates valid from invalid cases, drift/recall/robustness are acceptable, and the rule has enough context to make the intended judgement, stop tuning it. Do not broaden the question, enlarge model-visible context, weaken graduation policy, or move the threshold merely to improve measured results.
+
+If a rule only works after those kinds of changes, prefer narrowing or splitting the rule, improving deterministic candidate selection, or leaving the concern outside `jevcheck`.
 
 ## Baselines and intentional exceptions
 

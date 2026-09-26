@@ -33,18 +33,29 @@ Poor examples:
 8. Start the rule in `shadow` status.
 9. Inspect false positives, false negatives, probability margins, and model drift before making it `owned`.
 10. Keep thresholds, CI behavior, suppressions, baselines, and other policy in code rather than asking the model to decide them.
+11. Ensure the deterministically selected candidate contains enough evidence to answer the bounded question. If it does not, improve or narrow the context rather than adding a second model call to judge applicability.
+12. Stop once the rule has sufficient evidence. Do not broaden context, weaken graduation policy, or tune thresholds merely to make the measured results look better.
 
 ## Context sufficiency and trust boundary
 
-A semantic rule is only as defensible as the evidence supplied to it.
+A semantic rule is only as defensible as the evidence supplied to it. The model should only see context that is relevant to the exact semantic focus, and nearby code can provide evidence, but it must not become an independent source of violations outside the focus.
 
-- Send the smallest deterministic context that is sufficient to answer the bounded question.
-- Add ancestor or surrounding context only when it can materially affect the judgement.
-- Never send secrets, credentials, private keys, environment files, generated output, vendored code, or unrelated repository content.
-- Remember that model-visible code and context leave the local process for the configured Jev provider.
-- If a candidate does not contain enough evidence for a defensible YES/NO answer, improve deterministic selection/context or do not apply the rule there.
+If the rule cannot be judged from the selected focus plus bounded context:
 
-Do not compensate for missing evidence by broadening the question into general code review or by continually increasing context.
+- improve the deterministic selector or context
+- split the concern into smaller rules
+- use a different deterministic tool when the missing relationship is mechanically discoverable
+- leave the concern outside jevcheck when a bounded judgement cannot be made reliably
+
+Do not add an applicability or confidence model call merely to compensate for weak candidate construction. Jevcheck's useful contract is one bounded Noul decision where YES consistently means "violation present".
+
+Treat model-visible source as data that may be sent to the configured remote provider. Do not deliberately include secrets, credentials, private keys, environment files, generated output, vendored code, or unrelated proprietary content.
+
+## Stop rule
+
+Evidence is for deciding whether a rule is trustworthy, not for optimizing a score.
+
+Once the boundary is clear, valid and invalid examples separate cleanly enough, required evidence is current, and further changes would mainly increase context, complexity, or policy leniency, stop. If the rule only becomes "good" after broadening the question, inflating context, moving thresholds to fit examples, or weakening graduation requirements, reconsider the rule instead.
 
 ## AST-aware narrowing
 
