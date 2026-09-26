@@ -13,9 +13,11 @@ import { buildCandidates } from "./candidates.js";
 import { discoverFiles } from "./files.js";
 import { assertOwnedRuleEvidence } from "./graduation.js";
 import { applyMutation, stableMutationOrder } from "./mutate.js";
+import { ROBUSTNESS_PERTURBATIONS, perturbCandidate } from "./robustness.js";
 import { semanticRequestForCandidate } from "./semantic.js";
 import type {
   AnswerCache,
+  Candidate,
   CheckResult,
   Evaluation,
   Finding,
@@ -24,6 +26,7 @@ import type {
   JevCheckOptions,
   JevCheckRule,
   RecallRunResult,
+  RobustnessRunResult,
   RunStats,
   SourceInput,
   SuppressedFinding,
@@ -150,6 +153,7 @@ export interface JevCheck {
   checkSources(sources: SourceInput[]): Promise<CheckResult>;
   checkFiles(paths: string[]): Promise<CheckResult>;
   testFixtures(cwd?: string): Promise<FixtureRunResult>;
+  testRobustness(cwd?: string): Promise<RobustnessRunResult>;
   recallFiles(paths: string[], sampleSize?: number, cwd?: string): Promise<RecallRunResult>;
 }
 
@@ -181,6 +185,7 @@ export function createJevCheck(options: JevCheckOptions): JevCheck {
     onlyRuleIds?: string[],
     ignoreFileScope = false,
     applySuppressions = true,
+    candidateTransform?: (candidate: Candidate) => Candidate,
   ): Promise<CheckResult> {
     const result = emptyResult();
     result.stats.filesChecked = 1;
@@ -203,7 +208,8 @@ export function createJevCheck(options: JevCheckOptions): JevCheck {
       const status = rule.status ?? "shadow";
       const occurrenceCounts = new Map<string, number>();
 
-      for (const candidate of built.candidates) {
+      for (const rawCandidate of built.candidates) {
+        const candidate = candidateTransform ? candidateTransform(rawCandidate) : rawCandidate;
         result.stats.candidatesChecked += 1;
         const codeHash = hash(candidate.text);
         const key = cacheKey(
@@ -456,6 +462,84 @@ export function createJevCheck(options: JevCheckOptions): JevCheck {
     return { tests, diagnostics, stats };
   }
 
+  async function testRobustness(cwd = process.cwd()): Promise<RobustnessRunResult> {
+    const items: RobustnessRunResult["items"] = [];
+    const diagnostics: RobustnessRunResult["diagnostics"] = [];
+    const stats = emptyStats();
+
+    for (const rule of options.rules) {
+      const groups: Array<["valid" | "invalid", string[] | undefined]> = [
+        ["valid", rule.fixtures?.valid],
+        ["invalid", rule.fixtures?.invalid],
+      ];
+
+      for (const [expected, patterns] of groups) {
+        if (!patterns?.length) continue;
+        const paths = await discoverFiles(patterns, [], cwd);
+        if (!paths.length) {
+          diagnostics.push({
+            level: "error",
+            ruleId: rule.id,
+            message: "Fixture patterns for " + expected + " matched no files: " + patterns.join(", "),
+          });
+          continue;
+        }
+
+        for (const fixturePath of paths) {
+          const path = fixturePath.replaceAll("\\", "/");
+          const source = await readFile(resolve(cwd, fixturePath), "utf8");
+          const baseline = await checkSourceInternal(path, source, [rule.id], true, false);
+          mergeStats(stats, baseline.stats);
+          diagnostics.push(...baseline.diagnostics);
+
+          const strongestBaseline = baseline.evaluations.reduce<Evaluation | undefined>(
+            (best, item) => (!best || item.probability > best.probability ? item : best),
+            undefined,
+          );
+          const baselineProbability = strongestBaseline?.probability ?? 0;
+          const baselineViolated = baseline.evaluations.some((item) => item.violates);
+          const baselinePassed = expected === "invalid" ? baselineViolated : !baselineViolated;
+
+          for (const perturbation of ROBUSTNESS_PERTURBATIONS) {
+            const perturbed = await checkSourceInternal(
+              path,
+              source,
+              [rule.id],
+              true,
+              false,
+              (candidate) => perturbCandidate(path, candidate, perturbation),
+            );
+            mergeStats(stats, perturbed.stats);
+            diagnostics.push(...perturbed.diagnostics);
+
+            const strongestPerturbed = perturbed.evaluations.reduce<Evaluation | undefined>(
+              (best, item) => (!best || item.probability > best.probability ? item : best),
+              undefined,
+            );
+            const perturbedProbability = strongestPerturbed?.probability ?? 0;
+            const perturbedViolated = perturbed.evaluations.some((item) => item.violates);
+
+            items.push({
+              ruleId: rule.id,
+              path,
+              expected,
+              perturbation: perturbation.id,
+              baselineProbability,
+              perturbedProbability,
+              delta: Number(Math.abs(perturbedProbability - baselineProbability).toFixed(6)),
+              baselineViolated,
+              perturbedViolated,
+              baselinePassed,
+              flipped: baselineViolated !== perturbedViolated,
+            });
+          }
+        }
+      }
+    }
+
+    return { items, diagnostics, stats };
+  }
+
   async function recallFiles(
     paths: string[],
     sampleSize = 12,
@@ -573,5 +657,5 @@ export function createJevCheck(options: JevCheckOptions): JevCheck {
     return checkSourceInternal(path, source, onlyRuleIds);
   }
 
-  return { checkSource, checkSources, checkFiles, testFixtures, recallFiles };
+  return { checkSource, checkSources, checkFiles, testFixtures, testRobustness, recallFiles };
 }
