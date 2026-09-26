@@ -431,6 +431,14 @@ export function evaluateRuleEvidence(
     const confirmationErrors = (evidence.confirmationFixtureDiagnostics ?? []).filter(
       (item) => item.ruleId === rule.id && item.level === "error",
     );
+    const confirmationCurrentByKey = new Map(
+      confirmationFixtures.map((fixture) => [fixtureCalibrationKey(fixture), fixture]),
+    );
+    const extraConfirmation = (evidence.confirmation ?? []).filter(
+      (entry) =>
+        entry.ruleId === rule.id &&
+        !confirmationCurrentByKey.has(fixtureCalibrationKey(entry)),
+    );
     const confirmationProblems: string[] = [];
 
     if (!rule.fixtures.confirmation.valid?.length) {
@@ -472,6 +480,15 @@ export function evaluateRuleEvidence(
         if (!calibratedPass(fixture, recorded)) {
           confirmationProblems.push("confirmation fixture failed: " + fixture.path);
         }
+      }
+      if (extraConfirmation.length) {
+        confirmationProblems.push(
+          extraConfirmation.length +
+            " obsolete confirmation entr" +
+            (extraConfirmation.length === 1 ? "y" : "ies") +
+            ": " +
+            extraConfirmation.map((entry) => entry.path).join(", "),
+        );
       }
     }
 
