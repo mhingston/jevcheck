@@ -44,11 +44,12 @@ The model does semantic judgment. Code owns everything deterministic.
 - versioned, commit-able semantic replay corpora for offline evaluation
 - strict offline replay with explicit coverage misses and no provider fallback
 - versioned fixture calibration with thin-margin and fresh-run drift reporting
+- deterministic mutation recall over real repository files
 - stylish, JSON, and SARIF output
 - rule/model/code fingerprints and stable finding fingerprints
 - bundled agent skill, CI, and package metadata
 
-Mutation recall and enforced graduation gates remain deliberately separate follow-up slices.
+Enforced graduation gates remain deliberately separate from the measurement features.
 
 ## Development
 
@@ -103,7 +104,15 @@ Create `jevcheck.config.json`:
       "fixtures": {
         "valid": ["fixtures/no-sensitive-log/valid/**/*.ts"],
         "invalid": ["fixtures/no-sensitive-log/invalid/**/*.ts"]
-      }
+      },
+      "mutants": [
+        {
+          "id": "redacted-to-secret",
+          "pattern": "/redacted/g",
+          "replacement": "secret",
+          "replaceAll": true
+        }
+      ]
     }
   ]
 }
@@ -237,6 +246,49 @@ A fixture that still passes but sits 0.05 or less from its rule threshold is mar
 
 Calibration is not accuracy proof. It detects movement relative to labelled examples; fixture quality and representativeness still matter.
 
+### Mutation recall
+
+Fixtures show that a rule can distinguish curated valid/invalid examples. Mutation recall asks a stronger question: does the rule catch a known violation when that violation is injected into **real repository code**?
+
+Each rule can declare deterministic JSON-safe mutants:
+
+~~~json
+{
+  "mutants": [
+    {
+      "id": "drop-limit",
+      "pattern": "/\\.limit\\([^)]*\\)/g",
+      "replacement": "",
+      "replaceAll": true
+    }
+  ]
+}
+~~~
+
+Run recall over the configured source set:
+
+~~~sh
+jevcheck recall
+jevcheck recall --sample-size 20
+jevcheck recall src/services/**/*.ts
+~~~
+
+For each mutant, jevcheck:
+
+1. finds in-scope files where the mutation changes the text
+2. orders candidates deterministically by rule, mutant, and path
+3. samples up to 12 files by default
+4. checks the original file first
+5. excludes files that already violate the rule from the denominator
+6. judges the mutated text with normal candidate/prefilter logic
+7. counts a mutation as caught only when the mutated file crosses the rule threshold
+
+If the mutant changes a file but the rule's deterministic candidate selection never asks Jev about it, that is a **recall miss**, not a skipped sample. This makes recall useful for detecting over-narrow prefilters and AST selectors as well as weak semantic questions.
+
+Repository files are never modified; mutations exist only in memory. The command reports candidate count, sampled files, invalid originals, misses, per-mutant recall, and weakest measured recall. This slice measures recall but does not yet decide whether a rule is allowed to become `owned`.
+
+Because configuration is JSON-only, this first mutation slice deliberately supports declarative regex replacement rather than arbitrary code callbacks. AST-specific mutation helpers can be added later if real rules show the regex boundary is too limiting.
+
 ## Commands
 
 Check the configured include set:
@@ -288,6 +340,13 @@ Replay that corpus strictly offline:
 jevcheck replay
 ~~~
 
+Measure mutation recall against real code:
+
+~~~sh
+jevcheck recall
+jevcheck recall --sample-size 20
+~~~
+
 Create or refresh accepted-backlog baseline entries:
 
 ~~~sh
@@ -327,7 +386,7 @@ Credentials use the same environment variables as jev-cli.
 
 This is intentionally conservative: a new probabilistic rule cannot accidentally become a merge gate just because it was added to configuration.
 
-Fixture coverage, fresh probability calibration, thin-margin evidence, and semantic-aware drift checks exist now. A later slice should add mutation recall and then enforce those evidence requirements before `owned` status is accepted.
+Fixture coverage, fresh probability calibration, thin-margin evidence, semantic-aware drift checks, and mutation recall now exist. A later slice should combine them into explicit evidence gates before `owned` status is accepted.
 
 ## Exit codes
 
@@ -392,12 +451,12 @@ Provider choice changes transport, not lint semantics. Domain policy stays in je
 
 ## Next slices
 
-The next useful reliability work is:
+The remaining useful slices are:
 
-1. mutation recall against deterministic injected violations in real code
-2. enforced shadow-to-owned graduation gates using fixture/margin/drift/recall evidence
-3. a `rules audit` command exposing evidence and blockers
-4. related-node AST context across separate definitions/callers
+1. enforced shadow-to-owned graduation gates using fixture/margin/drift/recall evidence
+2. a `rules audit` command exposing evidence and blockers
+3. related-node AST context across separate definitions/callers
+4. optional AST-specific mutation helpers, only if declarative regex mutants prove insufficient
 
 Generated code fixes remain intentionally out of scope. Findings should feed a coding agent or deterministic refactoring tool rather than letting the semantic judge edit code itself.
 
