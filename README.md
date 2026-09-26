@@ -224,6 +224,14 @@ For non-AST rules:
 
 Keep semantic context bounded. Oversized focuses are skipped rather than silently truncated.
 
+### Context sufficiency and privacy
+
+A candidate should contain enough deterministically selected evidence for the bounded question to be answered defensibly. If the answer depends on information that is not present, improve the selector or bounded context, split the rule, or decide that the concern is not suitable for that scope. Do not add a second model judgement that asks whether the first judgement is applicable.
+
+Keep model-visible context to the smallest useful set. Depending on the configured provider, focused source code and surrounding context can leave the local machine. Do not deliberately include secrets, credentials, private keys, environment files, generated output, vendored code, or unrelated proprietary content.
+
+Context is evidence, not permission to broaden the question. Nearby code may help interpret the exact focus, but must not become an independent reason to report a violation.
+
 ## A practical rule lifecycle
 
 A useful default workflow is:
@@ -347,6 +355,14 @@ Only after the rule has earned that responsibility:
 An owned `error` finding is blocking. An owned `warning` remains non-blocking.
 
 Normal checks and replay fail closed if an owned rule's required evidence is missing, stale, or failing. `jevcheck` never silently downgrades it back to shadow.
+
+### Stop when the rule is good enough
+
+The evidence lifecycle exists to establish that a bounded rule is useful and stable, not to maximize a model probability or benchmark score.
+
+Once the semantic boundary is clear, labelled evidence separates valid from invalid cases, drift/recall/robustness are acceptable, and the rule has enough context to make the intended judgement, stop tuning it. Do not broaden the question, enlarge model-visible context, weaken graduation policy, or move the threshold merely to improve measured results.
+
+If a rule only works after those kinds of changes, prefer narrowing or splitting the rule, improving deterministic candidate selection, or leaving the concern outside `jevcheck`.
 
 ## Baselines and intentional exceptions
 
