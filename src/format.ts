@@ -1,4 +1,4 @@
-import type { CheckResult, FixtureDriftResult, FixtureRunResult } from "./types.js";
+import type { CheckResult, FixtureDriftResult, FixtureRunResult, RecallRunResult } from "./types.js";
 
 export function formatStylish(result: CheckResult): string {
   const lines: string[] = [];
@@ -276,5 +276,51 @@ export function formatFixtureDriftStylish(result: FixtureDriftResult): string {
     lines.push("  REMOVED  " + item.ruleId + "  " + item.expected + "  " + item.path);
   }
 
+  return lines.join("\n");
+}
+
+
+export function formatRecallStylish(result: RecallRunResult): string {
+  const lines: string[] = [];
+
+  for (const item of result.mutants) {
+    lines.push(
+      item.ruleId +
+        "  " +
+        item.mutantId +
+        "  " +
+        item.caught +
+        "/" +
+        item.judged +
+        " caught" +
+        (item.recall !== undefined ? "  recall=" + item.recall.toFixed(2) : "  recall=n/a") +
+        "  sampled=" +
+        item.sampled +
+        "/" +
+        item.candidateCount,
+    );
+    for (const path of item.misses) lines.push("  MISS     " + path);
+    for (const path of item.invalidOriginals) lines.push("  INVALID  " + path + "  original already violates");
+  }
+
+  for (const diagnostic of result.diagnostics) {
+    lines.push(
+      diagnostic.level.toUpperCase() +
+        "  " +
+        (diagnostic.ruleId ? diagnostic.ruleId + "  " : "") +
+        diagnostic.message,
+    );
+  }
+
+  if (!result.mutants.length) lines.push("No configured mutants.");
+  lines.push(
+    "Weakest measured recall: " +
+      (result.weakestRecall !== undefined ? result.weakestRecall.toFixed(2) : "n/a") +
+      "; " +
+      result.stats.requests +
+      " request(s), " +
+      result.stats.cacheHits +
+      " cache hit(s)",
+  );
   return lines.join("\n");
 }
