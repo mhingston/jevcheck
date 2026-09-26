@@ -259,7 +259,9 @@ The audit recomputes current fixture semantic identities deterministically and c
 
 Drift and mutation recall are persisted in the versioned, commit-friendly `.jevcheck/evidence.json` artifact. `test --drift` refreshes drift evidence and a full-scope `recall` refreshes mutation evidence. Scoped recall runs remain exploratory and do not overwrite graduation evidence.
 
-Freshness is deterministic. Drift evidence is tied to current fixture semantic identities, calibration, drift threshold, and provider/model namespace. Mutation evidence is tied to rule/candidate semantics, mutant definitions, the mutation candidate population, sampled source hashes, sample size, and provider/model namespace. Material changes make the evidence stale and require remeasurement.
+Freshness is deterministic. Drift evidence is tied to current fixture semantic identities, calibration, drift threshold, and provider/model namespace. Mutation evidence is tied to rule/candidate semantics, mutant definitions, the mutation candidate population, sampled source hashes, sample size, provider/model namespace, and the recorded per-mutant outcomes. Material changes or partial edits make the evidence stale and require remeasurement.
+
+These hashes are integrity/freshness checks, not signatures. `jevcheck.config.json` and committed evidence artifacts share the repository trust boundary; a repository author who can deliberately rewrite both is not an adversary jevcheck can cryptographically defend against.
 
 Audit remains advisory: it reports the exact blockers that normal owned-rule admission enforces, but it never rewrites rule status.
 
