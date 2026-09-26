@@ -15,6 +15,7 @@ import {
   ruleAppliesToFile,
 } from "./engine.js";
 import { discoverFiles } from "./files.js";
+import { applyMutation, stableMutationOrder } from "./mutate.js";
 import type {
   FixtureCalibrationEntry,
   FixtureDriftResult,
@@ -237,6 +238,7 @@ interface MutationIdentityOptions {
   contextLines?: number;
   include?: readonly string[];
   exclude?: readonly string[];
+  sampleSize: number;
   modelNamespace: string;
 }
 
@@ -263,13 +265,37 @@ export async function mutationEvidenceIdentity(
   options: MutationIdentityOptions,
 ): Promise<string> {
   const cwd = options.cwd ?? process.cwd();
-  const sources: Array<{ path: string; hash: string }> = [];
+  const sourceCache = new Map<string, string>();
+  const scopedPaths = [...paths]
+    .map((path) => path.replaceAll("\\", "/"))
+    .filter((path) => ruleAppliesToFile(rule, path));
 
-  for (const rawPath of [...paths].sort()) {
-    const path = rawPath.replaceAll("\\", "/");
-    if (!ruleAppliesToFile(rule, path)) continue;
-    const source = await readFile(resolve(cwd, rawPath), "utf8");
-    sources.push({ path, hash: hash(source) });
+  async function sourceFor(path: string): Promise<string> {
+    const cached = sourceCache.get(path);
+    if (cached !== undefined) return cached;
+    const source = await readFile(resolve(cwd, path), "utf8");
+    sourceCache.set(path, source);
+    return source;
+  }
+
+  const mutants = [];
+  for (const mutant of rule.mutants ?? []) {
+    const candidates: Array<{ path: string; sourceHash: string }> = [];
+    for (const path of scopedPaths) {
+      const source = await sourceFor(path);
+      if (applyMutation(source, mutant) === undefined) continue;
+      candidates.push({ path, sourceHash: hash(source) });
+    }
+
+    candidates.sort((a, b) =>
+      stableMutationOrder(rule.id, mutant.id, a.path)
+        .localeCompare(stableMutationOrder(rule.id, mutant.id, b.path)),
+    );
+    mutants.push({
+      mutantId: mutant.id,
+      candidatePaths: candidates.map((item) => item.path),
+      sampled: candidates.slice(0, options.sampleSize),
+    });
   }
 
   return hash(JSON.stringify({
@@ -285,8 +311,9 @@ export async function mutationEvidenceIdentity(
       include: [...(options.include ?? DEFAULT_SOURCE_INCLUDE)].sort(),
       exclude: [...(options.exclude ?? [])].sort(),
     },
+    sampleSize: options.sampleSize,
     modelNamespace: options.modelNamespace,
-    sources,
+    mutants,
   }));
 }
 
@@ -439,6 +466,7 @@ export async function evaluateConfiguredRuleEvidence(
         contextLines: config.contextLines,
         include,
         exclude,
+        sampleSize: recordedMutation.sampleSize,
         modelNamespace: options.modelNamespace,
       });
       if (recordedMutation.identity !== expected) {
