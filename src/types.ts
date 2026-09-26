@@ -2,7 +2,23 @@ import type { SystemOneLikeClient } from "@mhingston5/jev-cli";
 
 export type RuleSeverity = "error" | "warning";
 export type RuleStatus = "shadow" | "owned";
-export type AstLanguage = "typescript" | "tsx";
+export type AstLanguage = "javascript" | "typescript" | "tsx" | "html" | "css";
+
+export type AstSelector =
+  | { pattern: string; kind?: never; rule?: never }
+  | { kind: string; pattern?: never; rule?: never }
+  | { rule: Record<string, unknown>; pattern?: never; kind?: never };
+
+export interface AstContextConfig {
+  ancestor?: AstSelector;
+}
+
+export type AstCandidateConfig = AstSelector & {
+  language?: AstLanguage;
+  contextBefore?: number;
+  contextAfter?: number;
+  context?: AstContextConfig;
+};
 
 export interface RuleCriteria {
   true?: string;
@@ -12,13 +28,6 @@ export interface RuleCriteria {
 export interface RuleFixtures {
   valid?: string[];
   invalid?: string[];
-}
-
-export interface AstCandidateConfig {
-  language: AstLanguage;
-  rule: Record<string, unknown>;
-  contextBefore?: number;
-  contextAfter?: number;
 }
 
 export interface JevCheckRule {
@@ -58,6 +67,9 @@ export interface Candidate {
   endLine: number;
   focusStartLine: number;
   focusEndLine: number;
+  focusStartColumn?: number;
+  focusEndColumn?: number;
+  focusKind?: string;
 }
 
 export interface SourceInput {
@@ -70,6 +82,9 @@ export interface Evaluation {
   path: string;
   startLine: number;
   endLine: number;
+  startColumn?: number;
+  endColumn?: number;
+  focusKind?: string;
   probability: number;
   threshold: number;
   model: string;

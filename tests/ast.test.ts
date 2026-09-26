@@ -3,40 +3,78 @@ import { astCandidates } from "../src/ast.js";
 import { parseConfig } from "../src/config.js";
 
 describe("ast candidates", () => {
-  it("selects exact ast-grep nodes and keeps bounded surrounding context", () => {
+  it("infers TypeScript and applies checker-wide context when rule context is omitted", () => {
     const source = [
       "const before = 1;",
       "console.log(secret);",
-      "const middle = 2;",
-      "console.log(redacted);",
-      "const after = 3;",
+      "const after = 2;",
+    ].join("\n");
+
+    const result = astCandidates(
+      "src/a.ts",
+      source,
+      { pattern: "console.log($A)" },
+      200,
+      "security/no-sensitive-log",
+      1,
+    );
+
+    expect(result.candidates).toHaveLength(1);
+    expect(result.candidates[0]).toMatchObject({
+      startLine: 1,
+      endLine: 3,
+      focusStartLine: 2,
+      focusEndLine: 2,
+      focusStartColumn: 1,
+      focusKind: "call_expression",
+    });
+  });
+
+  it("supports kind selectors and nearest ancestor context while preserving exact focus", () => {
+    const source = [
+      "function run() {",
+      "  const value = secret;",
+      "  console.log(value);",
+      "}",
     ].join("\n");
 
     const result = astCandidates(
       "src/a.ts",
       source,
       {
-        language: "typescript",
-        rule: { pattern: "console.log($A)" },
-        contextBefore: 1,
-        contextAfter: 1,
+        kind: "call_expression",
+        contextBefore: 0,
+        contextAfter: 0,
+        context: { ancestor: { kind: "function_declaration" } },
       },
-      200,
-      "security/no-sensitive-log",
+      500,
+      "example",
     );
 
-    expect(result.candidates).toHaveLength(2);
+    expect(result.candidates).toHaveLength(1);
     expect(result.candidates[0]).toMatchObject({
       startLine: 1,
-      endLine: 3,
-      focusStartLine: 2,
-      focusEndLine: 2,
+      endLine: 4,
+      focusStartLine: 3,
+      focusEndLine: 3,
     });
-    expect(result.candidates[1]).toMatchObject({
-      startLine: 3,
-      endLine: 5,
-      focusStartLine: 4,
-      focusEndLine: 4,
+    expect(result.candidates[0]?.text).toContain("function run()");
+  });
+
+  it("reports UTF-16 columns even when ast-grep positions pass through UTF-8 text", () => {
+    const source = "const ü = 1; console.log(secret);";
+    const result = astCandidates(
+      "src/a.ts",
+      source,
+      { pattern: "console.log($A)", contextBefore: 0, contextAfter: 0 },
+      500,
+      "example",
+    );
+
+    expect(result.candidates[0]).toMatchObject({
+      focusStartLine: 1,
+      focusEndLine: 1,
+      focusStartColumn: source.indexOf("console.log") + 1,
     });
   });
 
@@ -45,7 +83,7 @@ describe("ast candidates", () => {
     const result = astCandidates(
       "src/a.ts",
       source,
-      { language: "typescript", rule: { pattern: "console.log($A)" } },
+      { pattern: "console.log($A)", contextBefore: 0, contextAfter: 0 },
       256,
       "example",
     );
@@ -54,16 +92,26 @@ describe("ast candidates", () => {
     expect(result.diagnostics[0]?.message).toContain("matched node exceeds chunkChars");
   });
 
-  it("validates ast configuration at config load time", () => {
+  it("warns when language inference is unavailable", () => {
+    const result = astCandidates(
+      "src/a.vue",
+      "console.log(secret);",
+      { pattern: "console.log($A)" },
+      500,
+      "example",
+    );
+
+    expect(result.candidates).toHaveLength(0);
+    expect(result.diagnostics[0]?.message).toContain("no built-in language mapping");
+  });
+
+  it("validates selector configuration", () => {
     expect(() =>
       parseConfig({
         rules: [{
           id: "example",
           question: "Does this violate the rule?",
-          ast: {
-            language: "typescript",
-            rule: { pattern: "console.log($A)" },
-          },
+          ast: { pattern: "console.log($A)" },
         }],
       }),
     ).not.toThrow();
@@ -73,12 +121,9 @@ describe("ast candidates", () => {
         rules: [{
           id: "example",
           question: "Does this violate the rule?",
-          ast: {
-            language: "javascript",
-            rule: { pattern: "console.log($A)" },
-          },
+          ast: { pattern: "console.log($A)", kind: "call_expression" },
         }],
       }),
-    ).toThrow("example.ast.language must be typescript or tsx");
+    ).toThrow("example.ast must define exactly one of pattern, kind, or rule");
   });
 });

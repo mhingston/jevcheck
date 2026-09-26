@@ -219,7 +219,15 @@ export function buildCandidates(
   }
 
   if (rule.ast) {
-    const ast = astCandidates(path, source, rule.ast, options.chunkChars, rule.id);
+    if (prefilter && !prefilter.test(source)) return { candidates: [], diagnostics };
+    const ast = astCandidates(
+      path,
+      source,
+      rule.ast,
+      options.chunkChars,
+      rule.id,
+      rule.contextLines ?? options.contextLines,
+    );
     return {
       candidates: applyCandidateFilters(ast.candidates, rule),
       diagnostics: ast.diagnostics,
