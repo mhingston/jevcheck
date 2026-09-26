@@ -80,7 +80,17 @@ Rules default to:
 - `severity: "error"`
 - `threshold: 0.8`
 
-### 4. Run it
+### 4. Inspect what Jev will see
+
+Before making a provider call, preview the exact bounded semantic request:
+
+~~~sh
+npx jevcheck inspect --rule security/no-sensitive-log src/example.ts
+~~~
+
+Use `--format json` for machine-readable output. Inspection uses the same deterministic candidate builder and semantic-request constructor as a real check, but never creates a Jev client.
+
+### 5. Run it
 
 Check the configured source set:
 
@@ -242,12 +252,23 @@ Context is evidence, not permission to broaden the question. Nearby code may hel
 A useful default workflow is:
 
 ~~~text
-author -> shadow -> fixtures -> calibrate -> drift/recall/robustness -> audit -> owned
+author -> inspect -> shadow -> fixtures -> calibrate -> drift/recall/robustness -> audit -> owned
 ~~~
 
 You do not need all of this to experiment with a shadow rule. The evidence workflow matters when you want a semantic rule to become a blocking reviewer.
 
-### 1. Start in shadow
+### 1. Inspect the evidence envelope
+
+Use `jevcheck inspect` while shaping a rule to verify the exact focus, bounded context, question, criteria, semantic fingerprint, and model-visible source before spending a provider call.
+
+~~~sh
+npx jevcheck inspect --rule reliability/unbounded-retry src/client.ts
+npx jevcheck inspect --changed --base origin/main --format json
+~~~
+
+If the preview contains unrelated code or lacks evidence needed for a defensible YES/NO judgement, fix deterministic selection or bounded context first.
+
+### 2. Start in shadow
 
 ~~~json
 {
@@ -259,7 +280,7 @@ You do not need all of this to experiment with a shadow rule. The evidence workf
 
 Run it against real changes and inspect where it is right or wrong.
 
-### 2. Add labelled fixtures
+### 3. Add labelled fixtures
 
 ~~~json
 {
@@ -278,7 +299,7 @@ npx jevcheck test
 
 Fixtures answer a basic question: can the rule distinguish examples you believe are valid and invalid?
 
-### 3. Record calibration
+### 4. Record calibration
 
 When the fixtures pass:
 
@@ -296,7 +317,7 @@ npx jevcheck test --drift
 
 Drift checks intentionally bypass the normal answer cache.
 
-### 4. Measure mutation recall
+### 5. Measure mutation recall
 
 Fixtures are curated. Mutation recall checks whether the rule still catches known violations inserted into real repository code.
 
@@ -323,7 +344,7 @@ npx jevcheck recall
 
 Repository files are never modified; mutations exist only in memory.
 
-### 5. Probe semantic robustness
+### 6. Probe semantic robustness
 
 Fixtures and mutation recall test whether a rule catches the right semantic changes. Robustness probes the opposite failure mode: whether model-visible text that should be irrelevant can change the judgement.
 
@@ -339,7 +360,7 @@ The command keeps the selected source and semantic focus unchanged, then re-runs
 
 It reports probability movement and classification flips, and records freshness-aware results in `.jevcheck/evidence.json` only when every expected fixture/perturbation case was measured. Incomplete runs surface diagnostics and do not overwrite durable evidence. Robustness is intentionally advisory for now: flips appear as audit warnings rather than silently changing graduation policy.
 
-### 6. Audit the evidence
+### 7. Audit the evidence
 
 ~~~sh
 npx jevcheck rules audit
@@ -347,7 +368,7 @@ npx jevcheck rules audit
 
 The audit reports whether each rule has the evidence required to act as an owned rule and explains any blockers. It also shows advisory threshold-separation diagnostics from current labelled calibration and persisted robustness results. If valid and invalid fixture probabilities overlap, the audit says explicitly that no single threshold can separate the labelled fixtures rather than encouraging threshold tuning.
 
-### 7. Promote to owned
+### 8. Promote to owned
 
 Only after the rule has earned that responsibility:
 
@@ -462,6 +483,7 @@ These evidence files contain hashes and evaluation metadata rather than a second
 | `jevcheck record` | Record semantic decisions for replay |
 | `jevcheck replay` | Re-run the recorded decisions strictly offline |
 | `jevcheck list` | List configured rules without provider credentials |
+| `jevcheck inspect` | Preview exact semantic requests without a provider call |
 
 Use `--format json` for machine-readable output.
 
@@ -552,7 +574,7 @@ The default graduation policy requires:
 - configured and measured mutants
 - minimum mutation recall of 0.90
 - no zero-judged mutants
-- rule `source` provenance
+- rule `source` provenance; local source files are resolved and fingerprinted
 
 You can override the small global policy surface when there is a deliberate reason:
 
@@ -581,7 +603,9 @@ npx jevcheck rules audit
 npx jevcheck
 ~~~
 
-Changing only `status` does not stale semantic evidence. Changes to the semantic request, threshold, candidate semantics, relevant mutation inputs, calibration, or provider/model identity can.
+Changing only `status` does not stale semantic evidence. Changes to the semantic request, threshold, candidate semantics, relevant mutation inputs, calibration, provider/model identity, or the contents of a referenced local policy source can.
+
+For a local source such as `docs/security.md#logging`, jevcheck fingerprints the referenced file content together with the source reference. If that file changes or disappears, persisted rule evidence becomes stale and an owned rule fails closed until its evidence is reviewed and refreshed. The fragment is provenance for humans; freshness currently hashes the whole referenced file conservatively. HTTP(S) sources remain valid provenance but cannot be freshness-verified offline.
 
 ## Exit codes
 
