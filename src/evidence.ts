@@ -52,6 +52,12 @@ export interface RuleDriftEvidence {
   thinMargins: string[];
 }
 
+export interface RuleRobustnessEvidence {
+  cases: number;
+  flips: string[];
+  maxProbabilityDelta: number;
+}
+
 export interface RuleEvidenceInputs {
   fixtures: readonly CurrentFixtureEvidence[];
   fixtureDiagnostics?: readonly Diagnostic[];
@@ -61,6 +67,8 @@ export interface RuleEvidenceInputs {
   driftError?: string;
   mutation?: readonly RecallMutantResult[];
   mutationError?: string;
+  robustness?: RuleRobustnessEvidence;
+  robustnessError?: string;
 }
 
 export const DEFAULT_RULE_EVIDENCE_POLICY: RuleEvidencePolicy = {
@@ -255,6 +263,10 @@ export function evaluateRuleEvidence(
     fixture: CurrentFixtureEvidence;
     calibration: FixtureCalibrationEntry;
   }> = [];
+  const semanticallyCurrentCalibration: Array<{
+    fixture: CurrentFixtureEvidence;
+    calibration: FixtureCalibrationEntry;
+  }> = [];
 
   if (evidence.calibration) {
     for (const fixture of fixtures) {
@@ -263,12 +275,13 @@ export function evaluateRuleEvidence(
         missingCalibration.push(fixture);
         continue;
       }
-      if (recorded.threshold !== fixture.threshold) {
-        staleCalibration.push({ fixture, reason: "threshold" });
-        continue;
-      }
       if (!sameStrings(recorded.semanticKeys, fixture.semanticKeys)) {
         staleCalibration.push({ fixture, reason: "semantic-inputs" });
+        continue;
+      }
+      semanticallyCurrentCalibration.push({ fixture, calibration: recorded });
+      if (recorded.threshold !== fixture.threshold) {
+        staleCalibration.push({ fixture, reason: "threshold" });
         continue;
       }
       currentCalibration.push({ fixture, calibration: recorded });
@@ -391,6 +404,63 @@ export function evaluateRuleEvidence(
         : "current for all " + fixtures.length + " fixture(s)",
   });
 
+  const calibratedValid = semanticallyCurrentCalibration.filter(
+    ({ fixture }) => fixture.expected === "valid",
+  );
+  const calibratedInvalid = semanticallyCurrentCalibration.filter(
+    ({ fixture }) => fixture.expected === "invalid",
+  );
+  if (!calibratedValid.length || !calibratedInvalid.length) {
+    checks.push({
+      id: "threshold-separation",
+      status: "warn",
+      message: "need semantically current valid and invalid calibration to measure threshold separation",
+    });
+  } else {
+    const validMax = Math.max(...calibratedValid.map(({ calibration }) => calibration.probability));
+    const invalidMin = Math.min(...calibratedInvalid.map(({ calibration }) => calibration.probability));
+    const separation = invalidMin - validMax;
+    const threshold = rule.threshold ?? DEFAULT_THRESHOLD;
+    const interval = "(" + validMax.toFixed(3) + ", " + invalidMin.toFixed(3) + "]";
+    if (separation <= 0) {
+      checks.push({
+        id: "threshold-separation",
+        status: "warn",
+        message:
+          "fixture probabilities overlap: valid max=" +
+          validMax.toFixed(3) +
+          ", invalid min=" +
+          invalidMin.toFixed(3) +
+          "; no threshold separates the current labelled fixtures",
+      });
+    } else if (threshold <= validMax || threshold > invalidMin) {
+      checks.push({
+        id: "threshold-separation",
+        status: "warn",
+        message:
+          "observed separating interval " +
+          interval +
+          " with separation=" +
+          separation.toFixed(3) +
+          "; current threshold=" +
+          threshold.toFixed(3) +
+          " is outside it",
+      });
+    } else {
+      checks.push({
+        id: "threshold-separation",
+        status: "pass",
+        message:
+          "observed separating interval " +
+          interval +
+          " with separation=" +
+          separation.toFixed(3) +
+          "; current threshold=" +
+          threshold.toFixed(3),
+      });
+    }
+  }
+
   if (evidence.driftError) {
     checks.push({
       id: "drift",
@@ -414,6 +484,49 @@ export function evaluateRuleEvidence(
       id: "drift",
       status: driftProblems.length ? statusFor(policy.requireCleanDrift) : "pass",
       message: driftProblems.length ? driftProblems.join("; ") : "clean",
+    });
+  }
+
+  if (evidence.robustnessError) {
+    checks.push({
+      id: "robustness",
+      status: "warn",
+      message: evidence.robustnessError,
+    });
+  } else if (!evidence.robustness) {
+    checks.push({
+      id: "robustness",
+      status: "warn",
+      message: "no persisted/current robustness evidence available; run jevcheck test --robustness",
+    });
+  } else if (evidence.robustness.cases === 0) {
+    checks.push({
+      id: "robustness",
+      status: "warn",
+      message: "robustness evidence contains no perturbation cases",
+    });
+  } else if (evidence.robustness.flips.length) {
+    checks.push({
+      id: "robustness",
+      status: "warn",
+      message:
+        evidence.robustness.flips.length +
+        " classification flip(s) across " +
+        evidence.robustness.cases +
+        " perturbation case(s): " +
+        evidence.robustness.flips.join(", ") +
+        "; max |Δp|=" +
+        evidence.robustness.maxProbabilityDelta.toFixed(3),
+    });
+  } else {
+    checks.push({
+      id: "robustness",
+      status: "pass",
+      message:
+        "0 classification flips across " +
+        evidence.robustness.cases +
+        " perturbation case(s); max |Δp|=" +
+        evidence.robustness.maxProbabilityDelta.toFixed(3),
     });
   }
 
