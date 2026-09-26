@@ -9,6 +9,7 @@ import {
   mutationEvidenceIdentity,
   persistDriftEvidence,
   persistMutationEvidence,
+  readRuleEvidenceArtifact,
 } from "../src/evidence-store.js";
 import type {
   FixtureRunResult,
@@ -52,6 +53,75 @@ function rule(status: "shadow" | "owned" = "shadow"): JevCheckRule {
 }
 
 describe("persisted rule evidence", () => {
+  it("rejects malformed persisted mutant measurements instead of trusting them", async () => {
+    const cwd = await mkdtemp(join(tmpdir(), "jevcheck-invalid-evidence-"));
+    const path = join(cwd, "evidence.json");
+    const baseMutant = {
+      ruleId: "security/no-secret-log",
+      mutantId: "inject-secret",
+      candidateCount: 1,
+      sampled: 1,
+      judged: 1,
+      caught: 1,
+      recall: 1,
+      misses: [],
+      invalidOriginals: [],
+    };
+
+    const cases: Array<[string, Record<string, unknown>, string]> = [
+      ["negative judged", { ...baseMutant, judged: -1 }, ".judged must be a non-negative integer"],
+      ["impossible caught", { ...baseMutant, caught: 2 }, ".caught must not exceed judged"],
+      ["inconsistent recall", { ...baseMutant, recall: 0.5 }, ".recall must equal caught / judged"],
+      ["wrong rule", { ...baseMutant, ruleId: "other" }, ".ruleId must match parent ruleId"],
+    ];
+
+    for (const [, mutant, expected] of cases) {
+      await writeFile(path, JSON.stringify({
+        version: 1,
+        drift: [],
+        mutation: [{
+          ruleId: "security/no-secret-log",
+          identity: "identity",
+          modelNamespace: "typesafe:default",
+          sampleSize: 12,
+          mutants: [mutant],
+        }],
+      }));
+
+      await expect(readRuleEvidenceArtifact(path)).rejects.toThrow(expected);
+    }
+  });
+
+  it("rejects duplicate persisted mutant identities", async () => {
+    const cwd = await mkdtemp(join(tmpdir(), "jevcheck-duplicate-evidence-"));
+    const path = join(cwd, "evidence.json");
+    const mutant = {
+      ruleId: "security/no-secret-log",
+      mutantId: "inject-secret",
+      candidateCount: 1,
+      sampled: 1,
+      judged: 1,
+      caught: 1,
+      recall: 1,
+      misses: [],
+      invalidOriginals: [],
+    };
+    await writeFile(path, JSON.stringify({
+      version: 1,
+      drift: [],
+      mutation: [{
+        ruleId: "security/no-secret-log",
+        identity: "identity",
+        modelNamespace: "typesafe:default",
+        sampleSize: 12,
+        mutants: [mutant, mutant],
+      }],
+    }));
+
+    await expect(readRuleEvidenceArtifact(path))
+      .rejects.toThrow("duplicate mutantId: inject-secret");
+  });
+
   it("survives shadow to owned but becomes stale when sampled mutation inputs change", async () => {
     const cwd = await mkdtemp(join(tmpdir(), "jevcheck-evidence-store-"));
     await mkdir(join(cwd, "fixtures"), { recursive: true });
