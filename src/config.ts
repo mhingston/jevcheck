@@ -154,6 +154,46 @@ function validateRule(value: unknown, index: number): JevCheckRule {
     nonEmptyStrings(fixtures.invalid, rule.id + ".fixtures.invalid");
   }
 
+  if (rule.mutants !== undefined) {
+    if (!Array.isArray(rule.mutants) || rule.mutants.length === 0) {
+      throw new Error(rule.id + ".mutants must be a non-empty array");
+    }
+    const mutantIds = new Set<string>();
+    for (const [mutantIndex, value] of rule.mutants.entries()) {
+      if (!value || typeof value !== "object" || Array.isArray(value)) {
+        throw new Error(rule.id + ".mutants[" + mutantIndex + "] must be an object");
+      }
+      const mutant = value as Record<string, unknown>;
+      if (typeof mutant.id !== "string" || !mutant.id.trim()) {
+        throw new Error(rule.id + ".mutants[" + mutantIndex + "].id must be non-empty");
+      }
+      if (mutantIds.has(mutant.id)) {
+        throw new Error(rule.id + ".mutants contains duplicate id: " + mutant.id);
+      }
+      mutantIds.add(mutant.id);
+      if (typeof mutant.pattern !== "string" || !mutant.pattern.trim()) {
+        throw new Error(rule.id + ".mutants[" + mutantIndex + "].pattern must be non-empty");
+      }
+      if (typeof mutant.replacement !== "string") {
+        throw new Error(rule.id + ".mutants[" + mutantIndex + "].replacement must be a string");
+      }
+      if (mutant.replaceAll !== undefined && typeof mutant.replaceAll !== "boolean") {
+        throw new Error(rule.id + ".mutants[" + mutantIndex + "].replaceAll must be a boolean");
+      }
+      try {
+        compilePattern(mutant.pattern, mutant.replaceAll === true);
+      } catch (error) {
+        throw new Error(
+          rule.id +
+          ".mutants[" +
+          mutantIndex +
+          "].pattern is not a valid regular expression: " +
+          String(error),
+        );
+      }
+    }
+  }
+
   return rule as unknown as JevCheckRule;
 }
 
