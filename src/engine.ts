@@ -9,6 +9,7 @@ import {
   inlineSuppressionReason,
   normalizedFindingText,
 } from "./baseline.js";
+import { FIXTURE_THIN_MARGIN } from "./calibration.js";
 import { buildCandidates } from "./candidates.js";
 import { discoverFiles } from "./files.js";
 import { semanticDecisionKey } from "./replay.js";
@@ -338,6 +339,7 @@ export function createJevCheck(options: JevCheckOptions): JevCheck {
           model,
           cached,
           replayed,
+          semanticKey: replayIdentity.key,
           violates: probability >= threshold,
           ruleHash: rHash,
           codeHash,
@@ -445,16 +447,32 @@ export function createJevCheck(options: JevCheckOptions): JevCheck {
           );
           mergeStats(stats, fixtureResult.stats);
           diagnostics.push(...fixtureResult.diagnostics);
-          const probabilities = fixtureResult.evaluations.map((item) => item.probability);
-          const maxProbability = probabilities.length ? Math.max(...probabilities) : 0;
+          const strongest = fixtureResult.evaluations.reduce<Evaluation | undefined>(
+            (best, item) => (!best || item.probability > best.probability ? item : best),
+            undefined,
+          );
+          const maxProbability = strongest?.probability ?? 0;
+          const threshold = rule.threshold ?? DEFAULT_THRESHOLD;
           const violated = fixtureResult.evaluations.some((item) => item.violates);
+          const passed = expected === "invalid" ? violated : !violated;
+          const margin = Number(
+            (
+              expected === "invalid"
+                ? maxProbability - threshold
+                : threshold - maxProbability
+            ).toFixed(6),
+          );
           tests.push({
             ruleId: rule.id,
             path,
             expected,
-            passed: expected === "invalid" ? violated : !violated,
+            passed,
             maxProbability,
-            threshold: rule.threshold ?? DEFAULT_THRESHOLD,
+            threshold,
+            margin,
+            thinMargin: passed && margin <= FIXTURE_THIN_MARGIN,
+            semanticKeys: [...new Set(fixtureResult.evaluations.map((item) => item.semanticKey))].sort(),
+            model: strongest?.model,
           });
         }
       }

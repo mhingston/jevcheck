@@ -23,6 +23,26 @@ describe("parseConfig", () => {
     ).toThrow("replayFile must be a non-empty string");
   });
 
+  it("validates calibrationFile when configured", () => {
+    expect(() =>
+      parseConfig({
+        calibrationFile: "",
+        rules: [{ id: "example", question: "Is this a violation?" }],
+      }),
+    ).toThrow("calibrationFile must be a non-empty string");
+  });
+
+  it("validates driftThreshold when configured", () => {
+    for (const driftThreshold of [1.1, -0.1, Number.NaN, Number.POSITIVE_INFINITY]) {
+      expect(() =>
+        parseConfig({
+          driftThreshold,
+          rules: [{ id: "example", question: "Is this a violation?" }],
+        }),
+      ).toThrow("driftThreshold must be between 0 and 1");
+    }
+  });
+
   it("validates nested fixture pattern arrays", () => {
     expect(() =>
       parseConfig({

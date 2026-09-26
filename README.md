@@ -43,11 +43,12 @@ The model does semantic judgment. Code owns everything deterministic.
 - accepted-backlog baselines and reasoned inline suppressions
 - versioned, commit-able semantic replay corpora for offline evaluation
 - strict offline replay with explicit coverage misses and no provider fallback
+- versioned fixture calibration with thin-margin and fresh-run drift reporting
 - stylish, JSON, and SARIF output
 - rule/model/code fingerprints and stable finding fingerprints
 - bundled agent skill, CI, and package metadata
 
-Calibration/drift, mutation recall, and enforced graduation gates remain deliberately separate follow-up slices.
+Mutation recall and enforced graduation gates remain deliberately separate follow-up slices.
 
 ## Development
 
@@ -77,6 +78,8 @@ Create `jevcheck.config.json`:
   "exclude": ["**/*.test.ts"],
   "baselineFile": ".jevcheck/baseline.json",
   "replayFile": ".jevcheck/replay.json",
+  "calibrationFile": ".jevcheck/calibration.json",
+  "driftThreshold": 0.1,
   "rules": [
     {
       "id": "security/no-sensitive-log",
@@ -199,6 +202,41 @@ Replay never falls back to the ordinary answer cache or a provider. Missing corp
 
 This is regression evidence, not ground truth. Replaying an old model decision proves that deterministic policy and candidate changes can be evaluated reproducibly; it does not prove that the original semantic judgment was correct.
 
+### Fixture calibration and drift
+
+Replay answers "can I reproduce the same semantic decisions without asking again?" Calibration answers a different question: "when I **do** ask again, have fixture probabilities moved?"
+
+Record the current labelled fixture probabilities:
+
+~~~sh
+jevcheck test --record
+~~~
+
+The default file is `.jevcheck/calibration.json`. It is versioned, deterministic, and commit-friendly. Each fixture entry records rule, path, expected label, strongest probability, threshold, model label, and the exact semantic request hashes used for the fixture.
+
+Recording bypasses the ordinary answer cache and only writes calibration when the fixture run is non-empty and passing.
+
+Run a fresh comparison later:
+
+~~~sh
+jevcheck test --drift
+~~~
+
+Drift deliberately bypasses jevcheck's answer cache so every fixture is re-asked. It reports:
+
+- mean absolute probability movement across comparable fixtures
+- fixtures whose probability moved by at least the configured `driftThreshold` (default 0.10)
+- **STALE** fixtures whose semantic request hashes or configured threshold changed
+- newly added fixtures
+- fixtures present in the recorded calibration but no longer in the current suite
+- before/after model labels when available
+
+Only fixtures with unchanged semantic request identities and threshold are compared for drift. If fixture code, the rule question/criteria, focus, model-visible context, or threshold changes, jevcheck reports the calibration as **STALE** rather than mixing a changed evaluation policy into the model-drift comparison.
+
+A fixture that still passes but sits 0.05 or less from its rule threshold is marked `THIN`. Thin margins are warning evidence. Significant drift, stale calibration, added/removed fixtures, ordinary fixture failures, or diagnostics make `test --drift` exit non-zero.
+
+Calibration is not accuracy proof. It detects movement relative to labelled examples; fixture quality and representativeness still matter.
+
 ## Commands
 
 Check the configured include set:
@@ -229,6 +267,13 @@ Run labelled fixtures:
 
 ~~~sh
 jevcheck test
+~~~
+
+Record fixture calibration or compare fresh drift:
+
+~~~sh
+jevcheck test --record
+jevcheck test --drift
 ~~~
 
 Record a reusable semantic decision corpus:
@@ -282,7 +327,7 @@ Credentials use the same environment variables as jev-cli.
 
 This is intentionally conservative: a new probabilistic rule cannot accidentally become a merge gate just because it was added to configuration.
 
-Fixture coverage exists now. A later slice should make graduation stricter by enforcing labelled precision/recall, calibration margin, mutation recall, and drift requirements before `owned` status is accepted.
+Fixture coverage, fresh probability calibration, thin-margin evidence, and semantic-aware drift checks exist now. A later slice should add mutation recall and then enforce those evidence requirements before `owned` status is accepted.
 
 ## Exit codes
 
@@ -347,13 +392,12 @@ Provider choice changes transport, not lint semantics. Domain policy stays in je
 
 ## Next slices
 
-The next useful reliability work is to turn recorded decisions and labelled fixtures into stronger quality evidence:
+The next useful reliability work is:
 
-1. recorded fixture probabilities and drift checks
-2. related-node AST context across separate definitions/callers
-3. mutation recall
-4. enforced shadow-to-owned graduation gates
-5. a `rules audit` command exposing evidence and blockers
+1. mutation recall against deterministic injected violations in real code
+2. enforced shadow-to-owned graduation gates using fixture/margin/drift/recall evidence
+3. a `rules audit` command exposing evidence and blockers
+4. related-node AST context across separate definitions/callers
 
 Generated code fixes remain intentionally out of scope. Findings should feed a coding agent or deterministic refactoring tool rather than letting the semantic judge edit code itself.
 

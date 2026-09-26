@@ -174,6 +174,31 @@ describe("createJevCheck", () => {
     expect(result.suppressedFindings[0]?.suppression).toBe("baseline");
   });
 
+  it("marks a passing fixture exactly 0.05 from threshold as thin", async () => {
+    class BoundaryClient implements SystemOneLikeClient {
+      async systemOne(): Promise<SystemOneResponse> {
+        return {
+          model: "boundary-jev",
+          answers: { violation: { type: "noul", noul: 0.75 } },
+        };
+      }
+    }
+    const cwd = await mkdtemp(join(tmpdir(), "jevcheck-thin-"));
+    await mkdir(join(cwd, "fixtures"), { recursive: true });
+    await writeFile(join(cwd, "fixtures", "valid.ts"), "console.log(redacted);");
+    const checker = createJevCheck({
+      client: new BoundaryClient(),
+      rules: [{
+        id: "boundary",
+        question: "Is this a violation?",
+        threshold: 0.8,
+        fixtures: { valid: ["fixtures/valid.ts"] },
+      }],
+    });
+    const result = await checker.testFixtures(cwd);
+    expect(result.tests[0]).toMatchObject({ passed: true, margin: 0.05, thinMargin: true });
+  });
+
   it("runs fixtures even when production file globs do not match the fixture path", async () => {
     const cwd = await mkdtemp(join(tmpdir(), "jevcheck-"));
     const validDir = join(cwd, "fixtures", "valid");
@@ -200,5 +225,23 @@ describe("createJevCheck", () => {
     const result = await checker.testFixtures(cwd);
     expect(result.tests).toHaveLength(2);
     expect(result.tests.every((test) => test.passed)).toBe(true);
+    expect(result.tests).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        expected: "valid",
+        maxProbability: 0.05,
+        margin: 0.75,
+        thinMargin: false,
+        semanticKeys: [expect.any(String)],
+        model: "fake-jev",
+      }),
+      expect.objectContaining({
+        expected: "invalid",
+        maxProbability: 0.95,
+        margin: 0.15,
+        thinMargin: false,
+        semanticKeys: [expect.any(String)],
+        model: "fake-jev",
+      }),
+    ]));
   });
 });

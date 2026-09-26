@@ -100,7 +100,13 @@ function validateRule(value: unknown, index: number): JevCheckRule {
   if (rule.status !== undefined && rule.status !== "shadow" && rule.status !== "owned") {
     throw new Error(rule.id + ".status must be shadow or owned");
   }
-  if (rule.threshold !== undefined && (typeof rule.threshold !== "number" || rule.threshold < 0 || rule.threshold > 1)) {
+  if (
+    rule.threshold !== undefined &&
+    (typeof rule.threshold !== "number" ||
+      !Number.isFinite(rule.threshold) ||
+      rule.threshold < 0 ||
+      rule.threshold > 1)
+  ) {
     throw new Error(rule.id + ".threshold must be between 0 and 1");
   }
   validateNonNegativeInteger(rule.contextLines, rule.id + ".contextLines");
@@ -169,6 +175,15 @@ export function parseConfig(value: unknown): JevCheckConfig {
   if (typeof config.chunkChars === "number" && config.chunkChars < 256) {
     throw new Error("chunkChars must be at least 256");
   }
+  if (
+    config.driftThreshold !== undefined &&
+    (typeof config.driftThreshold !== "number" ||
+      !Number.isFinite(config.driftThreshold) ||
+      config.driftThreshold < 0 ||
+      config.driftThreshold > 1)
+  ) {
+    throw new Error("driftThreshold must be between 0 and 1");
+  }
 
   return {
     include: nonEmptyStrings(config.include, "include"),
@@ -179,6 +194,8 @@ export function parseConfig(value: unknown): JevCheckConfig {
     cacheFile: optionalNonEmptyString(config.cacheFile, "cacheFile"),
     baselineFile: optionalNonEmptyString(config.baselineFile, "baselineFile"),
     replayFile: optionalNonEmptyString(config.replayFile, "replayFile"),
+    calibrationFile: optionalNonEmptyString(config.calibrationFile, "calibrationFile"),
+    driftThreshold: config.driftThreshold as number | undefined,
     suppressionMarker: optionalNonEmptyString(config.suppressionMarker, "suppressionMarker"),
     rules,
   };
