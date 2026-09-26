@@ -32,6 +32,17 @@ class FakeClient implements SystemOneLikeClient {
   }
 }
 
+function readyEvidence(ruleId: string) {
+  return [{
+    ruleId,
+    currentStatus: "owned" as const,
+    checks: [],
+    blockers: [],
+    warnings: [],
+    readyForOwned: true,
+  }];
+}
+
 const astRule = {
   id: "security/no-secret-log",
   question: "Does this code log a secret?",
@@ -46,6 +57,57 @@ const astRule = {
 };
 
 describe("createJevCheck", () => {
+  it("fails closed when an owned rule has no evidence report", () => {
+    expect(() =>
+      createJevCheck({
+        client: new FakeClient(),
+        rules: [{
+          id: "owned-without-evidence",
+          question: "Is this a violation?",
+          status: "owned",
+        }],
+      }),
+    ).toThrow("Rule owned-without-evidence cannot be owned");
+  });
+
+  it("fails closed with the evaluator blockers", () => {
+    expect(() =>
+      createJevCheck({
+        client: new FakeClient(),
+        rules: [{
+          id: "owned-blocked",
+          question: "Is this a violation?",
+          status: "owned",
+        }],
+        ruleEvidenceReports: [{
+          ruleId: "owned-blocked",
+          currentStatus: "owned",
+          checks: [],
+          blockers: ["mutation recall 0.80 < required 0.90"],
+          warnings: [],
+          readyForOwned: false,
+        }],
+      }),
+    ).toThrow("mutation recall 0.80 < required 0.90");
+  });
+
+  it("keeps owned status non-blocking in explicit measurement mode", async () => {
+    const checker = createJevCheck({
+      client: new FakeClient(),
+      mode: "measure",
+      rules: [{
+        id: "measurement",
+        question: "Does this code log a secret?",
+        status: "owned",
+        threshold: 0.8,
+        prefilter: "console\\.log",
+      }],
+    });
+
+    const result = await checker.checkSource("src/a.ts", "console.log(secret);");
+    expect(result.findings[0]).toMatchObject({ status: "owned", blocking: false });
+  });
+
   it("uses deterministic prefilters before Jev and marks owned errors as blocking", async () => {
     const client = new FakeClient();
     const checker = createJevCheck({
@@ -59,6 +121,7 @@ describe("createJevCheck", () => {
         prefilter: "console\\.log",
         threshold: 0.8,
       }],
+      ruleEvidenceReports: readyEvidence("security/no-secret-log"),
     });
 
     const clean = await checker.checkSource("src/a.ts", "const value = 1;");
@@ -107,6 +170,7 @@ describe("createJevCheck", () => {
         status: "owned",
         threshold: 0.8,
       }],
+      ruleEvidenceReports: readyEvidence("security/no-secret-log"),
     });
 
     const source = [
@@ -123,7 +187,7 @@ describe("createJevCheck", () => {
 
   it("passes exact AST focus metadata to Jev and the result", async () => {
     const client = new FakeClient();
-    const checker = createJevCheck({ client, rules: [astRule] });
+    const checker = createJevCheck({ client, rules: [astRule], ruleEvidenceReports: readyEvidence(astRule.id) });
     const result = await checker.checkSource("src/a.ts", "const x = 1; console.log(secret);");
 
     expect(result.findings[0]).toMatchObject({
@@ -144,7 +208,7 @@ describe("createJevCheck", () => {
       "// jevcheck-ignore security/no-secret-log -- value is redacted by the logger wrapper",
       "console.log(secret);",
     ].join("\n");
-    const checker = createJevCheck({ client: new FakeClient(), rules: [astRule] });
+    const checker = createJevCheck({ client: new FakeClient(), rules: [astRule], ruleEvidenceReports: readyEvidence(astRule.id) });
 
     const result = await checker.checkSource("src/a.ts", source);
 
@@ -158,13 +222,14 @@ describe("createJevCheck", () => {
 
   it("suppresses an unchanged finding when its fingerprint is in the baseline", async () => {
     const source = "console.log(secret);";
-    const first = await createJevCheck({ client: new FakeClient(), rules: [astRule] }).checkSource("src/a.ts", source);
+    const first = await createJevCheck({ client: new FakeClient(), rules: [astRule], ruleEvidenceReports: readyEvidence(astRule.id) }).checkSource("src/a.ts", source);
     const fingerprint = first.findings[0]?.fingerprint;
     expect(fingerprint).toBeDefined();
 
     const checker = createJevCheck({
       client: new FakeClient(),
       rules: [astRule],
+      ruleEvidenceReports: readyEvidence(astRule.id),
       baseline: [{ ruleId: astRule.id, path: "src/a.ts", fingerprint: fingerprint! }],
     });
     const result = await checker.checkSource("src/a.ts", source);
