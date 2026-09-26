@@ -38,7 +38,12 @@ function validateEntry(value: unknown, index: number): FixtureCalibrationEntry {
     throw new Error("calibration.fixtures[" + index + "].expected must be valid or invalid");
   }
   for (const field of ["probability", "threshold"] as const) {
-    if (typeof entry[field] !== "number" || entry[field] < 0 || entry[field] > 1) {
+    if (
+      typeof entry[field] !== "number" ||
+      !Number.isFinite(entry[field]) ||
+      entry[field] < 0 ||
+      entry[field] > 1
+    ) {
       throw new Error("calibration.fixtures[" + index + "]." + field + " must be between 0 and 1");
     }
   }
@@ -105,6 +110,17 @@ export async function readCalibration(path: string): Promise<FixtureCalibrationE
 }
 
 export function calibrationEntries(tests: readonly FixtureTestResult[]): FixtureCalibrationEntry[] {
+  for (const test of tests) {
+    if (test.semanticKeys.length === 0) {
+      throw new Error(
+        "fixture " +
+        test.ruleId +
+        " / " +
+        test.path +
+        " produced no semantic evaluations and cannot be calibrated",
+      );
+    }
+  }
   return tests
     .map((test) => ({
       ruleId: test.ruleId,
@@ -152,16 +168,20 @@ export function compareCalibration(
   for (const after of current) {
     const before = beforeByKey.get(fixtureCalibrationKey(after));
     if (!before) continue;
-    if (
+    const semanticInputsChanged =
       before.semanticKeys.length !== after.semanticKeys.length ||
-      before.semanticKeys.some((key, index) => key !== after.semanticKeys[index])
-    ) {
+      before.semanticKeys.some((key, index) => key !== after.semanticKeys[index]);
+    const thresholdChanged = before.threshold !== after.threshold;
+    if (semanticInputsChanged || thresholdChanged) {
       stale.push({
         ruleId: after.ruleId,
         path: after.path,
         expected: after.expected,
+        reason: semanticInputsChanged ? "semantic-inputs" : "threshold",
         beforeSemanticKeys: before.semanticKeys,
         afterSemanticKeys: after.semanticKeys,
+        beforeThreshold: before.threshold,
+        afterThreshold: after.threshold,
       });
       continue;
     }
@@ -187,7 +207,7 @@ export function compareCalibration(
     compared: compared.length,
     meanAbsoluteDelta,
     moved: compared
-      .filter((item) => item.delta >= driftThreshold)
+      .filter((item) => item.delta > 0 && item.delta >= driftThreshold)
       .sort((a, b) => b.delta - a.delta || a.ruleId.localeCompare(b.ruleId) || a.path.localeCompare(b.path)),
     stale: stale.sort((a, b) => a.ruleId.localeCompare(b.ruleId) || a.path.localeCompare(b.path)),
     added: current.filter((entry) => !beforeByKey.has(fixtureCalibrationKey(entry))),
