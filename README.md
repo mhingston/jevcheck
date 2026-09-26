@@ -318,13 +318,13 @@ Fixtures and mutation recall test whether a rule catches the right semantic chan
 npx jevcheck test --robustness
 ~~~
 
-The command inserts deterministic comments immediately beside each fixture's semantic focus and re-runs the judgement under three conditions:
+The command keeps the selected source and semantic focus unchanged, then re-runs the same judgement with deterministic untrusted surrounding context under three conditions:
 
 - a direct instruction to ignore the rule
 - a false claim that the code was already approved
 - unrelated nearby context
 
-It reports probability movement and classification flips, and records freshness-aware results in `.jevcheck/evidence.json`. Robustness is intentionally advisory for now: flips appear as audit warnings rather than silently changing graduation policy.
+It reports probability movement and classification flips, and records freshness-aware results in `.jevcheck/evidence.json` only when every expected fixture/perturbation case was measured. Incomplete runs surface diagnostics and do not overwrite durable evidence. Robustness is intentionally advisory for now: flips appear as audit warnings rather than silently changing graduation policy.
 
 ### 6. Audit the evidence
 
