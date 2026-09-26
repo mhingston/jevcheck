@@ -233,8 +233,11 @@ export interface FixtureDriftStale {
   ruleId: string;
   path: string;
   expected: "valid" | "invalid";
+  reason: "semantic-inputs" | "threshold";
   beforeSemanticKeys: string[];
   afterSemanticKeys: string[];
+  beforeThreshold: number;
+  afterThreshold: number;
 }
 
 export interface FixtureDriftResult {
