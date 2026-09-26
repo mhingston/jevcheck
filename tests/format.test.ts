@@ -19,6 +19,7 @@ function resultForPath(path: string, columns = false): CheckResult {
       threshold: 0.8,
       model: "jev",
       cached: false,
+      semanticKey: "semantic-a",
       violates: true,
       ruleHash: "rule",
       codeHash: "code",

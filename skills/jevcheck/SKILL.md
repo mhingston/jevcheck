@@ -76,7 +76,9 @@ Later, re-ask every fixture without the answer cache and compare against that ca
 jevcheck test --drift
 ~~~
 
-Treat a `THIN` passing fixture (less than 0.05 from the threshold) as weak evidence that deserves review. Treat probability movement of 0.10 or more as notable drift worth investigating. Neither is automatically a correctness failure: inspect whether the model changed, the semantic rule changed, or the fixture itself changed.
+Treat a `THIN` passing fixture (less than 0.05 from the threshold) as weak evidence that deserves review. Calibration recording and drift both bypass the answer cache.
+
+Drift compares probabilities only when the exact semantic request hashes are unchanged. If the fixture/rule/context changed, jevcheck reports the calibration as `STALE`; re-record it instead of calling that model drift. Significant drift, stale calibration, and added/removed fixtures fail `test --drift` so CI cannot silently ignore changed evidence.
 
 Do not confuse calibration with replay:
 - replay reuses prior semantic decisions and never calls a provider

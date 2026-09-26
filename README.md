@@ -79,6 +79,7 @@ Create `jevcheck.config.json`:
   "baselineFile": ".jevcheck/baseline.json",
   "replayFile": ".jevcheck/replay.json",
   "calibrationFile": ".jevcheck/calibration.json",
+  "driftThreshold": 0.1,
   "rules": [
     {
       "id": "security/no-sensitive-log",
@@ -211,7 +212,9 @@ Record the current labelled fixture probabilities:
 jevcheck test --record
 ~~~
 
-The default file is `.jevcheck/calibration.json`. It is versioned, deterministic, and commit-friendly. Each fixture entry records rule, path, expected label, strongest probability, threshold, and model label.
+The default file is `.jevcheck/calibration.json`. It is versioned, deterministic, and commit-friendly. Each fixture entry records rule, path, expected label, strongest probability, threshold, model label, and the exact semantic request hashes used for the fixture.
+
+Recording bypasses the ordinary answer cache and only writes calibration when the fixture run is non-empty and passing.
 
 Run a fresh comparison later:
 
@@ -222,14 +225,15 @@ jevcheck test --drift
 Drift deliberately bypasses jevcheck's answer cache so every fixture is re-asked. It reports:
 
 - mean absolute probability movement across comparable fixtures
-- fixtures whose probability moved by at least 0.10
+- fixtures whose probability moved by at least the configured `driftThreshold` (default 0.10)
+- **STALE** fixtures whose semantic request hashes changed
 - newly added fixtures
 - fixtures present in the recorded calibration but no longer in the current suite
 - before/after model labels when available
 
-A fixture that still passes but sits less than 0.05 from its rule threshold is marked `THIN`. Thin margins and drift are evidence for review; this slice does **not** make them CI failures or automatically promote/demote rules.
+Only semantically identical fixture requests are compared for drift. If fixture code, the rule question/criteria, focus, or model-visible context changes, jevcheck reports the calibration as **STALE** rather than mislabeling the change as model drift.
 
-Use `--no-cache` with `test --record` when intentionally refreshing the baseline from fresh provider answers rather than existing cached decisions.
+A fixture that still passes but sits less than 0.05 from its rule threshold is marked `THIN`. Thin margins are warning evidence. Significant drift, stale calibration, added/removed fixtures, ordinary fixture failures, or diagnostics make `test --drift` exit non-zero.
 
 Calibration is not accuracy proof. It detects movement relative to labelled examples; fixture quality and representativeness still matter.
 
@@ -323,7 +327,7 @@ Credentials use the same environment variables as jev-cli.
 
 This is intentionally conservative: a new probabilistic rule cannot accidentally become a merge gate just because it was added to configuration.
 
-Fixture coverage, margin evidence, and drift reporting exist now. A later slice should make graduation stricter by combining those with mutation recall before `owned` status is accepted.
+Fixture coverage, fresh probability calibration, thin-margin evidence, and semantic-aware drift checks exist now. A later slice should add mutation recall and then enforce those evidence requirements before `owned` status is accepted.
 
 ## Exit codes
 
@@ -391,9 +395,9 @@ Provider choice changes transport, not lint semantics. Domain policy stays in je
 The next useful reliability work is:
 
 1. mutation recall against deterministic injected violations in real code
-2. related-node AST context across separate definitions/callers
-3. enforced shadow-to-owned graduation gates using fixture/margin/drift/recall evidence
-4. a `rules audit` command exposing evidence and blockers
+2. enforced shadow-to-owned graduation gates using fixture/margin/drift/recall evidence
+3. a `rules audit` command exposing evidence and blockers
+4. related-node AST context across separate definitions/callers
 
 Generated code fixes remain intentionally out of scope. Findings should feed a coding agent or deterministic refactoring tool rather than letting the semantic judge edit code itself.
 
