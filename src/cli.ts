@@ -46,6 +46,7 @@ interface CliOptions {
   testRecord: boolean;
   testDrift: boolean;
   sampleSize: number;
+  sampleSizeSet: boolean;
   patterns: string[];
 }
 
@@ -119,6 +120,7 @@ function parseArgs(argv: string[]): CliOptions {
     testRecord: false,
     testDrift: false,
     sampleSize: 12,
+    sampleSizeSet: false,
     patterns: [],
   };
 
@@ -176,6 +178,7 @@ function parseArgs(argv: string[]): CliOptions {
           throw new Error("--sample-size must be a positive integer");
         }
         options.sampleSize = value;
+        options.sampleSizeSet = true;
         i += 1;
         break;
       }
@@ -204,7 +207,7 @@ function parseArgs(argv: string[]): CliOptions {
   if (options.testRecord && options.testDrift) {
     throw new Error("choose either test --record or test --drift");
   }
-  if (options.sampleSize !== 12 && options.command !== "recall") {
+  if (options.sampleSizeSet && options.command !== "recall") {
     throw new Error("--sample-size is only valid with recall");
   }
   if (options.command === "recall" && options.staged) {
