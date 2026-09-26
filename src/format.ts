@@ -271,7 +271,12 @@ export function formatFixtureDriftStylish(result: FixtureDriftResult): string {
             item.beforeThreshold.toFixed(2) +
             " -> " +
             item.afterThreshold.toFixed(2)
-          : "semantic inputs changed") +
+          : item.reason === "model"
+            ? "model changed " +
+              (item.beforeModel ?? "unknown") +
+              " -> " +
+              (item.afterModel ?? "unknown")
+            : "semantic inputs changed") +
         "; re-record calibration",
     );
   }
