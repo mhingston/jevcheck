@@ -43,6 +43,41 @@ describe("parseConfig", () => {
     }
   });
 
+  it("validates declarative mutants", () => {
+    expect(() =>
+      parseConfig({
+        rules: [{
+          id: "example",
+          question: "Is this a violation?",
+          mutants: [],
+        }],
+      }),
+    ).toThrow("example.mutants must be a non-empty array");
+
+    expect(() =>
+      parseConfig({
+        rules: [{
+          id: "example",
+          question: "Is this a violation?",
+          mutants: [
+            { id: "x", pattern: "/a/", replacement: "b" },
+            { id: "x", pattern: "/c/", replacement: "d" },
+          ],
+        }],
+      }),
+    ).toThrow("example.mutants contains duplicate id: x");
+
+    expect(() =>
+      parseConfig({
+        rules: [{
+          id: "example",
+          question: "Is this a violation?",
+          mutants: [{ id: "x", pattern: "/[/", replacement: "" }],
+        }],
+      }),
+    ).toThrow("pattern is not a valid regular expression");
+  });
+
   it("validates nested fixture pattern arrays", () => {
     expect(() =>
       parseConfig({
