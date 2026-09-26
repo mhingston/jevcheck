@@ -1,0 +1,171 @@
+import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { dirname } from "node:path";
+import type {
+  FixtureCalibrationEntry,
+  FixtureDriftItem,
+  FixtureDriftResult,
+  FixtureTestResult,
+} from "./types.js";
+
+export const DEFAULT_CALIBRATION_FILE = ".jevcheck/calibration.json";
+export const CALIBRATION_FORMAT_VERSION = 1;
+export const DEFAULT_DRIFT_THRESHOLD = 0.1;
+export const FIXTURE_THIN_MARGIN = 0.05;
+
+interface CalibrationFile {
+  version: number;
+  fixtures: FixtureCalibrationEntry[];
+}
+
+export function fixtureCalibrationKey(
+  value: Pick<FixtureCalibrationEntry, "ruleId" | "path" | "expected">,
+): string {
+  return [value.ruleId, value.expected, value.path.replaceAll("\\", "/")].join("\0");
+}
+
+function validateEntry(value: unknown, index: number): FixtureCalibrationEntry {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("calibration.fixtures[" + index + "] must be an object");
+  }
+  const entry = value as Record<string, unknown>;
+  for (const field of ["ruleId", "path"] as const) {
+    if (typeof entry[field] !== "string" || !(entry[field] as string).trim()) {
+      throw new Error("calibration.fixtures[" + index + "]." + field + " must be a non-empty string");
+    }
+  }
+  if (entry.expected !== "valid" && entry.expected !== "invalid") {
+    throw new Error("calibration.fixtures[" + index + "].expected must be valid or invalid");
+  }
+  for (const field of ["probability", "threshold"] as const) {
+    if (typeof entry[field] !== "number" || entry[field] < 0 || entry[field] > 1) {
+      throw new Error("calibration.fixtures[" + index + "]." + field + " must be between 0 and 1");
+    }
+  }
+  if (entry.model !== undefined && (typeof entry.model !== "string" || !entry.model.trim())) {
+    throw new Error("calibration.fixtures[" + index + "].model must be a non-empty string");
+  }
+
+  return {
+    ruleId: entry.ruleId as string,
+    path: (entry.path as string).replaceAll("\\", "/"),
+    expected: entry.expected as "valid" | "invalid",
+    probability: entry.probability as number,
+    threshold: entry.threshold as number,
+    ...(entry.model ? { model: entry.model as string } : {}),
+  };
+}
+
+export async function readCalibration(path: string): Promise<FixtureCalibrationEntry[]> {
+  let raw: string;
+  try {
+    raw = await readFile(path, "utf8");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      throw new Error("calibration file not found: " + path + "; run jevcheck test --record first");
+    }
+    throw error;
+  }
+
+  const parsed = JSON.parse(raw) as unknown;
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error("calibration file must be an object");
+  }
+  const file = parsed as Record<string, unknown>;
+  if (file.version !== CALIBRATION_FORMAT_VERSION) {
+    throw new Error(
+      "unsupported calibration format version: " +
+      String(file.version) +
+      " (expected " +
+      CALIBRATION_FORMAT_VERSION +
+      ")",
+    );
+  }
+  if (!Array.isArray(file.fixtures)) {
+    throw new Error("calibration.fixtures must be an array");
+  }
+
+  const fixtures = file.fixtures.map(validateEntry);
+  const seen = new Set<string>();
+  for (const fixture of fixtures) {
+    const key = fixtureCalibrationKey(fixture);
+    if (seen.has(key)) throw new Error("duplicate calibration fixture: " + key.replaceAll("\0", " / "));
+    seen.add(key);
+  }
+  return fixtures;
+}
+
+export function calibrationEntries(tests: readonly FixtureTestResult[]): FixtureCalibrationEntry[] {
+  return tests
+    .map((test) => ({
+      ruleId: test.ruleId,
+      path: test.path.replaceAll("\\", "/"),
+      expected: test.expected,
+      probability: Number(test.maxProbability.toFixed(6)),
+      threshold: test.threshold,
+      ...(test.model ? { model: test.model } : {}),
+    }))
+    .sort(
+      (a, b) =>
+        a.ruleId.localeCompare(b.ruleId) ||
+        a.path.localeCompare(b.path) ||
+        a.expected.localeCompare(b.expected),
+    );
+}
+
+export async function writeCalibration(
+  path: string,
+  tests: readonly FixtureTestResult[],
+): Promise<number> {
+  const file: CalibrationFile = {
+    version: CALIBRATION_FORMAT_VERSION,
+    fixtures: calibrationEntries(tests),
+  };
+  await mkdir(dirname(path), { recursive: true });
+  const temporary = path + ".tmp";
+  await writeFile(temporary, JSON.stringify(file, null, 2) + "\n", "utf8");
+  await rename(temporary, path);
+  return file.fixtures.length;
+}
+
+export function compareCalibration(
+  recorded: readonly FixtureCalibrationEntry[],
+  currentTests: readonly FixtureTestResult[],
+  driftThreshold = DEFAULT_DRIFT_THRESHOLD,
+): FixtureDriftResult {
+  const current = calibrationEntries(currentTests);
+  const beforeByKey = new Map(recorded.map((entry) => [fixtureCalibrationKey(entry), entry]));
+  const afterByKey = new Map(current.map((entry) => [fixtureCalibrationKey(entry), entry]));
+  const compared: FixtureDriftItem[] = [];
+
+  for (const after of current) {
+    const before = beforeByKey.get(fixtureCalibrationKey(after));
+    if (!before) continue;
+    const delta = Math.abs(after.probability - before.probability);
+    compared.push({
+      ruleId: after.ruleId,
+      path: after.path,
+      expected: after.expected,
+      before: before.probability,
+      after: after.probability,
+      delta,
+      beforeThreshold: before.threshold,
+      afterThreshold: after.threshold,
+      beforeModel: before.model,
+      afterModel: after.model,
+    });
+  }
+
+  const meanAbsoluteDelta =
+    compared.reduce((sum, item) => sum + item.delta, 0) / Math.max(1, compared.length);
+
+  return {
+    compared: compared.length,
+    meanAbsoluteDelta,
+    moved: compared
+      .filter((item) => item.delta >= driftThreshold)
+      .sort((a, b) => b.delta - a.delta || a.ruleId.localeCompare(b.ruleId) || a.path.localeCompare(b.path)),
+    added: current.filter((entry) => !beforeByKey.has(fixtureCalibrationKey(entry))),
+    removed: recorded.filter((entry) => !afterByKey.has(fixtureCalibrationKey(entry))),
+    driftThreshold,
+  };
+}
