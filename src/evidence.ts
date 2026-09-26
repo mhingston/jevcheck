@@ -16,10 +16,11 @@ import type {
   JevCheckRule,
   RecallMutantResult,
   RecallRunResult,
-  RuleStatus,
+  RuleEvidenceCheck,
+  RuleEvidenceCheckStatus,
+  RuleEvidencePolicy,
+  RuleEvidenceReport,
 } from "./types.js";
-
-export type RuleEvidenceCheckStatus = "pass" | "warn" | "block";
 
 export interface CurrentFixtureEvidence {
   ruleId: string;
@@ -47,6 +48,8 @@ export interface RuleDriftEvidence {
   stale: string[];
   added: string[];
   removed: string[];
+  fixtureFailures: string[];
+  thinMargins: string[];
 }
 
 export interface RuleEvidenceInputs {
@@ -55,33 +58,9 @@ export interface RuleEvidenceInputs {
   calibration?: readonly FixtureCalibrationEntry[];
   calibrationError?: string;
   drift?: RuleDriftEvidence;
+  driftError?: string;
   mutation?: readonly RecallMutantResult[];
-}
-
-export interface RuleEvidencePolicy {
-  requireValidFixture: boolean;
-  requireInvalidFixture: boolean;
-  allowThinMargins: boolean;
-  requireCurrentCalibration: boolean;
-  requireCleanDrift: boolean;
-  requireMutants: boolean;
-  minMutationRecall: number;
-  requireSource: boolean;
-}
-
-export interface RuleEvidenceCheck {
-  id: string;
-  status: RuleEvidenceCheckStatus;
-  message: string;
-}
-
-export interface RuleEvidenceReport {
-  ruleId: string;
-  currentStatus: RuleStatus;
-  checks: RuleEvidenceCheck[];
-  blockers: string[];
-  warnings: string[];
-  readyForOwned: boolean;
+  mutationError?: string;
 }
 
 export const DEFAULT_RULE_EVIDENCE_POLICY: RuleEvidencePolicy = {
@@ -94,6 +73,55 @@ export const DEFAULT_RULE_EVIDENCE_POLICY: RuleEvidencePolicy = {
   minMutationRecall: 0.9,
   requireSource: true,
 };
+
+
+const POLICY_FIELDS = [
+  "requireValidFixture",
+  "requireInvalidFixture",
+  "allowThinMargins",
+  "requireCurrentCalibration",
+  "requireCleanDrift",
+  "requireMutants",
+  "minMutationRecall",
+  "requireSource",
+] as const;
+
+export function parseRuleEvidencePolicy(
+  value: unknown,
+  field = "graduation",
+): Partial<RuleEvidencePolicy> {
+  if (value === undefined) return {};
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(field + " must be an object");
+  }
+
+  const policy = value as Record<string, unknown>;
+  const unknown = Object.keys(policy).filter(
+    (key) => !POLICY_FIELDS.includes(key as (typeof POLICY_FIELDS)[number]),
+  );
+  if (unknown.length) {
+    throw new Error(field + " contains unknown field(s): " + unknown.join(", "));
+  }
+
+  for (const key of POLICY_FIELDS) {
+    if (key === "minMutationRecall") continue;
+    if (policy[key] !== undefined && typeof policy[key] !== "boolean") {
+      throw new Error(field + "." + key + " must be a boolean");
+    }
+  }
+
+  if (
+    policy.minMutationRecall !== undefined &&
+    (typeof policy.minMutationRecall !== "number" ||
+      !Number.isFinite(policy.minMutationRecall) ||
+      policy.minMutationRecall < 0 ||
+      policy.minMutationRecall > 1)
+  ) {
+    throw new Error(field + ".minMutationRecall must be between 0 and 1");
+  }
+
+  return policy as Partial<RuleEvidencePolicy>;
+}
 
 function sameStrings(left: readonly string[], right: readonly string[]): boolean {
   return left.length === right.length && left.every((value, index) => value === right[index]);
@@ -199,7 +227,10 @@ export function evaluateRuleEvidence(
   evidence: RuleEvidenceInputs,
   policyOverrides: Partial<RuleEvidencePolicy> = {},
 ): RuleEvidenceReport {
-  const policy = { ...DEFAULT_RULE_EVIDENCE_POLICY, ...policyOverrides };
+  const policy = {
+    ...DEFAULT_RULE_EVIDENCE_POLICY,
+    ...parseRuleEvidencePolicy(policyOverrides, "rule evidence policy"),
+  };
   const checks: RuleEvidenceCheck[] = [];
   const fixtures = evidence.fixtures.filter((item) => item.ruleId === rule.id);
   const valid = fixtures.filter((item) => item.expected === "valid");
@@ -275,6 +306,13 @@ export function evaluateRuleEvidence(
         failingFixtures.map(({ fixture }) => fixture.path).join(", "),
     );
   }
+  if (evidence.drift?.fixtureFailures.length) {
+    presenceProblems.push(
+      evidence.drift.fixtureFailures.length +
+        " fixture(s) fail in current drift evidence: " +
+        evidence.drift.fixtureFailures.join(", "),
+    );
+  }
 
   checks.push({
     id: "fixtures",
@@ -289,18 +327,21 @@ export function evaluateRuleEvidence(
         " current calibrated result(s) passing",
   });
 
-  const thin = currentCalibration.filter(
+  const calibratedThin = currentCalibration.filter(
     ({ fixture, calibration }) =>
       calibratedPass(fixture, calibration) &&
       calibratedMargin(fixture, calibration) <= FIXTURE_THIN_MARGIN,
   );
+  const thinPaths = evidence.drift
+    ? [...new Set(evidence.drift.thinMargins)].sort()
+    : calibratedThin.map(({ fixture }) => fixture.path);
   checks.push({
     id: "thin-margins",
-    status: thin.length ? (policy.allowThinMargins ? "warn" : "block") : "pass",
-    message: thin.length
-      ? thin.length +
+    status: thinPaths.length ? (policy.allowThinMargins ? "warn" : "block") : "pass",
+    message: thinPaths.length
+      ? thinPaths.length +
         " passing fixture(s) have thin margins: " +
-        thin.map(({ fixture }) => fixture.path).join(", ")
+        thinPaths.join(", ")
       : "0 current passing fixtures with thin margins",
   });
 
@@ -350,7 +391,13 @@ export function evaluateRuleEvidence(
         : "current for all " + fixtures.length + " fixture(s)",
   });
 
-  if (!evidence.drift) {
+  if (evidence.driftError) {
+    checks.push({
+      id: "drift",
+      status: statusFor(policy.requireCleanDrift),
+      message: evidence.driftError,
+    });
+  } else if (!evidence.drift) {
     checks.push({
       id: "drift",
       status: statusFor(policy.requireCleanDrift),
@@ -376,6 +423,12 @@ export function evaluateRuleEvidence(
       id: "mutation",
       status: statusFor(policy.requireMutants),
       message: "no mutants configured",
+    });
+  } else if (evidence.mutationError) {
+    checks.push({
+      id: "mutation",
+      status: statusFor(policy.requireMutants),
+      message: evidence.mutationError,
     });
   } else if (!evidence.mutation) {
     checks.push({
