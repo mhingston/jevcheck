@@ -69,7 +69,12 @@ describe("persisted rule evidence", () => {
     };
 
     const cases: Array<[string, Record<string, unknown>, string]> = [
-      ["negative judged", { ...baseMutant, judged: -1 }, ".judged must be a non-negative integer"],
+      ["negative judged", { ...baseMutant, judged: -1 }, ".judged must be a non-negative safe integer"],
+      [
+        "unsafe judged",
+        { ...baseMutant, judged: Number.MAX_SAFE_INTEGER + 1 },
+        ".judged must be a non-negative safe integer",
+      ],
       ["impossible caught", { ...baseMutant, caught: 2 }, ".caught must not exceed judged"],
       ["inconsistent recall", { ...baseMutant, recall: 0.5 }, ".recall must equal caught / judged"],
       ["wrong rule", { ...baseMutant, ruleId: "other" }, ".ruleId must match parent ruleId"],
@@ -90,6 +95,20 @@ describe("persisted rule evidence", () => {
 
       await expect(readRuleEvidenceArtifact(path)).rejects.toThrow(expected);
     }
+
+    await writeFile(path, JSON.stringify({
+      version: 1,
+      drift: [],
+      mutation: [{
+        ruleId: "security/no-secret-log",
+        identity: "identity",
+        modelNamespace: "typesafe:default",
+        sampleSize: Number.MAX_SAFE_INTEGER + 1,
+        mutants: [baseMutant],
+      }],
+    }));
+    await expect(readRuleEvidenceArtifact(path))
+      .rejects.toThrow(".sampleSize must be a positive safe integer");
   });
 
   it("rejects duplicate persisted mutant identities", async () => {
@@ -213,6 +232,36 @@ describe("persisted rule evidence", () => {
       modelNamespace: "typesafe:default",
     });
     expect(ready.reports[0]?.readyForOwned).toBe(true);
+
+    const tampered = await readRuleEvidenceArtifact(evidenceFile);
+    const tamperedMutant = tampered.mutation[0]?.mutants[0];
+    expect(tamperedMutant).toBeDefined();
+    tamperedMutant!.caught = 0;
+    tamperedMutant!.recall = 0;
+    tamperedMutant!.misses = ["src/a.ts"];
+    await writeFile(evidenceFile, JSON.stringify(tampered, null, 2) + "\n");
+
+    const tamperedResult = await evaluateConfiguredRuleEvidence(config, {
+      cwd,
+      modelNamespace: "typesafe:default",
+    });
+    expect(tamperedResult.reports[0]?.readyForOwned).toBe(false);
+    expect(tamperedResult.reports[0]?.checks.find((check) => check.id === "mutation")?.message)
+      .toContain("persisted mutation recall evidence is stale");
+
+    await persistMutationEvidence(
+      evidenceFile,
+      [shadow],
+      recall,
+      ["src/a.ts", "src/unrelated.ts"],
+      12,
+      {
+        cwd,
+        include: ["src/**/*.ts"],
+        exclude: [],
+        modelNamespace: "typesafe:default",
+      },
+    );
 
     await writeFile(join(cwd, "src", "unrelated.ts"), "const value = 2;");
     const unrelatedEdit = await evaluateConfiguredRuleEvidence(config, {
