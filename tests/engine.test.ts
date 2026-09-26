@@ -174,6 +174,31 @@ describe("createJevCheck", () => {
     expect(result.suppressedFindings[0]?.suppression).toBe("baseline");
   });
 
+  it("marks a passing fixture exactly 0.05 from threshold as thin", async () => {
+    class BoundaryClient implements SystemOneLikeClient {
+      async systemOne(): Promise<SystemOneResponse> {
+        return {
+          model: "boundary-jev",
+          answers: { violation: { type: "noul", noul: 0.75 } },
+        };
+      }
+    }
+    const cwd = await mkdtemp(join(tmpdir(), "jevcheck-thin-"));
+    await mkdir(join(cwd, "fixtures"), { recursive: true });
+    await writeFile(join(cwd, "fixtures", "valid.ts"), "console.log(redacted);");
+    const checker = createJevCheck({
+      client: new BoundaryClient(),
+      rules: [{
+        id: "boundary",
+        question: "Is this a violation?",
+        threshold: 0.8,
+        fixtures: { valid: ["fixtures/valid.ts"] },
+      }],
+    });
+    const result = await checker.testFixtures(cwd);
+    expect(result.tests[0]).toMatchObject({ passed: true, margin: 0.05, thinMargin: true });
+  });
+
   it("runs fixtures even when production file globs do not match the fixture path", async () => {
     const cwd = await mkdtemp(join(tmpdir(), "jevcheck-"));
     const validDir = join(cwd, "fixtures", "valid");
