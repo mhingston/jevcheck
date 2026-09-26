@@ -11,6 +11,7 @@ import {
 import { DiskAnswerCache } from "./cache.js";
 import {
   DEFAULT_CALIBRATION_FILE,
+  DEFAULT_CONFIRMATION_FILE,
   compareCalibration,
   readCalibration,
   writeCalibration,
@@ -56,6 +57,7 @@ interface CliOptions {
   cache: boolean;
   testRecord: boolean;
   testDrift: boolean;
+  testConfirm: boolean;
   testRobustness: boolean;
   sampleSize: number;
   sampleSizeSet: boolean;
@@ -85,15 +87,17 @@ function usage(): string {
     "  --provider <name>     Jev provider inherited from @mhingston5/jev-cli",
     "  --model <name>        Override the provider model",
     "  --no-cache            Disable the answer cache",
-    "  --record              With test, record fixture probabilities",
-    "  --drift               With test, re-ask fixtures and compare calibration",
+    "  --record              With test, record development fixture probabilities",
+    "  --drift               With test, re-ask development fixtures and compare calibration",
+    "  --confirm             With test, evaluate and record untouched confirmation fixtures",
     "  --robustness          With test, probe label-preserving adversarial context",
     "  --sample-size <n>     With recall, files sampled per mutant (default: 12)",
     "  -h, --help            Show help",
     "",
     "record captures semantic decisions to replayFile (default: .jevcheck/replay.json).",
     "replay is strict and offline: missing decisions are errors and never reach a provider.",
-    "test --record writes calibrationFile; test --drift and test --robustness bypass the answer cache.",
+    "test --record writes calibrationFile; test --confirm writes confirmationFile only when all confirmation fixtures pass.",
+    "test --drift, test --confirm, and test --robustness bypass the answer cache.",
     "robustness probes fixture judgments with nearby comments that should not change the label.",
     "recall mutates sampled real files in memory; repository files are never modified.",
     "",
@@ -133,6 +137,7 @@ function parseArgs(argv: string[]): CliOptions {
     cache: true,
     testRecord: false,
     testDrift: false,
+    testConfirm: false,
     testRobustness: false,
     sampleSize: 12,
     sampleSizeSet: false,
@@ -187,6 +192,9 @@ function parseArgs(argv: string[]): CliOptions {
       case "--drift":
         options.testDrift = true;
         break;
+      case "--confirm":
+        options.testConfirm = true;
+        break;
       case "--robustness":
         options.testRobustness = true;
         break;
@@ -226,16 +234,18 @@ function parseArgs(argv: string[]): CliOptions {
     throw new Error("rules audit does not accept file patterns, --changed, --staged, or --base");
   }
   if (
-    (options.testRecord || options.testDrift || options.testRobustness) &&
+    (options.testRecord || options.testDrift || options.testConfirm || options.testRobustness) &&
     options.command !== "test"
   ) {
-    throw new Error("--record, --drift, and --robustness are only valid with test");
+    throw new Error("--record, --drift, --confirm, and --robustness are only valid with test");
   }
   if (
-    [options.testRecord, options.testDrift, options.testRobustness]
+    [options.testRecord, options.testDrift, options.testConfirm, options.testRobustness]
       .filter(Boolean).length > 1
   ) {
-    throw new Error("choose only one of test --record, test --drift, or test --robustness");
+    throw new Error(
+      "choose only one of test --record, test --drift, test --confirm, or test --robustness",
+    );
   }
   if (options.sampleSizeSet && options.command !== "recall") {
     throw new Error("--sample-size is only valid with recall");
@@ -289,6 +299,7 @@ async function main(): Promise<void> {
   }
 
   const calibrationFile = resolve(config.calibrationFile ?? DEFAULT_CALIBRATION_FILE);
+  const confirmationFile = resolve(config.confirmationFile ?? DEFAULT_CONFIRMATION_FILE);
   const evidenceFile = resolve(config.evidenceFile ?? DEFAULT_EVIDENCE_FILE);
 
   if (args.command === "rules-audit") {
@@ -333,7 +344,7 @@ async function main(): Promise<void> {
     args.command !== "replay" &&
     !(
       args.command === "test" &&
-      (args.testRecord || args.testDrift || args.testRobustness)
+      (args.testRecord || args.testDrift || args.testConfirm || args.testRobustness)
     )
       ? new DiskAnswerCache(cacheFile)
       : undefined;
@@ -352,6 +363,63 @@ async function main(): Promise<void> {
     mode: args.command === "check" || args.command === "replay" ? "enforce" : "measure",
     ruleEvidenceReports,
   });
+
+  if (args.command === "test" && args.testConfirm) {
+    const result = await checker.testFixtures(process.cwd(), "confirmation");
+    const fixtureFailed =
+      result.tests.some((test) => !test.passed) ||
+      result.diagnostics.some((item) => item.level === "error");
+    const confirmationReady =
+      result.tests.length > 0 &&
+      result.tests.every((test) => test.semanticKeys.length > 0);
+    let recorded: { file: string; fixtures: number } | undefined;
+
+    if (!fixtureFailed && confirmationReady) {
+      recorded = {
+        file: confirmationFile,
+        fixtures: await writeCalibration(confirmationFile, result.tests),
+      };
+    }
+
+    if (args.format === "json") {
+      console.log(formatJson({
+        ...result,
+        ...(recorded ? { recorded } : {}),
+        ...(!recorded
+          ? {
+              confirmationNotRecorded: fixtureFailed
+                ? "confirmation fixture failures"
+                : result.tests.length === 0
+                  ? "no confirmation fixtures"
+                  : "confirmation fixtures with no semantic evaluations",
+            }
+          : {}),
+      }));
+    } else {
+      const sections = [formatFixtureStylish(result)];
+      if (recorded) {
+        sections.push(
+          "Recorded " +
+            recorded.fixtures +
+            " untouched confirmation result(s) to " +
+            recorded.file,
+        );
+      } else {
+        sections.push(
+          "Confirmation not recorded: " +
+            (fixtureFailed
+              ? "all confirmation fixtures must pass; replace consumed failing cases before re-confirming."
+              : result.tests.length === 0
+                ? "no confirmation fixtures were evaluated."
+                : "every confirmation fixture must produce at least one semantic evaluation."),
+        );
+      }
+      console.log(sections.join("\n\n"));
+    }
+
+    process.exitCode = fixtureFailed || !recorded ? 1 : 0;
+    return;
+  }
 
   if (args.command === "test" && args.testRobustness) {
     const result = await checker.testRobustness();
