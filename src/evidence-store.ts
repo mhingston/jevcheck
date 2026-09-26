@@ -31,9 +31,9 @@ import type {
 
 export const DEFAULT_EVIDENCE_FILE = ".jevcheck/evidence.json";
 export const RULE_EVIDENCE_FORMAT_VERSION = 1;
-const DRIFT_IDENTITY_VERSION = "v1";
-const MUTATION_IDENTITY_VERSION = "v2";
-const ROBUSTNESS_IDENTITY_VERSION = "v1";
+const DRIFT_IDENTITY_VERSION = "v2";
+const MUTATION_IDENTITY_VERSION = "v3";
+const ROBUSTNESS_IDENTITY_VERSION = "v2";
 
 export const DEFAULT_SOURCE_INCLUDE = [
   "**/*.{js,jsx,ts,tsx,mjs,cjs,mts,cts,py,go,rs,java,cs,rb,php,vue,svelte}",
@@ -81,6 +81,53 @@ export interface ConfiguredEvidenceResult {
 
 function hash(value: string): string {
   return createHash("sha256").update(value).digest("hex");
+}
+
+export interface RuleSourceProvenance {
+  kind: "missing" | "external" | "local";
+  reference?: string;
+  fingerprint?: string;
+  error?: string;
+}
+
+function sourceIdentity(provenance: RuleSourceProvenance): string | null {
+  if (provenance.kind === "missing") return null;
+  return provenance.kind + ":" + provenance.reference + ":" + (provenance.fingerprint ?? "unverified");
+}
+
+export async function ruleSourceProvenance(
+  rule: JevCheckRule,
+  cwd = process.cwd(),
+): Promise<RuleSourceProvenance> {
+  if (!rule.source) return { kind: "missing" };
+  if (/^https?:\/\//i.test(rule.source)) {
+    return { kind: "external", reference: rule.source };
+  }
+
+  const path = rule.source.split("#", 1)[0]?.trim();
+  if (!path) {
+    return {
+      kind: "local",
+      reference: rule.source,
+      error: "local rule source has no file path: " + rule.source,
+    };
+  }
+
+  try {
+    const content = await readFile(resolve(cwd, path), "utf8");
+    return {
+      kind: "local",
+      reference: rule.source,
+      fingerprint: hash(JSON.stringify({ reference: rule.source, content })),
+    };
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    return {
+      kind: "local",
+      reference: rule.source,
+      error: "local rule source cannot be read: " + rule.source + " (" + detail + ")",
+    };
+  }
 }
 
 function emptyArtifact(): RuleEvidenceArtifact {
@@ -482,6 +529,7 @@ export function driftEvidenceIdentity(
   calibration: readonly FixtureCalibrationEntry[],
   driftThreshold: number,
   modelNamespace: string,
+  ruleSourceIdentity: string | null = null,
 ): string {
   return hash(JSON.stringify({
     version: DRIFT_IDENTITY_VERSION,
@@ -491,6 +539,7 @@ export function driftEvidenceIdentity(
     calibration: sortedCalibration(ruleId, calibration),
     driftThreshold,
     modelNamespace,
+    ruleSourceIdentity,
   }));
 }
 
@@ -580,6 +629,7 @@ export async function mutationEvidenceIdentity(
     },
     sampleSize: options.sampleSize,
     modelNamespace: options.modelNamespace,
+    ruleSourceIdentity: sourceIdentity(await ruleSourceProvenance(rule, cwd)),
     mutants,
     measurement: measurement
       .filter((item) => item.ruleId === rule.id)
@@ -640,20 +690,26 @@ export async function persistDriftEvidence(
   drift: FixtureDriftResult,
   driftThreshold: number,
   modelNamespace: string,
+  cwd = process.cwd(),
 ): Promise<void> {
   const artifact = await readRuleEvidenceArtifact(path);
-  artifact.drift = rules.map((rule) => ({
-    ruleId: rule.id,
-    identity: driftEvidenceIdentity(
-      rule.id,
-      currentFixtures,
-      calibration,
-      driftThreshold,
+  artifact.drift = [];
+  for (const rule of rules) {
+    const provenance = await ruleSourceProvenance(rule, cwd);
+    artifact.drift.push({
+      ruleId: rule.id,
+      identity: driftEvidenceIdentity(
+        rule.id,
+        currentFixtures,
+        calibration,
+        driftThreshold,
+        modelNamespace,
+        sourceIdentity(provenance),
+      ),
       modelNamespace,
-    ),
-    modelNamespace,
-    ...driftForRule(rule.id, drift, fixtureRun),
-  }));
+      ...driftForRule(rule.id, drift, fixtureRun),
+    });
+  }
   await writeRuleEvidenceArtifact(path, artifact);
 }
 
@@ -663,6 +719,7 @@ export function robustnessEvidenceIdentity(
   modelNamespace: string,
   expectedCases: number,
   measurement: readonly RobustnessCaseResult[] = [],
+  ruleSourceIdentity: string | null = null,
 ): string {
   return hash(JSON.stringify({
     version: ROBUSTNESS_IDENTITY_VERSION,
@@ -671,6 +728,7 @@ export function robustnessEvidenceIdentity(
     fixtures: sortedFixtureEvidence(ruleId, fixtures),
     modelNamespace,
     expectedCases,
+    ruleSourceIdentity,
     measurement: measurement
       .filter((item) => item.ruleId === ruleId)
       .map((item) => ({
@@ -701,6 +759,7 @@ export async function persistRobustnessEvidence(
   currentFixtures: readonly CurrentFixtureEvidence[],
   result: RobustnessRunResult,
   modelNamespace: string,
+  cwd = process.cwd(),
 ): Promise<void> {
   if (!result.complete || result.cases.length !== result.expectedCases) {
     throw new Error(
@@ -711,6 +770,7 @@ export async function persistRobustnessEvidence(
   artifact.robustness = [];
 
   for (const rule of rules) {
+    const provenance = await ruleSourceProvenance(rule, cwd);
     const cases = result.cases.filter((item) => item.ruleId === rule.id);
     if (!cases.length) continue;
     artifact.robustness.push({
@@ -721,6 +781,7 @@ export async function persistRobustnessEvidence(
         modelNamespace,
         cases.length,
         cases,
+        sourceIdentity(provenance),
       ),
       modelNamespace,
       expectedCases: cases.length,
@@ -801,6 +862,15 @@ export async function evaluateConfiguredRuleEvidence(
   const reports: RuleEvidenceReport[] = [];
 
   for (const rule of config.rules) {
+    const provenance = await ruleSourceProvenance(rule, cwd);
+    const provenanceIdentity = sourceIdentity(provenance);
+    const sourceError = provenance.error;
+    const sourceMessage = provenance.kind === "local"
+      ? rule.source + " (local source fingerprinted)"
+      : provenance.kind === "external"
+        ? rule.source + " (external source; freshness is not locally fingerprinted)"
+        : undefined;
+
     let drift: RuleDriftEvidence | undefined;
     let driftError: string | undefined;
     const recordedDrift = persistedDrift.get(rule.id);
@@ -814,6 +884,7 @@ export async function evaluateConfiguredRuleEvidence(
           calibration,
           config.driftThreshold ?? DEFAULT_DRIFT_THRESHOLD,
           options.modelNamespace,
+          provenanceIdentity,
         );
         if (recordedDrift.identity !== expected) {
           driftError = "persisted drift evidence is stale; rerun jevcheck test --drift";
@@ -859,6 +930,7 @@ export async function evaluateConfiguredRuleEvidence(
         options.modelNamespace,
         recordedRobustness.expectedCases,
         recordedRobustness.cases,
+        provenanceIdentity,
       );
       if (recordedRobustness.identity !== expected) {
         robustnessError =
@@ -882,6 +954,8 @@ export async function evaluateConfiguredRuleEvidence(
           mutationError,
           robustness,
           robustnessError,
+          sourceError,
+          sourceMessage,
         },
         config.graduation,
       ),
