@@ -322,6 +322,8 @@ export interface RobustnessRunResult {
   stats: RunStats;
   flips: number;
   maxDelta: number;
+  expectedCases: number;
+  complete: boolean;
 }
 
 export interface RuleThresholdDiagnostic {
