@@ -13,6 +13,7 @@ import {
   DEFAULT_THRESHOLD,
 } from "./engine.js";
 import { discoverFiles } from "./files.js";
+import { confirmationFixtureOverlaps } from "./fixtures.js";
 import { semanticRequestForCandidate } from "./semantic.js";
 import type {
   Diagnostic,
@@ -177,6 +178,21 @@ export async function collectCurrentFixtureEvidence(
   const diagnostics: Diagnostic[] = [];
 
   for (const rule of rules) {
+    if (options.fixtureSet === "confirmation") {
+      const overlaps = await confirmationFixtureOverlaps(rule, cwd);
+      if (overlaps.length) {
+        diagnostics.push({
+          level: "error",
+          ruleId: rule.id,
+          message:
+            "Confirmation fixtures overlap development fixtures: " +
+            overlaps.join(", ") +
+            ". Move each case to exactly one fixture set before using confirmation evidence.",
+        });
+        continue;
+      }
+    }
+
     const fixtureConfig =
       options.fixtureSet === "confirmation" ? rule.fixtures?.confirmation : rule.fixtures;
     const groups: Array<["valid" | "invalid", string[] | undefined]> = [
