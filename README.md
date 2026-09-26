@@ -1,77 +1,459 @@
 # jevcheck
 
-Semantic linting for code-review questions a syntax-based linter cannot answer.
+Semantic linting for code-review questions ordinary linters cannot answer.
 
-jevcheck keeps candidate selection, thresholds, caching, suppressions, CI policy, and rule lifecycle deterministic, then delegates one bounded semantic judgment to [Jev](https://typesafe.ai/) through [@mhingston5/jev-cli](https://github.com/mhingston/jev-cli).
+`jevcheck` lets you turn bounded review concerns such as "does this log expose a secret?" or "can this retry loop run without a meaningful bound?" into repeatable lint rules.
 
-It is inspired by [Ice-Hazymoon/jevlint](https://github.com/Ice-Hazymoon/jevlint), but intentionally uses jev-cli as the reusable provider and System One boundary instead of growing a second Jev client.
+The core rule is simple:
 
-## What belongs here?
+> **Use deterministic code for selection, validation, thresholds, policy, and lifecycle. Use Jev only for bounded semantic judgement where YES consistently means "violation present".**
 
-Use ordinary linters and static analysis whenever code can answer the question exactly.
+`jevcheck` is built on [`@mhingston5/jev-cli`](https://github.com/mhingston/jev-cli), so provider selection and Jev transport stay outside the linter itself.
 
-Good jevcheck rules ask questions such as:
+## Quick start
+
+### 1. Install
+
+Node.js 20 or newer is required.
+
+~~~sh
+npm install --save-dev @mhingston5/jevcheck
+~~~
+
+The package installs the `jevcheck` binary. The examples below use `npx` so a project-local install works without any global setup.
+
+### 2. Configure a Jev provider
+
+TypeSafe is the default provider:
+
+~~~sh
+export TYPESAFE_API_KEY="..."
+~~~
+
+You can also use any provider supported by [`@mhingston5/jev-cli`](https://github.com/mhingston/jev-cli#providers), for example:
+
+~~~sh
+export OPENROUTER_API_KEY="..."
+export JEV_PROVIDER="openrouter"
+~~~
+
+Or select the provider per run:
+
+~~~sh
+npx jevcheck --provider openrouter
+~~~
+
+Credentials are read from environment variables. Do not put API keys in `jevcheck.config.json`.
+
+### 3. Add your first rule
+
+Create `jevcheck.config.json` in the repository root:
+
+~~~json
+{
+  "include": ["src/**/*.ts"],
+  "exclude": ["**/*.test.ts"],
+  "rules": [
+    {
+      "id": "security/no-sensitive-log",
+      "status": "shadow",
+      "severity": "error",
+      "files": ["**/*.ts"],
+      "ast": {
+        "pattern": "console.$METHOD($ARG)"
+      },
+      "question": "Does this logging call expose a credential, token, API key, password, or other sensitive value?",
+      "criteria": {
+        "true": "A sensitive value itself can reach the logging call.",
+        "false": "Only a field name, redacted placeholder, boolean, length, or non-sensitive identifier is logged."
+      }
+    }
+  ]
+}
+~~~
+
+New rules should normally start as `shadow`. Shadow findings are visible but non-blocking, which gives you room to inspect false positives and refine the rule before it can fail CI.
+
+Rules default to:
+
+- `status: "shadow"`
+- `severity: "error"`
+- `threshold: 0.8`
+
+### 4. Run it
+
+Check the configured source set:
+
+~~~sh
+npx jevcheck
+~~~
+
+For day-to-day development, smaller scopes are usually better:
+
+~~~sh
+# exact staged index snapshot
+npx jevcheck --staged
+
+# working-tree changes and untracked files
+npx jevcheck --changed
+
+# branch diff
+npx jevcheck --changed --base origin/main
+~~~
+
+If the rule finds something in `shadow` mode, you get the finding without failing the check.
+
+That is enough to start using `jevcheck`.
+
+## What should become a jevcheck rule?
+
+Use ordinary static analysis whenever code can answer the question exactly.
+
+Good semantic rules ask one bounded question about meaning or intent:
 
 - Does this logging statement expose a sensitive value?
 - Can this retry path continue without a meaningful bound?
 - Does this handler leak an internal implementation detail to an external caller?
+- Does this error message reveal information that should stay internal?
 
-Poor rules ask questions such as:
+Keep deterministic questions out of Jev:
 
 - Is this import unused?
 - Is this method longer than 50 lines?
-- Does this file contain eval?
+- Does this file contain `eval`?
+- Is this dependency forbidden?
+- Does this AST node have a particular shape?
+
+And avoid open-ended review prompts such as:
+
 - How should this subsystem be redesigned?
+- Is this good code?
+- What would you improve here?
 
-The model does semantic judgment. Code owns everything deterministic.
+A good rule has a clear semantic boundary, a narrow candidate set, and a YES answer that always means the same thing: **a violation is present**.
 
-## Capabilities
+## How it works
 
-- reusable TypeScript API with injectable `SystemOneLikeClient`
-- all providers supported by jev-cli
-- Noul rules where YES always means violation
-- file globs, exclusions, regex prefilters, negative `unless` filters, and bounded chunking
-- ast-grep candidate selection with pattern, kind, or rule selectors
-- JavaScript/TypeScript/TSX/HTML/CSS language inference with explicit override
-- optional nearest-ancestor AST context while keeping the matched node as exact focus
-- precise AST line/column metadata in Jev state, stylish output, and SARIF
-- whole-file rules that skip rather than silently truncate oversized files
-- answer caching keyed by rule, code, location, and provider/model namespace
-- `shadow` and `owned` lifecycle semantics
-- valid/invalid fixtures through `jevcheck test`
-- exact staged-index and changed-file Git scopes
-- accepted-backlog baselines and reasoned inline suppressions
-- versioned, commit-able semantic replay corpora for offline evaluation
-- strict offline replay with explicit coverage misses and no provider fallback
-- versioned fixture calibration with thin-margin and fresh-run drift reporting
-- deterministic mutation recall over real repository files
-- stylish, JSON, and SARIF output
-- rule/model/code fingerprints and stable finding fingerprints
-- bundled agent skill, CI, and package metadata
+A `jevcheck` rule has three layers:
 
-Enforced graduation gates remain deliberately separate from the measurement features.
-
-## Development
-
-~~~sh
-npm install
-npm run typecheck
-npm test
-npm run build
-npm run pack:check
+~~~text
+deterministic candidate selection
+            |
+            v
+   bounded Jev judgement
+            |
+            v
+deterministic threshold + policy
 ~~~
 
-After building:
+That separation is deliberate.
 
-~~~sh
-node dist/cli.js --help
+`jevcheck` owns deterministic behaviour such as:
+
+- file selection and exclusions
+- AST matching
+- regex prefilters and exemptions
+- chunking and context limits
+- thresholds
+- baselines and suppressions
+- caching and replay
+- rule lifecycle
+- exit codes and CI policy
+
+Jev answers the bounded semantic question for the selected code.
+
+An AST match or regex hit is therefore **not** evidence of a violation. It only decides what Jev is allowed to judge.
+
+## Choosing candidates
+
+Narrow candidates as much as you can before making a semantic request.
+
+### AST selectors
+
+Prefer AST selection when the construct can be identified structurally.
+
+Each `ast` selector defines exactly one of:
+
+~~~json
+{ "pattern": "console.log($A)" }
 ~~~
 
-The package name is `@mhingston5/jevcheck` and the binary is `jevcheck`.
+~~~json
+{ "kind": "call_expression" }
+~~~
 
-## Configuration
+~~~json
+{
+  "rule": {
+    "all": [
+      { "kind": "call_expression" },
+      { "has": { "pattern": "$A" } }
+    ]
+  }
+}
+~~~
 
-Create `jevcheck.config.json`:
+Language is inferred for JavaScript, TypeScript, TSX, HTML, and CSS. You can override it with `ast.language` when needed.
+
+The matched AST node remains the exact semantic focus. If the model needs nearby structural context, add the nearest matching ancestor:
+
+~~~json
+{
+  "ast": {
+    "pattern": "await $CALL",
+    "context": {
+      "ancestor": {
+        "kind": "function_declaration"
+      }
+    }
+  }
+}
+~~~
+
+### Prefilters and exemptions
+
+For non-AST rules:
+
+- `files` chooses where the rule applies.
+- `exclude` removes known irrelevant paths.
+- `prefilter` cheaply rejects files/candidates before semantic evaluation.
+- `unless` removes candidates with a deterministic exemption.
+- `wholeFile` is available for genuinely global or absence-style questions.
+
+`ast` and `wholeFile` are mutually exclusive.
+
+Keep semantic context bounded. Oversized focuses are skipped rather than silently truncated.
+
+## A practical rule lifecycle
+
+A useful default workflow is:
+
+~~~text
+author -> shadow -> fixtures -> calibrate -> drift/recall -> audit -> owned
+~~~
+
+You do not need all of this to experiment with a shadow rule. The evidence workflow matters when you want a semantic rule to become a blocking reviewer.
+
+### 1. Start in shadow
+
+~~~json
+{
+  "id": "reliability/unbounded-retry",
+  "status": "shadow",
+  "question": "Can this retry path continue without a meaningful bound?"
+}
+~~~
+
+Run it against real changes and inspect where it is right or wrong.
+
+### 2. Add labelled fixtures
+
+~~~json
+{
+  "fixtures": {
+    "valid": ["fixtures/unbounded-retry/valid/**/*.ts"],
+    "invalid": ["fixtures/unbounded-retry/invalid/**/*.ts"]
+  }
+}
+~~~
+
+Then run:
+
+~~~sh
+npx jevcheck test
+~~~
+
+Fixtures answer a basic question: can the rule distinguish examples you believe are valid and invalid?
+
+### 3. Record calibration
+
+When the fixtures pass:
+
+~~~sh
+npx jevcheck test --record
+~~~
+
+This records the current fixture probabilities in `.jevcheck/calibration.json`.
+
+Later, re-ask those fixtures and compare the probabilities:
+
+~~~sh
+npx jevcheck test --drift
+~~~
+
+Drift checks intentionally bypass the normal answer cache.
+
+### 4. Measure mutation recall
+
+Fixtures are curated. Mutation recall checks whether the rule still catches known violations inserted into real repository code.
+
+Add deterministic mutants to the rule:
+
+~~~json
+{
+  "mutants": [
+    {
+      "id": "drop-limit",
+      "pattern": "/\\.limit\\([^)]*\\)/g",
+      "replacement": "",
+      "replaceAll": true
+    }
+  ]
+}
+~~~
+
+Then run:
+
+~~~sh
+npx jevcheck recall
+~~~
+
+Repository files are never modified; mutations exist only in memory.
+
+### 5. Audit the evidence
+
+~~~sh
+npx jevcheck rules audit
+~~~
+
+The audit reports whether each rule has the evidence required to act as an owned rule and explains any blockers.
+
+### 6. Promote to owned
+
+Only after the rule has earned that responsibility:
+
+~~~json
+{
+  "status": "owned"
+}
+~~~
+
+An owned `error` finding is blocking. An owned `warning` remains non-blocking.
+
+Normal checks and replay fail closed if an owned rule's required evidence is missing, stale, or failing. `jevcheck` never silently downgrades it back to shadow.
+
+## Baselines and intentional exceptions
+
+### Baseline existing backlog
+
+If you want to adopt a rule without failing on already-accepted findings:
+
+~~~sh
+npx jevcheck baseline
+~~~
+
+The default file is `.jevcheck/baseline.json`.
+
+A baseline is for accepted existing backlog. New or changed violations still report.
+
+### Suppress one intentional exception
+
+Put a reasoned suppression on the finding or immediately above it:
+
+~~~ts
+// jevcheck-ignore security/no-sensitive-log -- logger wrapper redacts this value
+console.log(secret);
+~~~
+
+Suppressions without a reason are ignored.
+
+Use a baseline for repository backlog and an inline suppression for a specific durable exception.
+
+## Replay semantic decisions offline
+
+The normal answer cache is an optimization. Replay is durable evaluation evidence.
+
+Record semantic decisions from a live provider:
+
+~~~sh
+npx jevcheck record
+~~~
+
+Or only for a branch diff:
+
+~~~sh
+npx jevcheck record --changed --base origin/main
+~~~
+
+This writes `.jevcheck/replay.json` by default.
+
+Re-run those exact semantic decisions later without provider credentials or network access:
+
+~~~sh
+npx jevcheck replay
+~~~
+
+Replay is strict:
+
+- matching semantic requests are reused
+- policy-only changes such as threshold, severity, or status can be evaluated against the recorded probability
+- changes to the question, criteria, focused code, or model-visible context produce a replay miss
+- replay never falls back to a live provider
+
+Replay gives reproducibility, not ground truth. A recorded judgement can still have been wrong.
+
+## Files worth committing
+
+The default `.gitignore` policy keeps transient cache state out while allowing durable evidence files to be committed.
+
+| File | Purpose | Commit? |
+| --- | --- | --- |
+| `jevcheck.config.json` | Rules and checker configuration | Yes |
+| `.jevcheck/baseline.json` | Accepted existing findings | Usually |
+| `.jevcheck/replay.json` | Reusable semantic decisions | When replay is part of your workflow |
+| `.jevcheck/calibration.json` | Recorded fixture probabilities | For evidence-gated rules |
+| `.jevcheck/evidence.json` | Drift and mutation evidence | For evidence-gated rules |
+| `.jevcheck/cache.json` | Local answer cache | No |
+
+These evidence files contain hashes and evaluation metadata rather than a second copy of your source code or prompts.
+
+## Common commands
+
+| Command | Use it for |
+| --- | --- |
+| `jevcheck` | Check the configured source set |
+| `jevcheck --staged` | Check the exact Git index snapshot |
+| `jevcheck --changed` | Check working-tree changes and untracked files |
+| `jevcheck --changed --base origin/main` | Check a branch diff |
+| `jevcheck test` | Run labelled fixtures |
+| `jevcheck test --record` | Record fixture calibration |
+| `jevcheck test --drift` | Re-ask fixtures and detect probability drift |
+| `jevcheck recall` | Measure mutation recall against real code |
+| `jevcheck rules audit` | Inspect rule evidence without calling a provider |
+| `jevcheck baseline` | Create or refresh accepted-backlog entries |
+| `jevcheck record` | Record semantic decisions for replay |
+| `jevcheck replay` | Re-run the recorded decisions strictly offline |
+| `jevcheck list` | List configured rules without provider credentials |
+
+Use `--format json` for machine-readable output.
+
+For code-scanning integrations:
+
+~~~sh
+npx jevcheck --changed --base origin/main --format sarif > jevcheck.sarif
+~~~
+
+SARIF contains active findings only. Shadow findings are emitted as notes, owned warnings as warnings, and owned errors as errors.
+
+## Provider configuration
+
+Provider and model selection are inherited from `@mhingston5/jev-cli`.
+
+| Provider | `--provider` / `JEV_PROVIDER` | Credentials |
+| --- | --- | --- |
+| TypeSafe | `typesafe` | `TYPESAFE_API_KEY` |
+| OpenRouter | `openrouter` | `OPENROUTER_API_KEY` |
+| Vercel AI Gateway | `vercel` | `AI_GATEWAY_API_KEY` |
+| Cloudflare AI | `cloudflare` | `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` |
+| Custom | `custom` | `JEV_API_KEY` when required |
+
+Override the model with `--model` or `JEV_MODEL`.
+
+See [jev-cli provider documentation](https://github.com/mhingston/jev-cli#providers) for provider-specific details.
+
+## Configuration example
+
+A more complete rule can include provenance, AST context, fixtures, and mutants:
 
 ~~~json
 {
@@ -80,6 +462,7 @@ Create `jevcheck.config.json`:
   "baselineFile": ".jevcheck/baseline.json",
   "replayFile": ".jevcheck/replay.json",
   "calibrationFile": ".jevcheck/calibration.json",
+  "evidenceFile": ".jevcheck/evidence.json",
   "driftThreshold": 0.1,
   "rules": [
     {
@@ -92,7 +475,9 @@ Create `jevcheck.config.json`:
       "ast": {
         "pattern": "console.$METHOD($ARG)",
         "context": {
-          "ancestor": { "kind": "function_declaration" }
+          "ancestor": {
+            "kind": "function_declaration"
+          }
         }
       },
       "question": "Does this logging call expose a credential, token, API key, password, or other sensitive value?",
@@ -118,303 +503,20 @@ Create `jevcheck.config.json`:
 }
 ~~~
 
-Rules default to `shadow`, `error`, and a 0.8 threshold. YES must always mean violation so probability interpretation and policy stay uniform.
-
-### Candidate narrowing
-
-Narrow deterministically before spending a model request:
-
-- `files` chooses where a rule applies.
-- `exclude` removes known irrelevant paths.
-- `ast` uses in-process ast-grep to select exact nodes.
-- `prefilter` is a cheap file-level gate before AST parsing and an additional filter over selected candidates.
-- `unless` drops candidates with a deterministic exemption.
-- `wholeFile` is for absence/global questions that genuinely require the complete file.
-
-An AST match or prefilter is not evidence of a violation. It only selects the code Jev is allowed to judge.
-
-An `ast` selector defines exactly one of:
-
-~~~json
-{ "pattern": "console.log($A)" }
-{ "kind": "call_expression" }
-{ "rule": { "all": [{ "kind": "call_expression" }, { "has": { "pattern": "$A" } }] } }
-~~~
-
-Language is inferred for `.js`, `.jsx`, `.mjs`, `.cjs`, `.ts`, `.mts`, `.cts`, `.tsx`, `.html`, `.htm`, and `.css`. Set `ast.language` explicitly to `javascript`, `typescript`, `tsx`, `html`, or `css` when inference is not appropriate.
-
-The matched AST node remains the exact semantic focus. `ast.context.ancestor` can add the nearest matching ancestor as related context without widening the focus:
-
-~~~json
-{
-  "ast": {
-    "pattern": "await $CALL",
-    "context": {
-      "ancestor": { "kind": "function_declaration" }
-    }
-  }
-}
-~~~
-
-`contextBefore` and `contextAfter` can override surrounding context independently. If omitted, the rule-level `contextLines` value is used, then the checker-wide default. Context stays bounded by `chunkChars`; an oversized focus is skipped rather than truncated.
-
-AST findings carry precise 1-based line/column ranges and the matched AST kind. Those fields are sent to Jev as focus metadata and flow through JSON/SARIF output.
-
-`ast` and `wholeFile` are mutually exclusive.
-
-### Baselines and suppressions
-
-Use a baseline for accepted existing backlog, not for hiding new findings:
-
-~~~sh
-jevcheck baseline
-~~~
-
-The default file is `.jevcheck/baseline.json`. It is intentionally commit-friendly; jevcheck's `.gitignore` ignores other `.jevcheck` state while allowing the baseline file.
-
-A baseline fingerprint covers the rule, path, normalized focused source range, and deterministic occurrence identity. Unrelated edits outside the finding range do not invalidate it; changing the flagged code makes it report again.
-
-For a specific intentional exception, put a comment on the finding or immediately above it and include a reason:
-
-~~~ts
-// jevcheck-ignore security/no-sensitive-log -- logger wrapper redacts this value
-console.log(secret);
-~~~
-
-Markers without a reason are ignored. The marker name can be changed with `suppressionMarker`.
-
-For broad chunk rules, suppressions and baselines apply to the chunk's focus range. Prefer AST selectors when you need precise finding ownership.
-
-### Replay and offline evaluation
-
-Replay is deliberately separate from the execution cache. The cache is an optimization; the replay corpus is durable evaluation evidence.
-
-Capture the current semantic decisions with a live provider:
-
-~~~sh
-jevcheck record
-jevcheck record --changed --base origin/main
-~~~
-
-By default this writes `.jevcheck/replay.json`. The file is versioned and commit-friendly, but it does **not** store source code or prompts verbatim. Each entry records hashed semantic inputs plus the rule/path/focus metadata, probability, and model that produced the decision.
-
-Run the same semantic checks later without provider credentials or network access:
-
-~~~sh
-jevcheck replay
-jevcheck replay --changed --base origin/main
-~~~
-
-Replay is strict. A request is reused only when the model-visible state and semantic question/criteria are identical. Policy-only changes such as `threshold`, `severity`, or `status` do not change the replay key, so you can evaluate those changes against the recorded probabilities. Changes to the question, criteria, candidate context, focused code, or other model-visible state produce an explicit replay miss.
-
-Replay never falls back to the ordinary answer cache or a provider. Missing corpus coverage exits non-zero.
-
-This is regression evidence, not ground truth. Replaying an old model decision proves that deterministic policy and candidate changes can be evaluated reproducibly; it does not prove that the original semantic judgment was correct.
-
-### Fixture calibration and drift
-
-Replay answers "can I reproduce the same semantic decisions without asking again?" Calibration answers a different question: "when I **do** ask again, have fixture probabilities moved?"
-
-Record the current labelled fixture probabilities:
-
-~~~sh
-jevcheck test --record
-~~~
-
-The default file is `.jevcheck/calibration.json`. It is versioned, deterministic, and commit-friendly. Each fixture entry records rule, path, expected label, strongest probability, threshold, model label, and the exact semantic request hashes used for the fixture.
-
-Recording bypasses the ordinary answer cache and only writes calibration when the fixture run is non-empty and passing.
-
-Run a fresh comparison later:
-
-~~~sh
-jevcheck test --drift
-~~~
-
-Drift deliberately bypasses jevcheck's answer cache so every fixture is re-asked. It reports:
-
-- mean absolute probability movement across comparable fixtures
-- fixtures whose probability moved by at least the configured `driftThreshold` (default 0.10)
-- **STALE** fixtures whose semantic request hashes or configured threshold changed
-- newly added fixtures
-- fixtures present in the recorded calibration but no longer in the current suite
-- before/after model labels when available
-
-Only fixtures with unchanged semantic request identities and threshold are compared for drift. If fixture code, the rule question/criteria, focus, model-visible context, or threshold changes, jevcheck reports the calibration as **STALE** rather than mixing a changed evaluation policy into the model-drift comparison.
-
-A fixture that still passes but sits 0.05 or less from its rule threshold is marked `THIN`. Thin margins are warning evidence. Significant drift, stale calibration, added/removed fixtures, ordinary fixture failures, or diagnostics make `test --drift` exit non-zero.
-
-Calibration is not accuracy proof. It detects movement relative to labelled examples; fixture quality and representativeness still matter.
-
-### Rule evidence audit
-
-`jevcheck rules audit` evaluates the evidence currently available for every rule without calling a provider:
-
-~~~sh
-jevcheck rules audit
-jevcheck rules audit --format json
-~~~
-
-The audit recomputes current fixture semantic identities deterministically and compares them with committed calibration, so missing calibration, threshold changes, semantic-input changes, fixture failures, and thin margins are distinguishable.
-
-Drift and mutation recall are persisted in the versioned, commit-friendly `.jevcheck/evidence.json` artifact. `test --drift` refreshes drift evidence and a full-scope `recall` refreshes mutation evidence. Scoped recall runs remain exploratory and do not overwrite graduation evidence.
-
-Freshness is deterministic. Drift evidence is tied to current fixture semantic identities, calibration, drift threshold, and provider/model namespace. Mutation evidence is tied to rule/candidate semantics, mutant definitions, the mutation candidate population, sampled source hashes, sample size, provider/model namespace, and the recorded per-mutant outcomes. Material changes or partial edits make the evidence stale and require remeasurement.
-
-These hashes are integrity/freshness checks, not signatures. `jevcheck.config.json` and committed evidence artifacts share the repository trust boundary; a repository author who can deliberately rewrite both is not an adversary jevcheck can cryptographically defend against.
-
-Audit remains advisory: it reports the exact blockers that normal owned-rule admission enforces, but it never rewrites rule status.
-
-### Mutation recall
-
-Fixtures show that a rule can distinguish curated valid/invalid examples. Mutation recall asks a stronger question: does the rule catch a known violation when that violation is injected into **real repository code**?
-
-Each rule can declare deterministic JSON-safe mutants:
-
-~~~json
-{
-  "mutants": [
-    {
-      "id": "drop-limit",
-      "pattern": "/\\.limit\\([^)]*\\)/g",
-      "replacement": "",
-      "replaceAll": true
-    }
-  ]
-}
-~~~
-
-Run recall over the configured source set:
-
-~~~sh
-jevcheck recall
-jevcheck recall --sample-size 20
-jevcheck recall src/services/**/*.ts
-~~~
-
-For each mutant, jevcheck:
-
-1. finds in-scope files where the mutation changes the text
-2. orders candidates deterministically by rule, mutant, and path
-3. samples up to 12 files by default
-4. checks the original file first
-5. excludes files that already violate the rule from the denominator
-6. judges the mutated text with normal candidate/prefilter logic
-7. counts a mutation as caught only when the mutated file crosses the rule threshold
-
-If the mutant changes a file but the rule's deterministic candidate selection never asks Jev about it, that is a **recall miss**, not a skipped sample. This makes recall useful for detecting over-narrow prefilters and AST selectors as well as weak semantic questions.
-
-Repository files are never modified; mutations exist only in memory. The command reports candidate count, sampled files, invalid originals, misses, per-mutant recall, and weakest measured recall. Full-scope recall is persisted as graduation evidence and is one of the deterministic requirements evaluated before a rule can run as `owned`.
-
-Because configuration is JSON-only, this first mutation slice deliberately supports declarative regex replacement rather than arbitrary code callbacks. AST-specific mutation helpers can be added later if real rules show the regex boundary is too limiting.
-
-## Commands
-
-Check the configured include set:
-
-~~~sh
-jevcheck
-~~~
-
-Check only the exact staged index snapshot:
-
-~~~sh
-jevcheck --staged
-~~~
-
-Check working-tree changes and untracked files:
-
-~~~sh
-jevcheck --changed
-~~~
-
-Check a branch diff:
-
-~~~sh
-jevcheck --changed --base origin/main
-~~~
-
-Run labelled fixtures:
-
-~~~sh
-jevcheck test
-~~~
-
-Record fixture calibration or compare fresh drift:
-
-~~~sh
-jevcheck test --record
-jevcheck test --drift
-~~~
-
-Record a reusable semantic decision corpus:
-
-~~~sh
-jevcheck record
-~~~
-
-Replay that corpus strictly offline:
-
-~~~sh
-jevcheck replay
-~~~
-
-Measure mutation recall against real code:
-
-~~~sh
-jevcheck recall
-jevcheck recall --sample-size 20
-~~~
-
-Create or refresh accepted-backlog baseline entries:
-
-~~~sh
-jevcheck baseline
-jevcheck baseline --changed --base origin/main
-~~~
-
-List configured rules without requiring provider credentials:
-
-~~~sh
-jevcheck list
-~~~
-
-Machine-readable output:
-
-~~~sh
-jevcheck --format json
-jevcheck --changed --base origin/main --format sarif > jevcheck.sarif
-~~~
-
-SARIF contains only active findings. Suppressed findings remain available in JSON output for auditability. Shadow findings are emitted as SARIF notes; owned warnings as warnings; owned errors as errors.
-
-Provider and model options are passed to jev-cli:
-
-~~~sh
-jevcheck --provider openrouter
-jevcheck --provider cloudflare --model typesafe/jev
-~~~
-
-Credentials use the same environment variables as jev-cli.
-
-## Rule lifecycle
-
-`shadow` is the default. Findings are reported but never fail the check.
-
-`owned` means the rule is intended to act as reviewer-of-record. An owned error finding exits with code 1. Owned warnings remain non-blocking.
-
-Owned admission is evidence-gated. Before a normal check or replay can run an `owned` rule, jevcheck evaluates the same evidence model used by `rules audit`. Missing, stale, or failing required evidence is a configuration/runtime error; jevcheck does **not** silently downgrade the rule to shadow.
+## Evidence and owned-rule graduation
 
 The default graduation policy requires:
 
 - at least one valid and invalid fixture
-- current passing calibration with no thin margins
+- current passing calibration
+- no thin fixture margins
 - clean current drift evidence
 - configured and measured mutants
-- minimum mutation recall of 0.90 with no zero-judged mutants
+- minimum mutation recall of 0.90
+- no zero-judged mutants
 - rule `source` provenance
 
-Override only the global policy fields you intentionally want to change:
+You can override the small global policy surface when there is a deliberate reason:
 
 ~~~json
 {
@@ -426,33 +528,35 @@ Override only the global policy fields you intentionally want to change:
 }
 ~~~
 
-The supported policy stays deliberately small; there is no per-rule policy DSL.
-
-A typical graduation workflow is:
+A typical graduation sequence is:
 
 ~~~sh
-# keep the rule shadow while building evidence
-jevcheck test --record
-jevcheck test --drift
-jevcheck recall
-jevcheck rules audit
+npx jevcheck test --record
+npx jevcheck test --drift
+npx jevcheck recall
+npx jevcheck rules audit
 
-# only after audit is ready:
-# edit status to "owned"
-jevcheck
+# after the audit is ready:
+# change status from "shadow" to "owned"
+
+npx jevcheck
 ~~~
 
-Changing `status` from shadow to owned does not itself stale semantic evidence. Changes to the question/criteria, threshold, deterministic candidate semantics, relevant mutation population/sampled source, mutant definitions, calibration, or provider/model identity do.
+Changing only `status` does not stale semantic evidence. Changes to the semantic request, threshold, candidate semantics, relevant mutation inputs, calibration, or provider/model identity can.
 
 ## Exit codes
 
-- 0: no blocking findings
-- 1: at least one owned error finding, or a failed fixture test
-- 2: configuration/runtime/provider error
+| Code | Meaning |
+| --- | --- |
+| `0` | No blocking findings |
+| `1` | Blocking finding or failed measurement/test command |
+| `2` | Configuration, runtime, or provider error |
 
-`jevcheck baseline` records the current active findings and does not fail because those findings exist.
+For normal checks, only owned error findings are blocking.
 
 ## Programmatic API
+
+`jevcheck` can also be embedded as a TypeScript library:
 
 ~~~ts
 import { createJevClient } from "@mhingston5/jev-cli";
@@ -468,7 +572,11 @@ const checker = createJevCheck({
       files: ["src/**/*.ts"],
       ast: {
         pattern: "while ($COND) { $$$BODY }",
-        context: { ancestor: { kind: "function_declaration" } }
+        context: {
+          ancestor: {
+            kind: "function_declaration"
+          }
+        }
       },
       question: "Can this retry loop continue without a meaningful bound?"
     }
@@ -481,9 +589,9 @@ const result = await checker.checkSource(
 );
 ~~~
 
-Every evaluation records the rule fingerprint, candidate code fingerprint, returned model, probability, threshold, and whether the answer came from cache or replay. Every reported finding also has a stable focused-range fingerprint used by baselines and SARIF.
+Every evaluation records rule/code fingerprints, model, probability, threshold, and cache/replay provenance. Findings also carry stable focused-range fingerprints used by baselines and SARIF.
 
-For programmatic replay, pass a `SemanticDecisionStore` to `createJevCheck`. `MemorySemanticDecisionStore` is useful in tests; `DiskSemanticDecisionStore` writes the versioned corpus. Call `flush()` after a recording run when using the disk store. Set `replayOnly: true` to make the checker strict and provider-free.
+For programmatic replay, pass a `SemanticDecisionStore` as `decisionStore`. `DiskSemanticDecisionStore` persists the versioned replay corpus, while `MemorySemanticDecisionStore` is useful for tests. After a recording run, call `await decisionStore.flush?.()` when using a persistent store. To replay without a provider, construct the checker with that store, omit `client`, and set `replayOnly: true`; missing decisions then fail instead of falling back to a live provider.
 
 ## Architecture
 
@@ -493,28 +601,37 @@ For programmatic replay, pass a `SemanticDecisionStore` to `createJevCheck`. `Me
             |
             v
          jevcheck
- deterministic selection + semantic judgment + policy
+ deterministic selection + semantic judgement + policy
        |            |             |
        v            v             v
-    ast-grep     baseline       reporters
+    ast-grep     evidence       reporters
        \            |             /
         +-------- engine --------+
                   |
             CLI / library API
 ~~~
 
-Provider choice changes transport, not lint semantics. Domain policy stays in jevcheck.
+Generated fixes are intentionally out of scope. `jevcheck` reports bounded semantic findings; a coding agent or deterministic refactoring tool can decide what to change.
 
-## Next slices
+## Development
 
-The core reliability architecture is now complete through evidence-gated shadow-to-owned graduation.
+~~~sh
+npm install
+npm run typecheck
+npm test
+npm run build
+npm run pack:check
+~~~
 
-Optional capability extensions remain:
+After building:
 
-1. related-node AST context across separate definitions/callers, only when a real rule needs it
-2. AST-specific mutation helpers, only if declarative regex mutants prove insufficient
+~~~sh
+node dist/cli.js --help
+~~~
 
-Generated code fixes remain intentionally out of scope. Findings should feed a coding agent or deterministic refactoring tool rather than letting the semantic judge edit code itself.
+## Agent skill
+
+The npm package includes `skills/jevcheck/SKILL.md` for coding agents working with `jevcheck` rules, evidence, suppressions, replay, and graduation.
 
 ## License
 
