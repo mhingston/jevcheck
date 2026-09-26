@@ -454,10 +454,13 @@ export function createJevCheck(options: JevCheckOptions): JevCheck {
           const threshold = rule.threshold ?? DEFAULT_THRESHOLD;
           const violated = fixtureResult.evaluations.some((item) => item.violates);
           const passed = expected === "invalid" ? violated : !violated;
-          const margin =
-            expected === "invalid"
-              ? maxProbability - threshold
-              : threshold - maxProbability;
+          const margin = Number(
+            (
+              expected === "invalid"
+                ? maxProbability - threshold
+                : threshold - maxProbability
+            ).toFixed(6),
+          );
           tests.push({
             ruleId: rule.id,
             path,
