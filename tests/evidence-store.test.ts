@@ -280,6 +280,20 @@ describe("persisted rule evidence", () => {
       .toContain("persisted mutation recall evidence is stale");
   });
 
+  it("rejects unsafe sample sizes before persisting mutation evidence", async () => {
+    const cwd = await mkdtemp(join(tmpdir(), "jevcheck-persist-sample-size-"));
+    await expect(
+      persistMutationEvidence(
+        join(cwd, "evidence.json"),
+        [rule()],
+        { mutants: [], diagnostics: [], stats },
+        [],
+        Number.MAX_SAFE_INTEGER + 1,
+        { cwd, modelNamespace: "typesafe:default" },
+      ),
+    ).rejects.toThrow("mutation evidence sampleSize must be a positive safe integer");
+  });
+
   it("includes model and sample size in mutation freshness", async () => {
     const cwd = await mkdtemp(join(tmpdir(), "jevcheck-mutation-identity-"));
     await mkdir(join(cwd, "src"), { recursive: true });
