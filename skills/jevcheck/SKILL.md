@@ -23,6 +23,14 @@ Poor examples:
 
 ## Authoring a rule
 
+Classify the concern before encoding it:
+
+- **DIRECT** — the undesirable condition is externally defined and visible in the bounded evidence; encode it.
+- **NEEDS SHAPING** — the intent is useful but terms such as simple, safe, clean, idiomatic, adequate, or well-designed do not yet have observable criteria; sharpen the boundary first.
+- **NOT FOR JEV** — deterministic tooling can prove it better, required evidence is unavailable, it is procedural guidance, or it asks the evaluator to invent a quality standard; keep it outside jevcheck.
+
+Then:
+
 1. Phrase one atomic Noul question. YES must always mean a violation.
 2. Narrow candidates deterministically. Prefer an `ast` selector when a structural construct is identifiable; otherwise use `files`, `exclude`, `prefilter`, and `unless`.
 3. For `ast`, define exactly one selector: `pattern`, `kind`, or `rule`. Let language infer from the file extension unless an explicit supported language is required.
@@ -70,6 +78,26 @@ Use `ast` when a candidate can be identified structurally. Supported selectors a
 JavaScript, TypeScript, TSX, HTML, and CSS are supported by the bundled parser. Common extensions infer the language automatically. `context.ancestor` can include the nearest related ancestor while preserving the original matched node as the exact focus.
 
 Do not turn a deterministic structural condition into a Jev question. If ast-grep alone proves the violation, use ast-grep or an ordinary linter directly instead of jevcheck.
+
+## Inspect before asking
+
+Use provider-free inspection while authoring or debugging a rule:
+
+~~~sh
+jevcheck inspect --rule security/no-sensitive-log src/example.ts
+jevcheck inspect --changed --base origin/main
+jevcheck inspect --staged --format json
+~~~
+
+Inspection runs the same deterministic candidate construction and semantic-request construction as a real check, but does not call Jev. Verify:
+
+- the candidate was selected for the intended deterministic reason
+- the focus range is exactly what YES/NO applies to
+- surrounding context is sufficient but not broader than necessary
+- the exact state/question payload contains no unintended source
+- the semantic key changes when model-visible semantics change
+
+Fix selection/context before calibrating if the evidence envelope is wrong.
 
 ## Replay before re-asking
 
@@ -176,9 +204,13 @@ The audit distinguishes:
 - missing versus stale calibration
 - drift evidence
 - mutation recall, including unmeasured or zero-judged mutants
-- rule source/provenance
+- rule source/provenance, including local policy-source freshness
 
-Current fixture semantic identities are recomputed deterministically. Drift and full-scope recall measurements are persisted in `.jevcheck/evidence.json` with freshness identities. Mutation identities also bind the recorded per-mutant outcomes, so partial or inconsistent artifact edits fail closed. If rule semantics, calibration, relevant mutation inputs, sample size, provider/model identity, or recorded outcomes change without a fresh measurement, expect the audit to report stale evidence rather than silently reuse it.
+Current fixture semantic identities are recomputed deterministically. Drift and full-scope recall measurements are persisted in `.jevcheck/evidence.json` with freshness identities. Mutation identities also bind the recorded per-mutant outcomes, so partial or inconsistent artifact edits fail closed.
+
+For local provenance such as `docs/security.md#logging`, jevcheck also fingerprints the referenced file. A changed or missing policy source makes persisted evidence stale and blocks an owned rule until the rule/policy relationship is reviewed and evidence is refreshed. The fragment is a human provenance pointer; jevcheck conservatively hashes the whole local file. HTTP(S) provenance is accepted but cannot be freshness-verified offline.
+
+If rule semantics, calibration, relevant mutation inputs, sample size, provider/model identity, recorded outcomes, or local policy source content change without a fresh measurement, expect the audit to report stale evidence rather than silently reuse it.
 
 Treat these hashes as freshness/integrity checks, not cryptographic signatures. Config and committed evidence live inside the same repository trust boundary.
 
@@ -229,6 +261,7 @@ Use the smallest relevant scope:
 jevcheck --staged
 jevcheck --changed
 jevcheck --changed --base origin/main
+jevcheck inspect --changed --base origin/main
 jevcheck test
 jevcheck test --record
 jevcheck test --drift
