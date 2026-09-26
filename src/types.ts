@@ -296,6 +296,43 @@ export interface FixtureRunResult {
   stats: RunStats;
 }
 
+export type RobustnessPerturbationId =
+  | "direct-instruction"
+  | "false-authority"
+  | "irrelevant-context";
+
+export interface RobustnessCaseResult {
+  ruleId: string;
+  path: string;
+  expected: "valid" | "invalid";
+  perturbation: RobustnessPerturbationId;
+  baselineProbability: number;
+  perturbedProbability: number;
+  delta: number;
+  threshold: number;
+  baselineViolated: boolean;
+  perturbedViolated: boolean;
+  flipped: boolean;
+  model?: string;
+}
+
+export interface RobustnessRunResult {
+  cases: RobustnessCaseResult[];
+  diagnostics: Diagnostic[];
+  stats: RunStats;
+  flips: number;
+  maxDelta: number;
+}
+
+export interface RuleThresholdDiagnostic {
+  ruleId: string;
+  validMax?: number;
+  invalidMin?: number;
+  separation?: number;
+  currentThreshold?: number;
+  separable: boolean;
+}
+
 export interface RecallMutantResult {
   ruleId: string;
   mutantId: string;
