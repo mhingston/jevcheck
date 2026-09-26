@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   formatFixtureDriftStylish,
   formatFixtureStylish,
+  formatRecallStylish,
   formatSarif,
   formatStylish,
 } from "../src/format.js";
@@ -154,6 +155,39 @@ describe("formatting", () => {
     expect(drift).toContain("threshold changed 0.80 -> 0.85");
     expect(drift).toContain("ADDED  security/no-log  valid  fixtures/added.ts");
     expect(drift).toContain("REMOVED  security/no-log  valid  fixtures/removed.ts");
+  });
+
+  it("formats mutation recall misses and invalid originals", () => {
+    const output = formatRecallStylish({
+      mutants: [{
+        ruleId: "security/no-log",
+        mutantId: "inject-secret",
+        candidateCount: 3,
+        sampled: 3,
+        judged: 2,
+        caught: 1,
+        recall: 0.5,
+        misses: ["src/miss.ts"],
+        invalidOriginals: ["src/already-bad.ts"],
+      }],
+      weakestRecall: 0.5,
+      diagnostics: [],
+      stats: {
+        filesChecked: 5,
+        candidatesChecked: 5,
+        requests: 3,
+        cacheHits: 2,
+        replayHits: 0,
+        replayMisses: 0,
+        inputTokens: 30,
+        outputTokens: 3,
+      },
+    });
+
+    expect(output).toContain("1/2 caught  recall=0.50");
+    expect(output).toContain("MISS     src/miss.ts");
+    expect(output).toContain("INVALID  src/already-bad.ts");
+    expect(output).toContain("Weakest measured recall: 0.50");
   });
 
   it("normalizes and URI-encodes artifact paths", () => {
