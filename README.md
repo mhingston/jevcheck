@@ -603,7 +603,7 @@ npx jevcheck rules audit
 npx jevcheck
 ~~~
 
-Changing only `status` does not stale semantic evidence. Changes to the semantic request, threshold, candidate semantics, relevant mutation inputs, calibration, provider/model identity, or the contents of a referenced local policy source can.
+Changing only `status` does not make semantic evidence stale. Changes to the semantic request, threshold, candidate semantics, relevant mutation inputs, calibration, provider/model identity, or the contents of a referenced local policy source can make persisted evidence stale.
 
 For a local source such as `docs/security.md#logging`, jevcheck fingerprints the referenced file content together with the source reference. If that file changes or disappears, persisted rule evidence becomes stale and an owned rule fails closed until its evidence is reviewed and refreshed. The fragment is provenance for humans; freshness currently hashes the whole referenced file conservatively. HTTP(S) sources remain valid provenance but cannot be freshness-verified offline.
 
