@@ -118,6 +118,54 @@ describe("fixture calibration", () => {
     expect(drift.removed.map((entry) => entry.path)).toEqual(["fixtures/removed.ts"]);
   });
 
+  it("marks threshold changes stale rather than model drift", () => {
+    const recorded = [{
+      ruleId: "rule/a",
+      path: "fixtures/a.ts",
+      expected: "invalid" as const,
+      probability: 0.91,
+      threshold: 0.8,
+      semanticKeys: ["semantic-a"],
+      model: "jev-a",
+    }];
+    const current: FixtureTestResult[] = [{
+      ...baseTests[0]!,
+      threshold: 0.85,
+      margin: 0.06,
+    }];
+
+    const drift = compareCalibration(recorded, current);
+    expect(drift.compared).toBe(0);
+    expect(drift.moved).toHaveLength(0);
+    expect(drift.stale[0]).toMatchObject({
+      reason: "threshold",
+      beforeThreshold: 0.8,
+      afterThreshold: 0.85,
+    });
+  });
+
+  it("does not report unchanged probabilities as movement when driftThreshold is zero", () => {
+    const recorded = [{
+      ruleId: "rule/a",
+      path: "fixtures/a.ts",
+      expected: "invalid" as const,
+      probability: 0.91,
+      threshold: 0.8,
+      semanticKeys: ["semantic-a"],
+    }];
+    const drift = compareCalibration(recorded, [baseTests[0]!], 0);
+    expect(drift.compared).toBe(1);
+    expect(drift.moved).toHaveLength(0);
+  });
+
+  it("refuses to calibrate fixtures that produced no semantic evaluations", async () => {
+    const cwd = await mkdtemp(join(tmpdir(), "jevcheck-calibration-empty-"));
+    await expect(writeCalibration(join(cwd, "calibration.json"), [{
+      ...baseTests[0]!,
+      semanticKeys: [],
+    }])).rejects.toThrow("produced no semantic evaluations");
+  });
+
   it("marks changed semantic inputs as stale rather than model drift", () => {
     const recorded = [{
       ruleId: "rule/a",
@@ -141,6 +189,7 @@ describe("fixture calibration", () => {
     expect(drift.stale).toEqual([
       expect.objectContaining({
         path: "fixtures/a.ts",
+        reason: "semantic-inputs",
         beforeSemanticKeys: ["old-semantic"],
         afterSemanticKeys: ["new-semantic"],
       }),
