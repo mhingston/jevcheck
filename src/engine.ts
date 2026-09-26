@@ -29,7 +29,7 @@ const DEFAULT_CHUNK_CHARS = 6000;
 const DEFAULT_OVERLAP_LINES = 4;
 const DEFAULT_CONTEXT_LINES = 20;
 const DEFAULT_THRESHOLD = 0.8;
-const CACHE_SEMANTICS_VERSION = "v3";
+const CACHE_SEMANTICS_VERSION = "v4";
 
 function hash(value: string): string {
   return createHash("sha256").update(value).digest("hex");
@@ -110,6 +110,9 @@ function cacheKey(
   contextEndLine: number,
   focusStartLine: number,
   focusEndLine: number,
+  focusStartColumn: number | undefined,
+  focusEndColumn: number | undefined,
+  focusKind: string | undefined,
   codeHash: string,
 ): string {
   return hash(
@@ -122,6 +125,9 @@ function cacheKey(
       String(contextEndLine),
       String(focusStartLine),
       String(focusEndLine),
+      String(focusStartColumn ?? ""),
+      String(focusEndColumn ?? ""),
+      focusKind ?? "",
       codeHash,
     ].join("\n"),
   );
@@ -136,8 +142,8 @@ function labelsFor(rule: JevCheckRule): { true: string; false: string } {
 
 function focusedQuestion(rule: JevCheckRule): string {
   return [
-    "Judge only whether the rule is violated by code inside focusLineRange.",
-    "Code outside focusLineRange is surrounding context only and must not itself cause a positive answer.",
+    "Judge only whether the rule is violated by code inside focusLineRange/focusRange.",
+    "Code outside that focus is surrounding context only and must not itself cause a positive answer.",
     rule.question,
   ].join(" ");
 }
@@ -203,6 +209,9 @@ export function createJevCheck(options: JevCheckOptions): JevCheck {
           candidate.endLine,
           candidate.focusStartLine,
           candidate.focusEndLine,
+          candidate.focusStartColumn,
+          candidate.focusEndColumn,
+          candidate.focusKind,
           codeHash,
         );
 
@@ -225,11 +234,26 @@ export function createJevCheck(options: JevCheckOptions): JevCheck {
           cached = true;
           result.stats.cacheHits += 1;
         } else {
+          const focusRange =
+            candidate.focusStartColumn !== undefined && candidate.focusEndColumn !== undefined
+              ? {
+                  start: {
+                    line: candidate.focusStartLine,
+                    column: candidate.focusStartColumn,
+                  },
+                  end: {
+                    line: candidate.focusEndLine,
+                    column: candidate.focusEndColumn,
+                  },
+                }
+              : undefined;
           const response = await options.client.systemOne({
             state: {
               path,
               lineRange: [candidate.startLine, candidate.endLine],
               focusLineRange: [candidate.focusStartLine, candidate.focusEndLine],
+              ...(focusRange ? { focusRange } : {}),
+              ...(candidate.focusKind ? { focusKind: candidate.focusKind } : {}),
               code: candidate.text,
             },
             questions: {
@@ -254,6 +278,9 @@ export function createJevCheck(options: JevCheckOptions): JevCheck {
           path,
           startLine: candidate.focusStartLine,
           endLine: candidate.focusEndLine,
+          startColumn: candidate.focusStartColumn,
+          endColumn: candidate.focusEndColumn,
+          focusKind: candidate.focusKind,
           probability,
           threshold,
           model,

@@ -25,12 +25,28 @@ Poor examples:
 
 1. Phrase one atomic Noul question. YES must always mean a violation.
 2. Narrow candidates deterministically. Prefer an `ast` selector when a structural construct is identifiable; otherwise use `files`, `exclude`, `prefilter`, and `unless`.
-3. Keep AST context bounded. The matched node is the focus; surrounding lines are evidence only.
-4. Add true and false criteria when the semantic boundary is easy to confuse.
-5. Add both valid and invalid fixtures.
-6. Start the rule in `shadow` status.
-7. Inspect false positives, false negatives, probability margins, and model drift before making it `owned`.
-8. Keep thresholds, CI behavior, suppressions, baselines, and other policy in code rather than asking the model to decide them.
+3. For `ast`, define exactly one selector: `pattern`, `kind`, or `rule`. Let language infer from the file extension unless an explicit supported language is required.
+4. Keep AST focus precise. The matched node is what Jev judges; `context.ancestor` and surrounding lines are evidence only.
+5. Keep all context bounded. Do not increase `chunkChars` merely to avoid a skipped oversized construct without checking the token/cost implications.
+6. Add true and false criteria when the semantic boundary is easy to confuse.
+7. Add both valid and invalid fixtures.
+8. Start the rule in `shadow` status.
+9. Inspect false positives, false negatives, probability margins, and model drift before making it `owned`.
+10. Keep thresholds, CI behavior, suppressions, baselines, and other policy in code rather than asking the model to decide them.
+
+## AST-aware narrowing
+
+Use `ast` when a candidate can be identified structurally. Supported selectors are:
+
+~~~json
+{ "pattern": "console.log($A)" }
+{ "kind": "call_expression" }
+{ "rule": { "kind": "call_expression" } }
+~~~
+
+JavaScript, TypeScript, TSX, HTML, and CSS are supported by the bundled parser. Common extensions infer the language automatically. `context.ancestor` can include the nearest related ancestor while preserving the original matched node as the exact focus.
+
+Do not turn a deterministic structural condition into a Jev question. If ast-grep alone proves the violation, use ast-grep or an ordinary linter directly instead of jevcheck.
 
 ## Suppressing known findings
 

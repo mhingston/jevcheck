@@ -8,9 +8,11 @@ import { createJevCheck } from "../src/engine.js";
 
 class FakeClient implements SystemOneLikeClient {
   calls = 0;
+  states: unknown[] = [];
 
   async systemOne(request: SystemOneRequest): Promise<SystemOneResponse> {
     this.calls += 1;
+    this.states.push(request.state);
     const state = request.state as {
       code: string;
       lineRange: [number, number];
@@ -37,9 +39,9 @@ const astRule = {
   severity: "error" as const,
   threshold: 0.8,
   ast: {
-    language: "typescript" as const,
-    rule: { pattern: "console.log($A)" },
+    pattern: "console.log($A)",
     contextBefore: 1,
+    contextAfter: 1,
   },
 };
 
@@ -117,6 +119,24 @@ describe("createJevCheck", () => {
 
     expect(result.findings).toHaveLength(1);
     expect(result.findings[0]).toMatchObject({ startLine: 1, endLine: 2 });
+  });
+
+  it("passes exact AST focus metadata to Jev and the result", async () => {
+    const client = new FakeClient();
+    const checker = createJevCheck({ client, rules: [astRule] });
+    const result = await checker.checkSource("src/a.ts", "const x = 1; console.log(secret);");
+
+    expect(result.findings[0]).toMatchObject({
+      startLine: 1,
+      startColumn: 14,
+      focusKind: "call_expression",
+    });
+    expect(client.states[0]).toMatchObject({
+      focusRange: {
+        start: { line: 1, column: 14 },
+      },
+      focusKind: "call_expression",
+    });
   });
 
   it("suppresses an AST finding only when an inline comment includes a reason", async () => {

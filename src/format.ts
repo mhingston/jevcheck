@@ -3,17 +3,29 @@ import type { CheckResult, FixtureRunResult } from "./types.js";
 export function formatStylish(result: CheckResult): string {
   const lines: string[] = [];
   const findings = [...result.findings].sort(
-    (a, b) => a.path.localeCompare(b.path) || a.startLine - b.startLine || a.ruleId.localeCompare(b.ruleId),
+    (a, b) =>
+      a.path.localeCompare(b.path) ||
+      a.startLine - b.startLine ||
+      (a.startColumn ?? 0) - (b.startColumn ?? 0) ||
+      a.ruleId.localeCompare(b.ruleId),
   );
 
   for (const finding of findings) {
     const kind = finding.blocking ? "error" : finding.status === "shadow" ? "shadow" : finding.severity;
+    const range =
+      finding.startColumn !== undefined && finding.endColumn !== undefined
+        ? finding.startLine +
+          ":" +
+          finding.startColumn +
+          "-" +
+          finding.endLine +
+          ":" +
+          finding.endColumn
+        : finding.startLine + "-" + finding.endLine;
     lines.push(
       finding.path +
         ":" +
-        finding.startLine +
-        "-" +
-        finding.endLine +
+        range +
         "  " +
         kind.padEnd(7) +
         "  " +
@@ -118,6 +130,8 @@ export function formatSarif(result: CheckResult): string {
             region: {
               startLine: finding.startLine,
               endLine: finding.endLine,
+              ...(finding.startColumn !== undefined ? { startColumn: finding.startColumn } : {}),
+              ...(finding.endColumn !== undefined ? { endColumn: finding.endColumn } : {}),
             },
           },
         }],
@@ -130,6 +144,7 @@ export function formatSarif(result: CheckResult): string {
           status: finding.status,
           model: finding.model,
           blocking: finding.blocking,
+          ...(finding.focusKind ? { focusKind: finding.focusKind } : {}),
         },
       })),
       invocations: [{

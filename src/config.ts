@@ -24,24 +24,63 @@ function validateNonNegativeInteger(value: unknown, field: string): void {
   }
 }
 
+function validateAstSelector(value: Record<string, unknown>, field: string): void {
+  const hasPattern = value.pattern !== undefined;
+  const hasKind = value.kind !== undefined;
+  const hasRule = value.rule !== undefined;
+  if (Number(hasPattern) + Number(hasKind) + Number(hasRule) !== 1) {
+    throw new Error(field + " must define exactly one of pattern, kind, or rule");
+  }
+  if (hasPattern && (typeof value.pattern !== "string" || !value.pattern.trim())) {
+    throw new Error(field + ".pattern must be a non-empty string");
+  }
+  if (hasKind && (typeof value.kind !== "string" || !value.kind.trim())) {
+    throw new Error(field + ".kind must be a non-empty string");
+  }
+  if (hasRule && (!value.rule || typeof value.rule !== "object" || Array.isArray(value.rule))) {
+    throw new Error(field + ".rule must be an ast-grep rule object");
+  }
+}
+
 function validateAst(value: unknown, ruleId: string): void {
   if (value === undefined) return;
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw new Error(ruleId + ".ast must be an object");
   }
   const ast = value as Record<string, unknown>;
-  if (ast.language !== "typescript" && ast.language !== "tsx") {
-    throw new Error(ruleId + ".ast.language must be typescript or tsx");
+  validateAstSelector(ast, ruleId + ".ast");
+
+  if (
+    ast.language !== undefined &&
+    ast.language !== "javascript" &&
+    ast.language !== "typescript" &&
+    ast.language !== "tsx" &&
+    ast.language !== "html" &&
+    ast.language !== "css"
+  ) {
+    throw new Error(ruleId + ".ast.language must be javascript, typescript, tsx, html, or css");
   }
-  if (!ast.rule || typeof ast.rule !== "object" || Array.isArray(ast.rule)) {
-    throw new Error(ruleId + ".ast.rule must be an ast-grep rule object");
-  }
+
   validateNonNegativeInteger(ast.contextBefore, ruleId + ".ast.contextBefore");
   validateNonNegativeInteger(ast.contextAfter, ruleId + ".ast.contextAfter");
+
+  if (ast.context !== undefined) {
+    if (!ast.context || typeof ast.context !== "object" || Array.isArray(ast.context)) {
+      throw new Error(ruleId + ".ast.context must be an object");
+    }
+    const context = ast.context as Record<string, unknown>;
+    if (context.ancestor !== undefined) {
+      if (!context.ancestor || typeof context.ancestor !== "object" || Array.isArray(context.ancestor)) {
+        throw new Error(ruleId + ".ast.context.ancestor must be an ast selector");
+      }
+      validateAstSelector(context.ancestor as Record<string, unknown>, ruleId + ".ast.context.ancestor");
+    }
+  }
+
   try {
     validateAstCandidate(ast as unknown as AstCandidateConfig);
   } catch (error) {
-    throw new Error(ruleId + ".ast.rule is invalid: " + (error instanceof Error ? error.message : String(error)));
+    throw new Error(ruleId + ".ast is invalid: " + (error instanceof Error ? error.message : String(error)));
   }
 }
 
