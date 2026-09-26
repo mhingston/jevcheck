@@ -30,6 +30,13 @@ export interface RuleFixtures {
   invalid?: string[];
 }
 
+export interface RuleMutant {
+  id: string;
+  pattern: string;
+  replacement: string;
+  replaceAll?: boolean;
+}
+
 export interface JevCheckRule {
   id: string;
   question: string;
@@ -47,6 +54,7 @@ export interface JevCheckRule {
   contextLines?: number;
   criteria?: RuleCriteria;
   fixtures?: RuleFixtures;
+  mutants?: RuleMutant[];
 }
 
 export interface JevCheckConfig {
@@ -252,6 +260,25 @@ export interface FixtureDriftResult {
 
 export interface FixtureRunResult {
   tests: FixtureTestResult[];
+  diagnostics: Diagnostic[];
+  stats: RunStats;
+}
+
+export interface RecallMutantResult {
+  ruleId: string;
+  mutantId: string;
+  candidateCount: number;
+  sampled: number;
+  judged: number;
+  caught: number;
+  recall?: number;
+  misses: string[];
+  invalidOriginals: string[];
+}
+
+export interface RecallRunResult {
+  mutants: RecallMutantResult[];
+  weakestRecall?: number;
   diagnostics: Diagnostic[];
   stats: RunStats;
 }

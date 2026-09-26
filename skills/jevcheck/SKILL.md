@@ -84,6 +84,40 @@ Do not confuse calibration with replay:
 - replay reuses prior semantic decisions and never calls a provider
 - drift intentionally calls the provider again and measures movement
 
+## Measure mutation recall
+
+Use mutation recall after fixtures/calibration when you need evidence that a rule still catches representative mistakes in real repository context.
+
+Configure deterministic JSON-safe mutants on the rule, for example:
+
+~~~json
+{
+  "mutants": [{
+    "id": "drop-limit",
+    "pattern": "/\\.limit\\([^)]*\\)/g",
+    "replacement": "",
+    "replaceAll": true
+  }]
+}
+~~~
+
+Then run:
+
+~~~sh
+jevcheck recall
+jevcheck recall --sample-size 20
+~~~
+
+Interpretation:
+
+- files are sampled deterministically, not by filesystem order
+- repository files are never changed on disk
+- files already violating before mutation are excluded from the recall denominator
+- a mutation that defeats the rule's prefilter/candidate selector is a recall miss
+- low recall can mean the semantic question is weak **or** deterministic narrowing is too aggressive
+
+Do not promote a rule to `owned` from fixture accuracy alone. Mutation recall is the evidence that the rule survives realistic repository context. This slice measures recall only; the later graduation gate should decide what minimum evidence is required.
+
 ## Suppressing known findings
 
 Use a committed baseline for accepted existing backlog:
@@ -112,6 +146,7 @@ jevcheck --changed --base origin/main
 jevcheck test
 jevcheck test --record
 jevcheck test --drift
+jevcheck recall
 jevcheck record
 jevcheck replay
 jevcheck list

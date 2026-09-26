@@ -22,6 +22,7 @@ import {
   formatFixtureDriftStylish,
   formatFixtureStylish,
   formatJson,
+  formatRecallStylish,
   formatSarif,
   formatStylish,
 } from "./format.js";
@@ -29,7 +30,7 @@ import { changedFiles, stagedSources } from "./git.js";
 import { DEFAULT_REPLAY_FILE, DiskSemanticDecisionStore } from "./replay.js";
 import type { SourceInput } from "./types.js";
 
-type Command = "check" | "test" | "list" | "baseline" | "record" | "replay";
+type Command = "check" | "test" | "list" | "baseline" | "record" | "replay" | "recall";
 type OutputFormat = "stylish" | "json" | "sarif";
 
 interface CliOptions {
@@ -44,6 +45,8 @@ interface CliOptions {
   cache: boolean;
   testRecord: boolean;
   testDrift: boolean;
+  sampleSize: number;
+  sampleSizeSet: boolean;
   patterns: string[];
 }
 
@@ -62,6 +65,7 @@ function usage(): string {
     "  jevcheck baseline [patterns...] [options]",
     "  jevcheck record [patterns...] [options]",
     "  jevcheck replay [patterns...] [options]",
+    "  jevcheck recall [patterns...] [options]",
     "",
     "Options:",
     "  --config <path>       Config file (default: jevcheck.config.json)",
@@ -74,11 +78,13 @@ function usage(): string {
     "  --no-cache            Disable the answer cache",
     "  --record              With test, record fixture probabilities",
     "  --drift               With test, re-ask fixtures and compare calibration",
+    "  --sample-size <n>     With recall, files sampled per mutant (default: 12)",
     "  -h, --help            Show help",
     "",
     "record captures semantic decisions to replayFile (default: .jevcheck/replay.json).",
     "replay is strict and offline: missing decisions are errors and never reach a provider.",
     "test --record writes calibrationFile; test --drift bypasses the answer cache.",
+    "recall mutates sampled real files in memory; repository files are never modified.",
     "",
     "Only owned error findings make the check command exit 1. Shadow findings are advisory.",
   ].join("\n");
@@ -98,7 +104,8 @@ function parseArgs(argv: string[]): CliOptions {
     args[0] === "list" ||
     args[0] === "baseline" ||
     args[0] === "record" ||
-    args[0] === "replay"
+    args[0] === "replay" ||
+    args[0] === "recall"
   ) {
     command = args.shift() as Command;
   }
@@ -112,6 +119,8 @@ function parseArgs(argv: string[]): CliOptions {
     cache: true,
     testRecord: false,
     testDrift: false,
+    sampleSize: 12,
+    sampleSizeSet: false,
     patterns: [],
   };
 
@@ -163,6 +172,16 @@ function parseArgs(argv: string[]): CliOptions {
       case "--drift":
         options.testDrift = true;
         break;
+      case "--sample-size": {
+        const value = Number(requireValue(args, i, arg));
+        if (!Number.isInteger(value) || value < 1) {
+          throw new Error("--sample-size must be a positive integer");
+        }
+        options.sampleSize = value;
+        options.sampleSizeSet = true;
+        i += 1;
+        break;
+      }
       case "-h":
       case "--help":
         console.log(usage());
@@ -188,6 +207,12 @@ function parseArgs(argv: string[]): CliOptions {
   if (options.testRecord && options.testDrift) {
     throw new Error("choose either test --record or test --drift");
   }
+  if (options.sampleSizeSet && options.command !== "recall") {
+    throw new Error("--sample-size is only valid with recall");
+  }
+  if (options.command === "recall" && options.staged) {
+    throw new Error("recall operates on working-tree files; --staged is not supported");
+  }
   return options;
 }
 
@@ -202,6 +227,7 @@ async function main(): Promise<void> {
       severity: rule.severity ?? "error",
       threshold: rule.threshold ?? 0.8,
       source: rule.source,
+      mutants: rule.mutants?.length ?? 0,
       candidate: rule.ast ? "ast" : rule.wholeFile ? "whole-file" : rule.prefilter ? "prefilter" : "chunks",
     }));
     console.log(
@@ -218,7 +244,9 @@ async function main(): Promise<void> {
                 "  threshold=" +
                 rule.threshold +
                 "  candidate=" +
-                rule.candidate,
+                rule.candidate +
+                "  mutants=" +
+                rule.mutants,
             )
             .join("\n"),
     );
@@ -387,6 +415,13 @@ async function main(): Promise<void> {
     console.log(
       args.format === "json" ? formatJson(empty) : args.format === "sarif" ? formatSarif(empty) : "No files matched.",
     );
+    return;
+  }
+
+  if (args.command === "recall") {
+    const result = await checker.recallFiles(paths, args.sampleSize);
+    console.log(args.format === "json" ? formatJson(result) : formatRecallStylish(result));
+    process.exitCode = result.diagnostics.some((item) => item.level === "error") ? 1 : 0;
     return;
   }
 
