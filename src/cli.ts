@@ -395,6 +395,13 @@ async function main(): Promise<void> {
     paths = await discoverFiles(args.patterns.length ? args.patterns : includes, config.exclude ?? []);
   }
 
+  if (args.command === "recall") {
+    const result = await checker.recallFiles(paths, args.sampleSize);
+    console.log(args.format === "json" ? formatJson(result) : formatRecallStylish(result));
+    process.exitCode = result.diagnostics.some((item) => item.level === "error") ? 1 : 0;
+    return;
+  }
+
   if (!paths.length) {
     const empty = {
       findings: [],
@@ -415,13 +422,6 @@ async function main(): Promise<void> {
     console.log(
       args.format === "json" ? formatJson(empty) : args.format === "sarif" ? formatSarif(empty) : "No files matched.",
     );
-    return;
-  }
-
-  if (args.command === "recall") {
-    const result = await checker.recallFiles(paths, args.sampleSize);
-    console.log(args.format === "json" ? formatJson(result) : formatRecallStylish(result));
-    process.exitCode = result.diagnostics.some((item) => item.level === "error") ? 1 : 0;
     return;
   }
 
