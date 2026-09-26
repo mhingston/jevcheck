@@ -78,11 +78,104 @@ function emptyArtifact(): RuleEvidenceArtifact {
   };
 }
 
-function stringArray(value: unknown, field: string): string[] {
-  if (!Array.isArray(value) || value.some((item) => typeof item !== "string")) {
-    throw new Error(field + " must be an array of strings");
+function nonEmptyString(value: unknown, field: string): string {
+  if (typeof value !== "string" || !value.trim()) {
+    throw new Error(field + " must be a non-empty string");
   }
-  return [...value].sort() as string[];
+  return value;
+}
+
+function nonNegativeInteger(value: unknown, field: string): number {
+  if (!Number.isInteger(value) || (value as number) < 0) {
+    throw new Error(field + " must be a non-negative integer");
+  }
+  return value as number;
+}
+
+function stringArray(value: unknown, field: string): string[] {
+  if (
+    !Array.isArray(value) ||
+    value.some((item) => typeof item !== "string" || !item.trim())
+  ) {
+    throw new Error(field + " must be an array of non-empty strings");
+  }
+  const strings = value as string[];
+  if (new Set(strings).size !== strings.length) {
+    throw new Error(field + " must not contain duplicates");
+  }
+  return [...strings].sort();
+}
+
+function validateRecallMutant(
+  value: unknown,
+  field: string,
+  parentRuleId: string,
+): RecallMutantResult {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(field + " must be an object");
+  }
+  const item = value as Record<string, unknown>;
+  const ruleId = nonEmptyString(item.ruleId, field + ".ruleId");
+  const mutantId = nonEmptyString(item.mutantId, field + ".mutantId");
+  if (ruleId !== parentRuleId) {
+    throw new Error(field + ".ruleId must match parent ruleId " + parentRuleId);
+  }
+
+  const candidateCount = nonNegativeInteger(item.candidateCount, field + ".candidateCount");
+  const sampled = nonNegativeInteger(item.sampled, field + ".sampled");
+  const judged = nonNegativeInteger(item.judged, field + ".judged");
+  const caught = nonNegativeInteger(item.caught, field + ".caught");
+  if (sampled > candidateCount) {
+    throw new Error(field + ".sampled must not exceed candidateCount");
+  }
+  if (judged > sampled) {
+    throw new Error(field + ".judged must not exceed sampled");
+  }
+  if (caught > judged) {
+    throw new Error(field + ".caught must not exceed judged");
+  }
+
+  const misses = stringArray(item.misses, field + ".misses");
+  const invalidOriginals = stringArray(item.invalidOriginals, field + ".invalidOriginals");
+  if (misses.length !== judged - caught) {
+    throw new Error(field + ".misses must contain exactly judged - caught entries");
+  }
+  if (invalidOriginals.length !== sampled - judged) {
+    throw new Error(field + ".invalidOriginals must contain exactly sampled - judged entries");
+  }
+
+  let recall: number | undefined;
+  if (judged === 0) {
+    if (item.recall !== undefined) {
+      throw new Error(field + ".recall must be omitted when judged is 0");
+    }
+  } else {
+    if (
+      typeof item.recall !== "number" ||
+      !Number.isFinite(item.recall) ||
+      item.recall < 0 ||
+      item.recall > 1
+    ) {
+      throw new Error(field + ".recall must be between 0 and 1 when judged is positive");
+    }
+    const expected = caught / judged;
+    if (Math.abs(item.recall - expected) > Number.EPSILON * 8) {
+      throw new Error(field + ".recall must equal caught / judged");
+    }
+    recall = item.recall;
+  }
+
+  return {
+    ruleId,
+    mutantId,
+    candidateCount,
+    sampled,
+    judged,
+    caught,
+    ...(recall !== undefined ? { recall } : {}),
+    misses,
+    invalidOriginals,
+  };
 }
 
 function validateArtifact(value: unknown): RuleEvidenceArtifact {
@@ -127,29 +220,55 @@ function validateArtifact(value: unknown): RuleEvidenceArtifact {
   });
 
   const mutation = file.mutation.map((value, index): PersistedMutationEvidence => {
+    const field = "evidence.mutation[" + index + "]";
     if (!value || typeof value !== "object" || Array.isArray(value)) {
-      throw new Error("evidence.mutation[" + index + "] must be an object");
+      throw new Error(field + " must be an object");
     }
     const item = value as Record<string, unknown>;
-    for (const field of ["ruleId", "identity", "modelNamespace"] as const) {
-      if (typeof item[field] !== "string" || !(item[field] as string).trim()) {
-        throw new Error("evidence.mutation[" + index + "]." + field + " must be non-empty");
-      }
-    }
+    const ruleId = nonEmptyString(item.ruleId, field + ".ruleId");
+    const identity = nonEmptyString(item.identity, field + ".identity");
+    const modelNamespace = nonEmptyString(item.modelNamespace, field + ".modelNamespace");
     if (!Number.isInteger(item.sampleSize) || (item.sampleSize as number) < 1) {
-      throw new Error("evidence.mutation[" + index + "].sampleSize must be a positive integer");
+      throw new Error(field + ".sampleSize must be a positive integer");
     }
     if (!Array.isArray(item.mutants)) {
-      throw new Error("evidence.mutation[" + index + "].mutants must be an array");
+      throw new Error(field + ".mutants must be an array");
     }
+
+    const mutants = item.mutants.map((mutant, mutantIndex) =>
+      validateRecallMutant(mutant, field + ".mutants[" + mutantIndex + "]", ruleId),
+    );
+    const mutantIds = new Set<string>();
+    for (const mutant of mutants) {
+      if (mutantIds.has(mutant.mutantId)) {
+        throw new Error(field + ".mutants contains duplicate mutantId: " + mutant.mutantId);
+      }
+      mutantIds.add(mutant.mutantId);
+    }
+
     return {
-      ruleId: item.ruleId as string,
-      identity: item.identity as string,
-      modelNamespace: item.modelNamespace as string,
+      ruleId,
+      identity,
+      modelNamespace,
       sampleSize: item.sampleSize as number,
-      mutants: item.mutants as RecallMutantResult[],
+      mutants,
     };
   });
+
+  const driftRuleIds = new Set<string>();
+  for (const item of drift) {
+    if (driftRuleIds.has(item.ruleId)) {
+      throw new Error("evidence.drift contains duplicate ruleId: " + item.ruleId);
+    }
+    driftRuleIds.add(item.ruleId);
+  }
+  const mutationRuleIds = new Set<string>();
+  for (const item of mutation) {
+    if (mutationRuleIds.has(item.ruleId)) {
+      throw new Error("evidence.mutation contains duplicate ruleId: " + item.ruleId);
+    }
+    mutationRuleIds.add(item.ruleId);
+  }
 
   return {
     version: RULE_EVIDENCE_FORMAT_VERSION,

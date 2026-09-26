@@ -116,7 +116,7 @@ Interpretation:
 - a mutation that defeats the rule's prefilter/candidate selector is a recall miss
 - low recall can mean the semantic question is weak **or** deterministic narrowing is too aggressive
 
-Do not promote a rule to `owned` from fixture accuracy alone. Mutation recall is the evidence that the rule survives realistic repository context. This slice measures recall only; the later graduation gate should decide what minimum evidence is required.
+Do not promote a rule to `owned` from fixture accuracy alone. Mutation recall is evidence that the rule survives realistic repository context. Full-scope recall is persisted and evaluated by the graduation gate, whose default minimum recall is 0.90.
 
 ## Audit rule evidence
 
