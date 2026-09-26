@@ -174,6 +174,79 @@ describe("createJevCheck", () => {
     expect(result.suppressedFindings[0]?.suppression).toBe("baseline");
   });
 
+  it("measures mutation recall on real files and excludes pre-existing violations", async () => {
+    const cwd = await mkdtemp(join(tmpdir(), "jevcheck-recall-"));
+    const src = join(cwd, "src");
+    await mkdir(src, { recursive: true });
+    await writeFile(join(src, "a.ts"), "console.log(redacted);");
+    await writeFile(
+      join(src, "b.ts"),
+      ["console.log(secret);", "const marker = \"redacted\";"].join("\n"),
+    );
+
+    const checker = createJevCheck({
+      client: new FakeClient(),
+      rules: [{
+        id: "security/no-secret-log",
+        question: "Does this code log a secret?",
+        threshold: 0.8,
+        prefilter: "console\\.log",
+        mutants: [{
+          id: "redacted-to-secret",
+          pattern: "/redacted/g",
+          replacement: "secret",
+          replaceAll: true,
+        }],
+      }],
+    });
+
+    const result = await checker.recallFiles(["src/a.ts", "src/b.ts"], 12, cwd);
+
+    expect(result.mutants).toEqual([expect.objectContaining({
+      ruleId: "security/no-secret-log",
+      mutantId: "redacted-to-secret",
+      candidateCount: 2,
+      sampled: 2,
+      judged: 1,
+      caught: 1,
+      recall: 1,
+      misses: [],
+      invalidOriginals: ["src/b.ts"],
+    })]);
+    expect(result.weakestRecall).toBe(1);
+  });
+
+  it("counts a mutated file with no semantic candidate as a recall miss", async () => {
+    const cwd = await mkdtemp(join(tmpdir(), "jevcheck-recall-miss-"));
+    const src = join(cwd, "src");
+    await mkdir(src, { recursive: true });
+    await writeFile(join(src, "a.ts"), "const value = \"redacted\";");
+
+    const checker = createJevCheck({
+      client: new FakeClient(),
+      rules: [{
+        id: "security/no-secret-log",
+        question: "Does this code log a secret?",
+        threshold: 0.8,
+        prefilter: "console\\.log",
+        mutants: [{
+          id: "redacted-to-secret",
+          pattern: "/redacted/",
+          replacement: "secret",
+        }],
+      }],
+    });
+
+    const result = await checker.recallFiles(["src/a.ts"], 12, cwd);
+
+    expect(result.mutants[0]).toMatchObject({
+      judged: 1,
+      caught: 0,
+      recall: 0,
+      misses: ["src/a.ts"],
+    });
+  });
+
   it("marks a passing fixture exactly 0.05 from threshold as thin", async () => {
     class BoundaryClient implements SystemOneLikeClient {
       async systemOne(): Promise<SystemOneResponse> {
