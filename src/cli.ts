@@ -442,7 +442,7 @@ async function main(): Promise<void> {
     if (!fixtureFailed && confirmationReady) {
       recorded = {
         file: confirmationFile,
-        fixtures: await writeCalibration(confirmationFile, result.tests),
+        fixtures: await writeCalibration(confirmationFile, result.tests, modelNamespace),
       };
     }
 
