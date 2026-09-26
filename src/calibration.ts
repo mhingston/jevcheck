@@ -94,7 +94,7 @@ export function thresholdDiagnostics(
       const currentThreshold = ruleEntries[0]?.threshold;
       const separation =
         validMax !== undefined && invalidMin !== undefined
-          ? invalidMin - validMax
+          ? Number((invalidMin - validMax).toFixed(6))
           : undefined;
 
       return {
