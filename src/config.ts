@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { validateAstCandidate } from "./ast.js";
 import { compilePattern } from "./candidates.js";
+import { parseRuleEvidencePolicy } from "./evidence.js";
 import type { AstCandidateConfig, JevCheckConfig, JevCheckRule } from "./types.js";
 
 function nonEmptyStrings(value: unknown, field: string): string[] | undefined {
@@ -235,7 +236,9 @@ export function parseConfig(value: unknown): JevCheckConfig {
     baselineFile: optionalNonEmptyString(config.baselineFile, "baselineFile"),
     replayFile: optionalNonEmptyString(config.replayFile, "replayFile"),
     calibrationFile: optionalNonEmptyString(config.calibrationFile, "calibrationFile"),
+    evidenceFile: optionalNonEmptyString(config.evidenceFile, "evidenceFile"),
     driftThreshold: config.driftThreshold as number | undefined,
+    graduation: parseRuleEvidencePolicy(config.graduation),
     suppressionMarker: optionalNonEmptyString(config.suppressionMarker, "suppressionMarker"),
     rules,
   };
