@@ -38,7 +38,7 @@ Poor examples:
 
 ## Context sufficiency and trust boundary
 
-The model should only see context that is relevant to the exact semantic focus. Nearby code can provide evidence, but it must not become an independent source of violations outside the focus.
+A semantic rule is only as defensible as the evidence supplied to it. The model should only see context that is relevant to the exact semantic focus, and nearby code can provide evidence, but it must not become an independent source of violations outside the focus.
 
 If the rule cannot be judged from the selected focus plus bounded context:
 
@@ -247,3 +247,17 @@ jevcheck --changed --base origin/main --format sarif > jevcheck.sarif
 A shadow finding is advisory. Only an owned error finding is blocking. Suppressed findings remain visible in JSON output for auditability.
 
 Do not treat a high Jev probability as proof. It is a semantic signal that should be evaluated against labelled fixtures and real review outcomes.
+
+## Stop rule
+
+Stop refining a rule when its bounded meaning is clear, representative valid and invalid cases are covered, current evidence is healthy, and another change would mainly optimize the measured signal rather than improve the rule.
+
+Do not:
+
+- widen context simply to move probabilities
+- tune a threshold merely to make fixtures pass when labelled ranges overlap
+- weaken graduation policy to make an owned rule admissible
+- add speculative exclusions or suppressions just to improve measured results
+- broaden an atomic semantic question into a general quality judgement
+
+If a rule needs repeated exceptions, very broad context, or unstable threshold tuning to work, split it into narrower rules, redesign its deterministic candidate selection, or leave it in shadow instead of forcing graduation.

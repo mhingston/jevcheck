@@ -224,12 +224,17 @@ For non-AST rules:
 
 Keep semantic context bounded. Oversized focuses are skipped rather than silently truncated.
 
-### Context sufficiency and privacy
+### Context sufficiency and trust boundary
 
-A candidate should contain enough deterministically selected evidence for the bounded question to be answered defensibly. If the answer depends on information that is not present, improve the selector or bounded context, split the rule, or decide that the concern is not suitable for that scope. Do not add a second model judgement that asks whether the first judgement is applicable.
+Jev can only judge the evidence supplied to it. Give each rule the smallest deterministic context that is sufficient to answer its bounded question.
 
-Keep model-visible context to the smallest useful set. Depending on the configured provider, focused source code and surrounding context can leave the local machine. Do not deliberately include secrets, credentials, private keys, environment files, generated output, vendored code, or unrelated proprietary content.
+- Include surrounding code only when it materially changes the judgement.
+- Do not send secrets, credentials, private keys, environment files, generated output, vendored code, or unrelated repository content.
+- Model-visible source and context are sent to the configured Jev provider. Treat that provider as part of the trust boundary for any code you submit.
+- If the selected candidate does not contain enough evidence for a defensible YES/NO judgement, improve the deterministic selector or bounded context, or do not apply the rule there.
+- Do not add a second model judgement that asks whether the first judgement is applicable.
 
+Do not solve insufficient context by turning a rule into an open-ended review prompt or by continuously widening its scope. A jevcheck rule should remain a narrow semantic question with stable meaning.
 Context is evidence, not permission to broaden the question. Nearby code may help interpret the exact focus, but must not become an independent reason to report a violation.
 
 ## A practical rule lifecycle
