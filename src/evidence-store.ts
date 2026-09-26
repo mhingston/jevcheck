@@ -29,7 +29,7 @@ import type {
 
 export const DEFAULT_EVIDENCE_FILE = ".jevcheck/evidence.json";
 export const RULE_EVIDENCE_FORMAT_VERSION = 1;
-const EVIDENCE_IDENTITY_VERSION = "v1";
+const EVIDENCE_IDENTITY_VERSION = "v2";
 
 export const DEFAULT_SOURCE_INCLUDE = [
   "**/*.{js,jsx,ts,tsx,mjs,cjs,mts,cts,py,go,rs,java,cs,rb,php,vue,svelte}",
@@ -86,8 +86,8 @@ function nonEmptyString(value: unknown, field: string): string {
 }
 
 function nonNegativeInteger(value: unknown, field: string): number {
-  if (!Number.isInteger(value) || (value as number) < 0) {
-    throw new Error(field + " must be a non-negative integer");
+  if (!Number.isSafeInteger(value) || (value as number) < 0) {
+    throw new Error(field + " must be a non-negative safe integer");
   }
   return value as number;
 }
@@ -228,8 +228,8 @@ function validateArtifact(value: unknown): RuleEvidenceArtifact {
     const ruleId = nonEmptyString(item.ruleId, field + ".ruleId");
     const identity = nonEmptyString(item.identity, field + ".identity");
     const modelNamespace = nonEmptyString(item.modelNamespace, field + ".modelNamespace");
-    if (!Number.isInteger(item.sampleSize) || (item.sampleSize as number) < 1) {
-      throw new Error(field + ".sampleSize must be a positive integer");
+    if (!Number.isSafeInteger(item.sampleSize) || (item.sampleSize as number) < 1) {
+      throw new Error(field + ".sampleSize must be a positive safe integer");
     }
     if (!Array.isArray(item.mutants)) {
       throw new Error(field + ".mutants must be an array");
@@ -382,6 +382,7 @@ export async function mutationEvidenceIdentity(
   rule: JevCheckRule,
   paths: readonly string[],
   options: MutationIdentityOptions,
+  measurement: readonly RecallMutantResult[] = [],
 ): Promise<string> {
   const cwd = options.cwd ?? process.cwd();
   const sourceCache = new Map<string, string>();
@@ -433,6 +434,20 @@ export async function mutationEvidenceIdentity(
     sampleSize: options.sampleSize,
     modelNamespace: options.modelNamespace,
     mutants,
+    measurement: measurement
+      .filter((item) => item.ruleId === rule.id)
+      .map((item) => ({
+        ruleId: item.ruleId,
+        mutantId: item.mutantId,
+        candidateCount: item.candidateCount,
+        sampled: item.sampled,
+        judged: item.judged,
+        caught: item.caught,
+        recall: item.recall ?? null,
+        misses: [...item.misses].sort(),
+        invalidOriginals: [...item.invalidOriginals].sort(),
+      }))
+      .sort((a, b) => a.mutantId.localeCompare(b.mutantId)),
   }));
 }
 
@@ -510,10 +525,15 @@ export async function persistMutationEvidence(
     if (!rule.mutants?.length) continue;
     artifact.mutation.push({
       ruleId: rule.id,
-      identity: await mutationEvidenceIdentity(rule, sourcePaths, {
-        ...options,
-        sampleSize,
-      }),
+      identity: await mutationEvidenceIdentity(
+        rule,
+        sourcePaths,
+        {
+          ...options,
+          sampleSize,
+        },
+        result.mutants.filter((item) => item.ruleId === rule.id),
+      ),
       modelNamespace: options.modelNamespace,
       sampleSize,
       mutants: result.mutants.filter((item) => item.ruleId === rule.id),
@@ -581,16 +601,21 @@ export async function evaluateConfiguredRuleEvidence(
     let mutationError: string | undefined;
     const recordedMutation = persistedMutation.get(rule.id);
     if (recordedMutation) {
-      const expected = await mutationEvidenceIdentity(rule, sourcePaths, {
-        cwd,
-        chunkChars: config.chunkChars,
-        overlapLines: config.overlapLines,
-        contextLines: config.contextLines,
-        include,
-        exclude,
-        sampleSize: recordedMutation.sampleSize,
-        modelNamespace: options.modelNamespace,
-      });
+      const expected = await mutationEvidenceIdentity(
+        rule,
+        sourcePaths,
+        {
+          cwd,
+          chunkChars: config.chunkChars,
+          overlapLines: config.overlapLines,
+          contextLines: config.contextLines,
+          include,
+          exclude,
+          sampleSize: recordedMutation.sampleSize,
+          modelNamespace: options.modelNamespace,
+        },
+        recordedMutation.mutants,
+      );
       if (recordedMutation.identity !== expected) {
         mutationError = "persisted mutation recall evidence is stale; rerun jevcheck recall";
       } else {
