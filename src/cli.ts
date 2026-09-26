@@ -225,6 +225,12 @@ async function main(): Promise<void> {
     return;
   }
 
+  const calibrationFile = resolve(config.calibrationFile ?? DEFAULT_CALIBRATION_FILE);
+  const recordedCalibration =
+    args.command === "test" && args.testDrift
+      ? await readCalibration(calibrationFile)
+      : undefined;
+
   const baselineFile = resolve(config.baselineFile ?? DEFAULT_BASELINE_FILE);
   const baseline =
     args.command === "check" || args.command === "replay"
@@ -245,7 +251,7 @@ async function main(): Promise<void> {
   const cache =
     args.cache &&
     args.command !== "replay" &&
-    !(args.command === "test" && args.testDrift)
+    !(args.command === "test" && (args.testRecord || args.testDrift))
       ? new DiskAnswerCache(cacheFile)
       : undefined;
   const checker = createJevCheck({
@@ -267,23 +273,32 @@ async function main(): Promise<void> {
 
   if (args.command === "test") {
     const result = await checker.testFixtures();
-    const calibrationFile = resolve(config.calibrationFile ?? DEFAULT_CALIBRATION_FILE);
+    const fixtureFailed =
+      result.tests.some((test) => !test.passed) ||
+      result.diagnostics.some((item) => item.level === "error");
     let recorded: { file: string; fixtures: number } | undefined;
     let drift;
 
-    if (args.testRecord) {
+    if (args.testRecord && !fixtureFailed && result.tests.length > 0) {
       recorded = {
         file: calibrationFile,
         fixtures: await writeCalibration(calibrationFile, result.tests),
       };
     } else if (args.testDrift) {
-      drift = compareCalibration(await readCalibration(calibrationFile), result.tests);
+      drift = compareCalibration(
+        recordedCalibration!,
+        result.tests,
+        config.driftThreshold ?? undefined,
+      );
     }
 
     if (args.format === "json") {
       console.log(formatJson({
         ...result,
         ...(recorded ? { recorded } : {}),
+        ...(args.testRecord && !recorded
+          ? { calibrationNotRecorded: fixtureFailed ? "fixture failures" : "no fixtures" }
+          : {}),
         ...(drift ? { drift } : {}),
       }));
     } else {
@@ -295,15 +310,28 @@ async function main(): Promise<void> {
             " fixture probability/probabilities to " +
             recorded.file,
         );
+      } else if (args.testRecord) {
+        sections.push(
+          "Calibration not recorded: " +
+            (fixtureFailed ? "fixture failures must be fixed first." : "no fixtures were evaluated."),
+        );
       }
       if (drift) sections.push(formatFixtureDriftStylish(drift));
       console.log(sections.join("\n\n"));
     }
 
-    const failed =
-      result.tests.some((test) => !test.passed) ||
-      result.diagnostics.some((item) => item.level === "error");
-    process.exitCode = failed ? 1 : 0;
+    const driftFailed =
+      drift !== undefined &&
+      (drift.moved.length > 0 ||
+        drift.stale.length > 0 ||
+        drift.added.length > 0 ||
+        drift.removed.length > 0);
+    process.exitCode =
+      fixtureFailed ||
+      (args.testRecord && !recorded) ||
+      driftFailed
+        ? 1
+        : 0;
     return;
   }
 

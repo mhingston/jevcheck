@@ -59,6 +59,7 @@ export interface JevCheckConfig {
   baselineFile?: string;
   replayFile?: string;
   calibrationFile?: string;
+  driftThreshold?: number;
   suppressionMarker?: string;
   rules: JevCheckRule[];
 }
