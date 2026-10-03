@@ -142,6 +142,30 @@ And avoid open-ended review prompts such as:
 
 A good rule has a clear semantic boundary, a narrow candidate set, and a YES answer that always means the same thing: **a violation is present**.
 
+### Design the invariant before writing config
+
+Before adding a rule, write down five things in plain language:
+
+1. **Invariant** — the single binary fact you want enforced.
+2. **Applicability** — when that fact is relevant. Prefer conditions you can encode deterministically with file globs, AST selectors, `prefilter`, or `unless`.
+3. **Scope rationale** — why the selected focus contains enough evidence to answer the question without widening into general review.
+4. **Deterministic coverage** — whether a compiler, test, linter, ast-grep rule, or other exact check can already prove the condition.
+5. **Semantic boundary** — what makes YES a violation and NO acceptable, including edge cases worth capturing in `criteria`.
+
+This avoids a common failure mode: starting from a broad review preference and then trying to make the model discover both *where* the rule applies and *what* the rule means.
+
+A useful authoring test is:
+
+~~~text
+Can deterministic code decide this exactly?
+  yes -> use deterministic tooling
+  no  -> can deterministic code identify the right candidate?
+          no  -> reshape the concern before using jevcheck
+          yes -> ask one bounded semantic question about that candidate
+~~~
+
+Do not duplicate deterministic enforcement with a semantic rule just because Jev can also answer it. If an exact check exists, keep that check as the source of truth and reserve jevcheck for the residual semantic gap.
+
 ## How it works
 
 A `jevcheck` rule has three layers:
