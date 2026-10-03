@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { describeProjectCondition, projectConditionMatches } from "./applicability.js";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import {
@@ -20,6 +21,7 @@ import {
   DEFAULT_OVERLAP_LINES,
   ruleAppliesToFile,
 } from "./engine.js";
+import { currentCoverageEvidence, type CoverageLinkFingerprint } from "./coverage.js";
 import { discoverFiles } from "./files.js";
 import { applyMutation, stableMutationOrder } from "./mutate.js";
 import type {
@@ -67,11 +69,18 @@ export interface PersistedRobustnessEvidence {
   cases: RobustnessCaseResult[];
 }
 
+export interface PersistedCoverageEvidence {
+  ruleId: string;
+  identity: string;
+  links: CoverageLinkFingerprint[];
+}
+
 export interface RuleEvidenceArtifact {
   version: number;
   drift: PersistedDriftEvidence[];
   mutation: PersistedMutationEvidence[];
   robustness: PersistedRobustnessEvidence[];
+  coverage: PersistedCoverageEvidence[];
 }
 
 export interface ConfiguredEvidenceOptions {
@@ -142,6 +151,7 @@ function emptyArtifact(): RuleEvidenceArtifact {
     drift: [],
     mutation: [],
     robustness: [],
+    coverage: [],
   };
 }
 
@@ -351,6 +361,9 @@ function validateArtifact(value: unknown): RuleEvidenceArtifact {
   if (file.robustness !== undefined && !Array.isArray(file.robustness)) {
     throw new Error("rule evidence robustness must be an array when present");
   }
+  if (file.coverage !== undefined && !Array.isArray(file.coverage)) {
+    throw new Error("rule evidence coverage must be an array when present");
+  }
 
   const drift = file.drift.map((value, index): PersistedDriftEvidence => {
     if (!value || typeof value !== "object" || Array.isArray(value)) {
@@ -443,6 +456,39 @@ function validateArtifact(value: unknown): RuleEvidenceArtifact {
     },
   );
 
+  const coverage = (file.coverage ?? []).map(
+    (value, index): PersistedCoverageEvidence => {
+      const field = "evidence.coverage[" + index + "]";
+      if (!value || typeof value !== "object" || Array.isArray(value)) {
+        throw new Error(field + " must be an object");
+      }
+      const item = value as Record<string, unknown>;
+      const ruleId = nonEmptyString(item.ruleId, field + ".ruleId");
+      const identity = nonEmptyString(item.identity, field + ".identity");
+      if (!Array.isArray(item.links) || item.links.length === 0) {
+        throw new Error(field + ".links must be a non-empty array");
+      }
+      const ids = new Set<string>();
+      const links = item.links.map((raw, linkIndex): CoverageLinkFingerprint => {
+        const linkField = field + ".links[" + linkIndex + "]";
+        if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+          throw new Error(linkField + " must be an object");
+        }
+        const link = raw as Record<string, unknown>;
+        const id = nonEmptyString(link.id, linkField + ".id");
+        if (ids.has(id)) throw new Error(field + ".links contains duplicate id: " + id);
+        ids.add(id);
+        return {
+          id,
+          path: nonEmptyString(link.path, linkField + ".path"),
+          fingerprint: nonEmptyString(link.fingerprint, linkField + ".fingerprint"),
+        };
+      });
+      links.sort((a, b) => a.id.localeCompare(b.id) || a.path.localeCompare(b.path));
+      return { ruleId, identity, links };
+    },
+  );
+
   const driftRuleIds = new Set<string>();
   for (const item of drift) {
     if (driftRuleIds.has(item.ruleId)) {
@@ -466,11 +512,20 @@ function validateArtifact(value: unknown): RuleEvidenceArtifact {
     robustnessRuleIds.add(item.ruleId);
   }
 
+  const coverageRuleIds = new Set<string>();
+  for (const item of coverage) {
+    if (coverageRuleIds.has(item.ruleId)) {
+      throw new Error("evidence.coverage contains duplicate ruleId: " + item.ruleId);
+    }
+    coverageRuleIds.add(item.ruleId);
+  }
+
   return {
     version: RULE_EVIDENCE_FORMAT_VERSION,
     drift: drift.sort((a, b) => a.ruleId.localeCompare(b.ruleId)),
     mutation: mutation.sort((a, b) => a.ruleId.localeCompare(b.ruleId)),
     robustness: robustness.sort((a, b) => a.ruleId.localeCompare(b.ruleId)),
+    coverage: coverage.sort((a, b) => a.ruleId.localeCompare(b.ruleId)),
   };
 }
 
@@ -836,6 +891,22 @@ export async function persistMutationEvidence(
   await writeRuleEvidenceArtifact(path, artifact);
 }
 
+export async function persistCoverageEvidence(
+  path: string,
+  rules: readonly JevCheckRule[],
+  cwd = process.cwd(),
+): Promise<number> {
+  const measured: PersistedCoverageEvidence[] = [];
+  for (const rule of rules) {
+    const current = await currentCoverageEvidence(rule, cwd);
+    if (current) measured.push(current);
+  }
+  const artifact = await readRuleEvidenceArtifact(path);
+  artifact.coverage = measured.sort((a, b) => a.ruleId.localeCompare(b.ruleId));
+  await writeRuleEvidenceArtifact(path, artifact);
+  return artifact.coverage.length;
+}
+
 export async function evaluateConfiguredRuleEvidence(
   config: JevCheckConfig,
   options: ConfiguredEvidenceOptions,
@@ -901,9 +972,50 @@ export async function evaluateConfiguredRuleEvidence(
   const persistedDrift = new Map(artifact.drift.map((item) => [item.ruleId, item]));
   const persistedMutation = new Map(artifact.mutation.map((item) => [item.ruleId, item]));
   const persistedRobustness = new Map(artifact.robustness.map((item) => [item.ruleId, item]));
+  const persistedCoverage = new Map(artifact.coverage.map((item) => [item.ruleId, item]));
   const reports: RuleEvidenceReport[] = [];
 
   for (const rule of config.rules) {
+    const applicability = rule.projectWhen
+      ? {
+          applies: await projectConditionMatches(rule.projectWhen, cwd),
+          message:
+            (await projectConditionMatches(rule.projectWhen, cwd) ? "applies: " : "not applicable: ") +
+            describeProjectCondition(rule.projectWhen),
+        }
+      : undefined;
+
+    let coverage: { status: "covered" | "stale"; message: string } | undefined;
+    if (rule.coveredBy?.length) {
+      const recorded = persistedCoverage.get(rule.id);
+      try {
+        const current = await currentCoverageEvidence(rule, cwd);
+        if (recorded && current && recorded.identity === current.identity) {
+          coverage = {
+            status: "covered",
+            message:
+              "covered by " +
+              current.links.map((link) => link.id + " (" + link.path + ")").join(", ") +
+              "; fingerprints are current, semantic judge skipped",
+          };
+        } else {
+          coverage = {
+            status: "stale",
+            message: recorded
+              ? "deterministic coverage is stale; semantic fallback active; rerun jevcheck coverage record after reviewing the coverage change"
+              : "deterministic coverage is not recorded; semantic fallback active; run jevcheck coverage record after reviewing the declared coverage",
+          };
+        }
+      } catch (error) {
+        coverage = {
+          status: "stale",
+          message:
+            "deterministic coverage cannot be verified; semantic fallback active: " +
+            (error instanceof Error ? error.message : String(error)),
+        };
+      }
+    }
+
     const provenance = await ruleSourceProvenance(rule, cwd);
     const provenanceIdentity = sourceIdentity(provenance);
     const sourceError = provenance.error;
@@ -1000,6 +1112,8 @@ export async function evaluateConfiguredRuleEvidence(
           mutationError,
           robustness,
           robustnessError,
+          applicability,
+          coverage,
           sourceError,
           sourceMessage,
         },
