@@ -198,6 +198,71 @@ Jev answers the bounded semantic question for the selected code.
 
 An AST match or regex hit is therefore **not** evidence of a violation. It only decides what Jev is allowed to judge.
 
+## Deterministic applicability and coverage
+
+Before selecting semantic candidates, jevcheck can now eliminate two kinds of unnecessary model work.
+
+### Repository applicability with `projectWhen`
+
+Use `projectWhen` when a reusable rule only makes sense for some repositories. It is evaluated deterministically at repository scope before semantic enforcement.
+
+~~~json
+{
+  "id": "express/actionable-errors",
+  "projectWhen": {
+    "allOf": [
+      { "packageJsonHasDep": "express" },
+      { "globMatches": "src/**/*.ts" }
+    ]
+  },
+  "question": "Does this user-facing error fail to tell the user what to do next?"
+}
+~~~
+
+Supported predicates are:
+
+- `packageJsonHasDep` — matches dependencies, dev dependencies, peer dependencies, or optional dependencies in the root `package.json`.
+- `fileExists` — checks a repository-relative path.
+- `globMatches` — checks whether a repository-relative glob matches at least one file.
+- `anyOf`, `allOf`, and `not` — compose predicates without introducing another model decision.
+
+When the condition is false, normal enforcement and replay skip the rule entirely. Measurement commands still exercise the semantic rule so fixtures, replay corpora, and robustness evidence can be maintained independently of the current repository state.
+
+### Deterministic coverage with `coveredBy`
+
+Use `coveredBy` when an existing test or linter already enforces the same invariant exactly:
+
+~~~json
+{
+  "id": "security/no-sensitive-log",
+  "coveredBy": [
+    {
+      "id": "eslint-security-rule",
+      "path": "eslint.config.js"
+    },
+    {
+      "id": "security-regression-tests",
+      "path": "tests/security/logging.test.ts"
+    }
+  ],
+  "question": "Does this logging call expose a credential or other sensitive value?"
+}
+~~~
+
+After reviewing that those files really provide deterministic coverage, record their current fingerprints:
+
+~~~sh
+npx jevcheck coverage record
+~~~
+
+The fingerprints are stored in the existing `.jevcheck/evidence.json` artifact. During normal enforcement:
+
+- if every declared coverage source still matches its recorded fingerprint, the rule reports as `covered` and Jev is skipped;
+- if coverage is missing, unreadable, changed, or has not been recorded, jevcheck surfaces the stale coverage and falls back to semantic evaluation;
+- an owned rule therefore still fails closed if its deterministic coverage goes stale and its semantic fallback evidence is not healthy.
+
+`coveredBy` is a provenance/freshness contract, not a test runner. Jevcheck does not execute the referenced linter or test. Recording coverage means you have reviewed that those deterministic checks enforce the invariant; do not use `coverage record` merely to silence semantic checks after an unrelated change.
+
 ## Choosing candidates
 
 Narrow candidates as much as you can before making a semantic request.
@@ -531,7 +596,8 @@ These evidence files contain hashes and evaluation metadata rather than a second
 | `jevcheck test --confirm` | Evaluate and record untouched confirmation fixtures |
 | `jevcheck test --robustness` | Probe fixture stability under label-preserving adversarial context |
 | `jevcheck recall` | Measure mutation recall against real code |
-| `jevcheck rules audit` | Inspect rule evidence without calling a provider |
+| `jevcheck rules audit` | Inspect rule evidence, applicability, and coverage without calling a provider |
+| `jevcheck coverage record` | Record reviewed deterministic coverage fingerprints |
 | `jevcheck baseline` | Create or refresh accepted-backlog entries |
 | `jevcheck record` | Record semantic decisions for replay |
 | `jevcheck replay` | Re-run the recorded decisions strictly offline |
@@ -587,6 +653,10 @@ A more complete rule can include provenance, AST context, fixtures, and mutants:
       "severity": "error",
       "why": "Logs must not expose credentials or other sensitive values.",
       "source": "docs/security.md#logging",
+      "projectWhen": { "globMatches": "src/**/*.ts" },
+      "coveredBy": [
+        { "id": "security-tests", "path": "tests/security/logging.test.ts" }
+      ],
       "files": ["**/*.ts"],
       "ast": {
         "pattern": "console.$METHOD($ARG)",
@@ -655,6 +725,8 @@ npx jevcheck test --record
 npx jevcheck test --drift
 npx jevcheck recall
 npx jevcheck test --robustness
+# when coveredBy is configured and its deterministic enforcement was reviewed:
+npx jevcheck coverage record
 npx jevcheck rules audit
 
 # after the audit is ready:
