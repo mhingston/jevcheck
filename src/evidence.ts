@@ -74,6 +74,14 @@ export interface RuleEvidenceInputs {
   mutationError?: string;
   robustness?: readonly RobustnessCaseResult[];
   robustnessError?: string;
+  applicability?: {
+    applies: boolean;
+    message: string;
+  };
+  coverage?: {
+    status: "covered" | "stale";
+    message: string;
+  };
   sourceError?: string;
   sourceMessage?: string;
 }
@@ -254,6 +262,24 @@ export function mutationEvidenceForRule(
   return recall.mutants.filter((item) => item.ruleId === ruleId);
 }
 
+function finishEvidenceReport(
+  rule: JevCheckRule,
+  checks: RuleEvidenceCheck[],
+  execution: RuleEvidenceReport["execution"],
+): RuleEvidenceReport {
+  const blockers = checks.filter((check) => check.status === "block").map((check) => check.message);
+  const warnings = checks.filter((check) => check.status === "warn").map((check) => check.message);
+  return {
+    ruleId: rule.id,
+    currentStatus: rule.status ?? "shadow",
+    execution,
+    checks,
+    blockers,
+    warnings,
+    readyForOwned: blockers.length === 0,
+  };
+}
+
 export function evaluateRuleEvidence(
   rule: JevCheckRule,
   evidence: RuleEvidenceInputs,
@@ -264,6 +290,29 @@ export function evaluateRuleEvidence(
     ...parseRuleEvidencePolicy(policyOverrides, "rule evidence policy"),
   };
   const checks: RuleEvidenceCheck[] = [];
+
+  if (evidence.applicability) {
+    checks.push({
+      id: "applicability",
+      status: "pass",
+      message: evidence.applicability.message,
+    });
+    if (!evidence.applicability.applies) {
+      return finishEvidenceReport(rule, checks, "inapplicable");
+    }
+  }
+
+  if (evidence.coverage) {
+    checks.push({
+      id: "coverage",
+      status: evidence.coverage.status === "covered" ? "pass" : "warn",
+      message: evidence.coverage.message,
+    });
+    if (evidence.coverage.status === "covered") {
+      return finishEvidenceReport(rule, checks, "covered");
+    }
+  }
+
   const fixtures = evidence.fixtures.filter((item) => item.ruleId === rule.id);
   const valid = fixtures.filter((item) => item.expected === "valid");
   const invalid = fixtures.filter((item) => item.expected === "invalid");
@@ -702,15 +751,5 @@ export function evaluateRuleEvidence(
     message: sourceProblem ?? evidence.sourceMessage ?? rule.source!,
   });
 
-  const blockers = checks.filter((check) => check.status === "block").map((check) => check.message);
-  const warnings = checks.filter((check) => check.status === "warn").map((check) => check.message);
-
-  return {
-    ruleId: rule.id,
-    currentStatus: rule.status ?? "shadow",
-    checks,
-    blockers,
-    warnings,
-    readyForOwned: blockers.length === 0,
-  };
+  return finishEvidenceReport(rule, checks, "semantic");
 }
