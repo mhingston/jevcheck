@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { minimatch } from "minimatch";
+import { projectConditionMatches } from "./applicability.js";
 import {
   DEFAULT_SUPPRESSION_MARKER,
   findingFingerprint,
@@ -215,7 +216,16 @@ export function createJevCheck(options: JevCheckOptions): JevCheck {
     const selected = onlyRuleIds ? new Set(onlyRuleIds) : undefined;
     for (const rule of options.rules) {
       if (selected && !selected.has(rule.id)) continue;
-      if (mode === "enforce" && executionByRule.get(rule.id) && executionByRule.get(rule.id) !== "semantic") continue;
+      const recordedExecution = executionByRule.get(rule.id);
+      if (mode === "enforce" && recordedExecution && recordedExecution !== "semantic") continue;
+      if (
+        mode === "enforce" &&
+        !recordedExecution &&
+        rule.projectWhen &&
+        !(await projectConditionMatches(rule.projectWhen, options.projectRoot ?? process.cwd()))
+      ) {
+        continue;
+      }
       if (!ignoreFileScope && !ruleAppliesToFile(rule, path)) continue;
 
       const built = buildCandidates(path, source, rule, {
