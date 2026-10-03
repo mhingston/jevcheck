@@ -31,19 +31,23 @@ Classify the concern before encoding it:
 
 Then:
 
-1. Phrase one atomic Noul question. YES must always mean a violation.
-2. Narrow candidates deterministically. Prefer an `ast` selector when a structural construct is identifiable; otherwise use `files`, `exclude`, `prefilter`, and `unless`.
-3. For `ast`, define exactly one selector: `pattern`, `kind`, or `rule`. Let language infer from the file extension unless an explicit supported language is required.
-4. Keep AST focus precise. The matched node is what Jev judges; `context.ancestor` and surrounding lines are evidence only.
-5. Keep all context bounded. Do not increase `chunkChars` merely to avoid a skipped oversized construct without checking the token/cost implications.
-6. Add true and false criteria when the semantic boundary is easy to confuse.
-7. Add both valid and invalid development fixtures.
-8. Reserve separate valid and invalid confirmation fixtures that will not be used to author the rule or choose its threshold.
-9. Start the rule in `shadow` status.
-10. Inspect false positives, false negatives, probability margins, and model drift before making it `owned`.
-11. Keep thresholds, CI behavior, suppressions, baselines, and other policy in code rather than asking the model to decide them.
-12. Ensure the deterministically selected candidate contains enough evidence to answer the bounded question. If it does not, improve or narrow the context rather than adding a second model call to judge applicability.
-13. Stop once the rule has sufficient evidence. Do not broaden context, weaken graduation policy, or tune thresholds merely to make the measured results look better.
+1. State the invariant in one sentence before writing config.
+2. State when the invariant is applicable, and encode as much of that applicability as possible with deterministic selectors rather than model judgement.
+3. State why the chosen focus is the right evaluation scope: it should contain enough evidence to answer the question without turning nearby context into an independent source of violations.
+4. Check whether an existing compiler rule, test, linter, ast-grep rule, or other deterministic check already proves the invariant. If it does, use that instead of jevcheck.
+5. Phrase one atomic Noul question. YES must always mean a violation.
+6. Narrow candidates deterministically. Prefer an `ast` selector when a structural construct is identifiable; otherwise use `files`, `exclude`, `prefilter`, and `unless`.
+7. For `ast`, define exactly one selector: `pattern`, `kind`, or `rule`. Let language infer from the file extension unless an explicit supported language is required.
+8. Keep AST focus precise. The matched node is what Jev judges; `context.ancestor` and surrounding lines are evidence only.
+9. Keep all context bounded. Do not increase `chunkChars` merely to avoid a skipped oversized construct without checking the token/cost implications.
+10. Add true and false criteria when the semantic boundary is easy to confuse.
+11. Add both valid and invalid development fixtures.
+12. Reserve separate valid and invalid confirmation fixtures that will not be used to author the rule or choose its threshold.
+13. Start the rule in `shadow` status.
+14. Inspect false positives, false negatives, probability margins, and model drift before making it `owned`.
+15. Keep thresholds, CI behavior, suppressions, baselines, and other policy in code rather than asking the model to decide them.
+16. Ensure the deterministically selected candidate contains enough evidence to answer the bounded question. If it does not, improve or narrow the context rather than adding a second model call to judge applicability.
+17. Stop once the rule has sufficient evidence. Do not broaden context, weaken graduation policy, or tune thresholds merely to make the measured results look better.
 
 ## Context sufficiency and trust boundary
 
