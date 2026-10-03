@@ -171,4 +171,31 @@ describe("deterministic runtime policy", () => {
     expect(result.evaluations).toHaveLength(0);
   });
 
+  it("treats a non-matching project condition as inapplicable before semantic evidence gates", async () => {
+    const cwd = await mkdtemp(join(tmpdir(), "jevcheck-inapplicable-audit-"));
+    await writeFile(join(cwd, "package.json"), JSON.stringify({ dependencies: {} }));
+
+    const evaluated = await evaluateConfiguredRuleEvidence(
+      {
+        rules: [{
+          id: "express/owned-rule",
+          question: "Is this a violation?",
+          status: "owned",
+          projectWhen: { packageJsonHasDep: "express" },
+        }],
+      },
+      { cwd, modelNamespace: "typesafe:default" },
+    );
+
+    expect(evaluated.reports[0]?.execution).toBe("inapplicable");
+    expect(evaluated.reports[0]?.readyForOwned).toBe(true);
+    expect(evaluated.reports[0]?.checks).toEqual([
+      expect.objectContaining({
+        id: "applicability",
+        status: "pass",
+        message: expect.stringContaining("not applicable"),
+      }),
+    ]);
+  });
+
 });
