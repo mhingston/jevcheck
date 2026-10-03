@@ -1,6 +1,6 @@
 import { readFile, stat } from "node:fs/promises";
 import { isAbsolute, resolve, sep } from "node:path";
-import fg from "fast-glob";
+import { glob } from "tinyglobby";
 import type { ProjectCondition } from "./types.js";
 
 function projectPath(cwd: string, path: string): string {
@@ -55,7 +55,13 @@ export async function projectConditionMatches(
     }
   }
   if ("globMatches" in condition) {
-    return (await fg(projectPattern(condition.globMatches), { cwd, dot: true, onlyFiles: true, followSymbolicLinks: false })).length > 0;
+    return (await glob(projectPattern(condition.globMatches), {
+      cwd,
+      dot: true,
+      expandDirectories: false,
+      onlyFiles: true,
+      followSymbolicLinks: false,
+    })).length > 0;
   }
   if ("anyOf" in condition) {
     for (const item of condition.anyOf) {

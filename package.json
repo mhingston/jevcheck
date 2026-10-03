@@ -27,7 +27,7 @@
   "dependencies": {
     "@ast-grep/napi": "^0.45.3",
     "@mhingston5/jev-cli": "^0.4.2",
-    "fast-glob": "^3.3.3",
+    "tinyglobby": "^0.2.17",
     "minimatch": "^10.0.1"
   },
   "devDependencies": {

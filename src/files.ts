@@ -1,4 +1,4 @@
-import fg from "fast-glob";
+import { glob } from "tinyglobby";
 import { minimatch } from "minimatch";
 import { readFile } from "node:fs/promises";
 
@@ -16,11 +16,11 @@ export async function discoverFiles(
   exclude: string[] = [],
   cwd = process.cwd(),
 ): Promise<string[]> {
-  const files = await fg(patterns, {
+  const files = await glob(patterns, {
     cwd,
     onlyFiles: true,
-    unique: true,
     dot: false,
+    expandDirectories: false,
     ignore: [...DEFAULT_IGNORES, ...exclude],
   });
   return files.sort();
