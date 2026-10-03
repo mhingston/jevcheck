@@ -123,7 +123,7 @@ The rule model does not change between the two uses. A rule still has the same d
 
 | Use | Typical command | What it means |
 | --- | --- | --- |
-| Local semantic lint | `npx jevcheck src/` | Check a source set during development |
+| Local semantic lint | `npx jevcheck "src/**/*.ts"` | Check a source set during development |
 | Repository/CI lint | `npx jevcheck` | Enforce configured semantic lint rules across the repository scope |
 | Staged lint | `npx jevcheck --staged` | Check exactly what is about to be committed |
 | Working-tree review | `npx jevcheck --changed` | Review changed and untracked code |
