@@ -33,10 +33,14 @@ describe("deterministic runtime policy", () => {
       JSON.stringify({ dependencies: { express: "^5.0.0" } }),
     );
     await writeFile(join(cwd, "src", "server.ts"), "export const app = true;");
+    await mkdir(join(cwd, "dist"), { recursive: true });
+    await writeFile(join(cwd, "dist", "generated.js"), "export const generated = true;");
 
     expect(await projectConditionMatches({ packageJsonHasDep: "express" }, cwd)).toBe(true);
+    expect(await projectConditionMatches({ packageJsonHasDep: "constructor" }, cwd)).toBe(false);
     expect(await projectConditionMatches({ fileExists: "src/server.ts" }, cwd)).toBe(true);
     expect(await projectConditionMatches({ globMatches: "src/**/*.ts" }, cwd)).toBe(true);
+    expect(await projectConditionMatches({ globMatches: "dist/**/*.js" }, cwd)).toBe(true);
     expect(await projectConditionMatches({
       allOf: [
         { packageJsonHasDep: "express" },
@@ -196,6 +200,64 @@ describe("deterministic runtime policy", () => {
         message: expect.stringContaining("not applicable"),
       }),
     ]);
+  });
+
+  it("invalidates recorded coverage when semantic rule meaning or scope changes", async () => {
+    const cwd = await mkdtemp(join(tmpdir(), "jevcheck-coverage-semantics-"));
+    await mkdir(join(cwd, "tests"), { recursive: true });
+    await writeFile(join(cwd, "tests", "security.test.ts"), "it('covers logging', () => {});");
+
+    const base: JevCheckRule = {
+      id: "security/no-secret-log",
+      question: "Does this code log a secret?",
+      files: ["src/**/*.ts"],
+      coveredBy: [{ id: "security-test", path: "tests/security.test.ts" }],
+    };
+    const evidenceFile = join(cwd, ".jevcheck", "evidence.json");
+    await persistCoverageEvidence(evidenceFile, [base], cwd);
+
+    for (const changed of [
+      { ...base, question: "Does this code expose a credential in logs?" },
+      { ...base, criteria: { true: "A credential value reaches the log call." } },
+      { ...base, files: ["lib/**/*.ts"] },
+    ]) {
+      const evaluated = await evaluateConfiguredRuleEvidence(
+        {
+          evidenceFile,
+          graduation: {
+            requireValidFixture: false,
+            requireInvalidFixture: false,
+            requireCurrentCalibration: false,
+            requireCleanDrift: false,
+            requireMutants: false,
+            requireSource: false,
+          },
+          rules: [changed],
+        },
+        { cwd, modelNamespace: "typesafe:default" },
+      );
+      expect(evaluated.reports[0]?.execution).toBe("semantic");
+      expect(evaluated.reports[0]?.checks.find((check) => check.id === "coverage")?.message)
+        .toContain("stale");
+    }
+  });
+
+  it("requires a semantic client in measurement mode even when reports say covered", () => {
+    expect(() =>
+      createJevCheck({
+        rules: [{ id: "covered-measure", question: "Is this a violation?", wholeFile: true }],
+        mode: "measure",
+        ruleEvidenceReports: [{
+          ruleId: "covered-measure",
+          currentStatus: "shadow",
+          execution: "covered",
+          checks: [],
+          blockers: [],
+          warnings: [],
+          readyForOwned: true,
+        }],
+      }),
+    ).toThrow("a Jev client is required");
   });
 
 });
