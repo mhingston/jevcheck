@@ -76,7 +76,7 @@ export interface RuleEvidenceCheck {
 export interface RuleEvidenceReport {
   ruleId: string;
   currentStatus: RuleStatus;
-  execution: "semantic" | "covered" | "inapplicable";
+  execution?: "semantic" | "covered" | "inapplicable";
   checks: RuleEvidenceCheck[];
   blockers: string[];
   warnings: string[];
