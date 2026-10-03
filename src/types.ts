@@ -252,6 +252,7 @@ export interface JevCheckOptions {
   replayOnly?: boolean;
   mode?: "enforce" | "measure";
   ruleEvidenceReports?: readonly RuleEvidenceReport[];
+  projectRoot?: string;
 }
 
 export interface FixtureTestResult {
