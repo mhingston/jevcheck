@@ -1,6 +1,6 @@
 {
   "name": "@mhingston5/jevcheck",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Provider-agnostic semantic linting for bounded code-review questions using Jev",
   "license": "MIT",
   "author": "Mark Hingston",
@@ -26,7 +26,7 @@
   },
   "dependencies": {
     "@ast-grep/napi": "^0.45.3",
-    "@mhingston5/jev-cli": "^0.3.0",
+    "@mhingston5/jev-cli": "^0.4.2",
     "fast-glob": "^3.3.3",
     "minimatch": "^10.0.1"
   },
