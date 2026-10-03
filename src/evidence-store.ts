@@ -976,14 +976,16 @@ export async function evaluateConfiguredRuleEvidence(
   const reports: RuleEvidenceReport[] = [];
 
   for (const rule of config.rules) {
-    const applicability = rule.projectWhen
-      ? {
-          applies: await projectConditionMatches(rule.projectWhen, cwd),
-          message:
-            (await projectConditionMatches(rule.projectWhen, cwd) ? "applies: " : "not applicable: ") +
-            describeProjectCondition(rule.projectWhen),
-        }
-      : undefined;
+    let applicability: { applies: boolean; message: string } | undefined;
+    if (rule.projectWhen) {
+      const applies = await projectConditionMatches(rule.projectWhen, cwd);
+      applicability = {
+        applies,
+        message:
+          (applies ? "applies: " : "not applicable: ") +
+          describeProjectCondition(rule.projectWhen),
+      };
+    }
 
     let coverage: { status: "covered" | "stale"; message: string } | undefined;
     if (rule.coveredBy?.length) {
