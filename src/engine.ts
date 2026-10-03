@@ -194,9 +194,11 @@ export function createJevCheck(options: JevCheckOptions): JevCheck {
   if (options.replayOnly && !options.decisionStore) {
     throw new Error("replayOnly requires a semantic decision store");
   }
-  const needsSemanticClient = options.rules.some(
-    (rule) => (executionByRule.get(rule.id) ?? "semantic") === "semantic",
-  );
+  const needsSemanticClient =
+    mode === "measure" ||
+    options.rules.some(
+      (rule) => (executionByRule.get(rule.id) ?? "semantic") === "semantic",
+    );
   if (!options.replayOnly && !options.client && needsSemanticClient) {
     throw new Error("a Jev client is required unless every rule is deterministically skipped");
   }
