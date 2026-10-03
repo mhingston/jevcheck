@@ -128,7 +128,7 @@ The rule model does not change between the two uses. A rule still has the same d
 | Staged lint | `npx jevcheck --staged` | Check exactly what is about to be committed |
 | Working-tree review | `npx jevcheck --changed` | Review changed and untracked code |
 | Pull-request / branch review | `npx jevcheck --changed --base origin/main` | Review only the branch diff |
-| Code scanning | `npx jevcheck --changed --base origin/main --format sarif` | Publish findings through SARIF-capable CI/code-scanning systems |
+| Code scanning | `npx jevcheck --changed --base origin/main --format sarif` | Emit SARIF for a separate CI/code-scanning upload step |
 
 This means you can adopt `jevcheck` progressively:
 
