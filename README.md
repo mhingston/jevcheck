@@ -1,8 +1,8 @@
 # jevcheck
 
-Semantic linting for code-review questions ordinary linters cannot answer.
+Semantic linting for bounded code questions ordinary linters cannot answer.
 
-`jevcheck` lets you turn bounded review concerns such as "does this log expose a secret?" or "can this retry loop run without a meaningful bound?" into repeatable lint rules.
+`jevcheck` lets you turn semantic code concerns such as "does this log expose a secret?" or "can this retry loop run without a meaningful bound?" into repeatable lint rules. You can run those rules like a conventional linter across a source set, or use the same rules as automated review checks over staged changes, branch diffs, and pull requests.
 
 The core rule is simple:
 
@@ -114,6 +114,30 @@ npx jevcheck --changed --base origin/main
 If the rule finds something in `shadow` mode, you get the finding without failing the check.
 
 That is enough to start using `jevcheck`.
+
+## Linter or reviewer?
+
+`jevcheck` is primarily a **semantic linter**. Automated code review is one way of running that linter.
+
+The rule model does not change between the two uses. A rule still has the same deterministic candidate selection, bounded semantic judgement, severity, status, threshold, baselines, suppressions, evidence, and exit-code policy. The difference is simply **what code you run it against and when you run it**.
+
+| Use | Typical command | What it means |
+| --- | --- | --- |
+| Local semantic lint | `npx jevcheck src/` | Check a source set during development |
+| Repository/CI lint | `npx jevcheck` | Enforce configured semantic lint rules across the repository scope |
+| Staged lint | `npx jevcheck --staged` | Check exactly what is about to be committed |
+| Working-tree review | `npx jevcheck --changed` | Review changed and untracked code |
+| Pull-request / branch review | `npx jevcheck --changed --base origin/main` | Review only the branch diff |
+| Code scanning | `npx jevcheck --changed --base origin/main --format sarif` | Publish findings through SARIF-capable CI/code-scanning systems |
+
+This means you can adopt `jevcheck` progressively:
+
+- use **shadow** rules as advisory semantic lint while you learn where a rule is useful;
+- run the same rules locally, in pre-commit/pre-push hooks, or in CI;
+- use diff-scoped commands for automated code review;
+- promote well-evidenced rules to **owned** when they are trustworthy enough to block either linting or review.
+
+An owned `error` finding is blocking wherever the check runs. It is not inherently a pull-request concept.
 
 ## What should become a jevcheck rule?
 
@@ -344,7 +368,7 @@ A useful default workflow is:
 author -> inspect -> shadow -> development fixtures -> calibrate -> drift/recall/robustness -> confirm -> audit -> owned
 ~~~
 
-You do not need all of this to experiment with a shadow rule. The evidence workflow matters when you want a semantic rule to become a blocking reviewer.
+You do not need all of this to experiment with a shadow rule. The evidence workflow matters when you want a semantic lint rule to become blocking in CI or review.
 
 ### 1. Inspect the evidence envelope
 
