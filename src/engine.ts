@@ -197,6 +197,9 @@ export function createJevCheck(options: JevCheckOptions): JevCheck {
   const baseline = new Set(
     (options.baseline ?? []).map((entry) => baselineKey(entry.ruleId, entry.path, entry.fingerprint)),
   );
+  const executionByRule = new Map(
+    (options.ruleEvidenceReports ?? []).map((report) => [report.ruleId, report.execution ?? "semantic"]),
+  );
 
   async function checkSourceInternal(
     path: string,
@@ -212,6 +215,7 @@ export function createJevCheck(options: JevCheckOptions): JevCheck {
     const selected = onlyRuleIds ? new Set(onlyRuleIds) : undefined;
     for (const rule of options.rules) {
       if (selected && !selected.has(rule.id)) continue;
+      if (mode === "enforce" && executionByRule.get(rule.id) && executionByRule.get(rule.id) !== "semantic") continue;
       if (!ignoreFileScope && !ruleAppliesToFile(rule, path)) continue;
 
       const built = buildCandidates(path, source, rule, {
