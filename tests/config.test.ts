@@ -148,4 +148,71 @@ describe("parseConfig", () => {
       }),
     ).toThrow("example.fixtures.valid must be an array of non-empty strings");
   });
+  it("validates projectWhen recursively", () => {
+    expect(() =>
+      parseConfig({
+        rules: [{
+          id: "example",
+          question: "Is this a violation?",
+          projectWhen: { fileExists: "../outside" },
+        }],
+      }),
+    ).toThrow("example.projectWhen.fileExists must stay inside the repository");
+
+    expect(() =>
+      parseConfig({
+        rules: [{
+          id: "example",
+          question: "Is this a violation?",
+          projectWhen: { anyOf: [] },
+        }],
+      }),
+    ).toThrow("example.projectWhen.anyOf must be a non-empty array");
+
+    expect(() =>
+      parseConfig({
+        rules: [{
+          id: "example",
+          question: "Is this a violation?",
+          projectWhen: { fileExists: "src/a.ts", globMatches: "src/**/*.ts" },
+        }],
+      }),
+    ).toThrow("example.projectWhen must define exactly one project condition");
+  });
+
+  it("validates deterministic coverage declarations", () => {
+    expect(() =>
+      parseConfig({
+        rules: [{
+          id: "example",
+          question: "Is this a violation?",
+          coveredBy: [],
+        }],
+      }),
+    ).toThrow("example.coveredBy must be a non-empty array");
+
+    expect(() =>
+      parseConfig({
+        rules: [{
+          id: "example",
+          question: "Is this a violation?",
+          coveredBy: [
+            { id: "test", path: "tests/a.ts" },
+            { id: "test", path: "tests/b.ts" },
+          ],
+        }],
+      }),
+    ).toThrow("example.coveredBy contains duplicate id: test");
+
+    expect(() =>
+      parseConfig({
+        rules: [{
+          id: "example",
+          question: "Is this a violation?",
+          coveredBy: [{ id: "test", path: "../outside.ts" }],
+        }],
+      }),
+    ).toThrow("example.coveredBy[0].path must stay inside the repository");
+  });
+
 });
