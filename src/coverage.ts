@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises";
 import { isAbsolute, resolve, sep } from "node:path";
 import type { JevCheckRule, RuleCoverageLink } from "./types.js";
 
-const COVERAGE_IDENTITY_VERSION = "v1";
+const COVERAGE_IDENTITY_VERSION = "v2";
 
 export interface CoverageLinkFingerprint extends RuleCoverageLink {
   fingerprint: string;
@@ -17,6 +17,22 @@ export interface CurrentCoverageEvidence {
 
 function hash(value: string): string {
   return createHash("sha256").update(value).digest("hex");
+}
+
+
+function coverageRuleSemantics(rule: JevCheckRule): Record<string, unknown> {
+  return {
+    id: rule.id,
+    question: rule.question,
+    criteria: rule.criteria ?? null,
+    files: rule.files ?? ["**/*"],
+    exclude: rule.exclude ?? [],
+    prefilter: rule.prefilter ?? null,
+    unless: rule.unless ?? null,
+    ast: rule.ast ?? null,
+    wholeFile: rule.wholeFile ?? false,
+    contextLines: rule.contextLines ?? null,
+  };
 }
 
 function coveragePath(cwd: string, path: string): string {
@@ -58,6 +74,7 @@ export async function currentCoverageEvidence(
     identity: hash(JSON.stringify({
       version: COVERAGE_IDENTITY_VERSION,
       ruleId: rule.id,
+      rule: coverageRuleSemantics(rule),
       links,
     })),
     links,
