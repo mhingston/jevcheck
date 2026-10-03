@@ -188,19 +188,33 @@ export function createJevCheck(options: JevCheckOptions): JevCheck {
   const contextLines = options.contextLines ?? DEFAULT_CONTEXT_LINES;
   const namespace = options.cacheNamespace ?? "default";
   const cache: AnswerCache | undefined = options.cache;
+  const executionByRule = new Map(
+    (options.ruleEvidenceReports ?? []).map((report) => [report.ruleId, report.execution ?? "semantic"]),
+  );
   if (options.replayOnly && !options.decisionStore) {
     throw new Error("replayOnly requires a semantic decision store");
   }
-  if (!options.replayOnly && !options.client) {
-    throw new Error("a Jev client is required unless replayOnly is enabled");
+  const needsSemanticClient = options.rules.some(
+    (rule) => (executionByRule.get(rule.id) ?? "semantic") === "semantic",
+  );
+  if (!options.replayOnly && !options.client && needsSemanticClient) {
+    throw new Error("a Jev client is required unless every rule is deterministically skipped");
   }
   const suppressionMarker = options.suppressionMarker ?? DEFAULT_SUPPRESSION_MARKER;
   const baseline = new Set(
     (options.baseline ?? []).map((entry) => baselineKey(entry.ruleId, entry.path, entry.fingerprint)),
   );
-  const executionByRule = new Map(
-    (options.ruleEvidenceReports ?? []).map((report) => [report.ruleId, report.execution ?? "semantic"]),
-  );
+  const projectApplicability = new Map<string, Promise<boolean>>();
+
+  function projectApplies(rule: JevCheckRule): Promise<boolean> {
+    if (!rule.projectWhen) return Promise.resolve(true);
+    let pending = projectApplicability.get(rule.id);
+    if (!pending) {
+      pending = projectConditionMatches(rule.projectWhen, options.projectRoot ?? process.cwd());
+      projectApplicability.set(rule.id, pending);
+    }
+    return pending;
+  }
 
   async function checkSourceInternal(
     path: string,
@@ -222,7 +236,7 @@ export function createJevCheck(options: JevCheckOptions): JevCheck {
         mode === "enforce" &&
         !recordedExecution &&
         rule.projectWhen &&
-        !(await projectConditionMatches(rule.projectWhen, options.projectRoot ?? process.cwd()))
+        !(await projectApplies(rule))
       ) {
         continue;
       }
