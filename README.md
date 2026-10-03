@@ -577,7 +577,7 @@ The default `.gitignore` policy keeps transient cache state out while allowing d
 | `.jevcheck/replay.json` | Reusable semantic decisions | When replay is part of your workflow |
 | `.jevcheck/calibration.json` | Recorded development-fixture probabilities | For evidence-gated rules |
 | `.jevcheck/confirmation.json` | Untouched confirmation-fixture results | When confirmation fixtures are configured |
-| `.jevcheck/evidence.json` | Drift, mutation, and robustness evidence | For evidence-gated rules |
+| `.jevcheck/evidence.json` | Drift, mutation, robustness, and deterministic coverage evidence | For evidence-gated or `coveredBy` rules |
 | `.jevcheck/cache.json` | Local answer cache | No |
 
 These evidence files contain hashes and evaluation metadata rather than a second copy of your source code or prompts.
