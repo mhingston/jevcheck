@@ -558,7 +558,9 @@ Provider and model selection are inherited from `@mhingston5/jev-cli`.
 | OpenRouter | `openrouter` | `OPENROUTER_API_KEY` |
 | Vercel AI Gateway | `vercel` | `AI_GATEWAY_API_KEY` |
 | Cloudflare AI | `cloudflare` | `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` |
-| Custom | `custom` | `JEV_API_KEY` when required |
+| Custom/System One-compatible | `custom` | `JEV_API_KEY` when required |
+
+For a custom System One-compatible API, set `JEV_ENDPOINT` to the endpoint (for example an implementation of the `/v1/systemone` contract). A custom provider has no implicit model default; set `--model` or `JEV_MODEL` only when the endpoint requires one.
 
 Override the model with `--model` or `JEV_MODEL`.
 
