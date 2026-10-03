@@ -21,6 +21,29 @@ Poor examples:
 - Does this file contain eval?
 - Should we redesign this subsystem?
 
+## Deterministic applicability and coverage
+
+Before spending a semantic call, ask whether the rule is relevant to this repository and whether deterministic enforcement already owns the invariant.
+
+Use `projectWhen` for repository-level applicability that can be decided from committed structure:
+
+- `packageJsonHasDep`
+- `fileExists`
+- `globMatches`
+- `anyOf`, `allOf`, and `not`
+
+Do not turn applicability into a second model question. A false `projectWhen` condition skips normal semantic enforcement; measurement workflows may still evaluate the rule so its fallback evidence remains maintainable.
+
+Use `coveredBy` only when a named test or linter really enforces the same invariant deterministically. Each coverage link has a stable `id` and a repository-relative `path`. After reviewing that coverage, record its fingerprints with:
+
+~~~sh
+jevcheck coverage record
+~~~
+
+Fresh recorded coverage skips the semantic judge. Missing, unreadable, changed, or unrecorded coverage falls back to the semantic rule and appears in `jevcheck rules audit`.
+
+Treat `coverage record` as an evidence review action, not a green-CI button. Jevcheck fingerprints the referenced enforcement files but does not execute them or prove that they are logically equivalent to the semantic rule. If a coverage source changes, review whether it still enforces the invariant before refreshing the fingerprints.
+
 ## Authoring a rule
 
 Classify the concern before encoding it:
@@ -301,6 +324,7 @@ jevcheck test --record
 jevcheck test --drift
 jevcheck test --confirm
 jevcheck recall
+jevcheck coverage record
 jevcheck record
 jevcheck replay
 jevcheck list
@@ -326,6 +350,7 @@ Do not:
 - tune a threshold merely to make fixtures pass when labelled ranges overlap
 - weaken graduation policy to make an owned rule admissible
 - add speculative exclusions or suppressions just to improve measured results
+- record stale or unreviewed deterministic coverage merely to suppress model calls
 - broaden an atomic semantic question into a general quality judgement
 
 If a rule needs repeated exceptions, very broad context, or unstable threshold tuning to work, split it into narrower rules, redesign its deterministic candidate selection, or leave it in shadow instead of forcing graduation.

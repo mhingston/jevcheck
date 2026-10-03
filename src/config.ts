@@ -1,5 +1,5 @@
 import { readFile } from "node:fs/promises";
-import { resolve } from "node:path";
+import { isAbsolute, resolve } from "node:path";
 import { validateAstCandidate } from "./ast.js";
 import { compilePattern } from "./candidates.js";
 import { parseRuleEvidencePolicy } from "./evidence.js";
@@ -85,6 +85,77 @@ function validateAst(value: unknown, ruleId: string): void {
   }
 }
 
+
+function validateRepositoryRelativePath(value: string, field: string, glob = false): void {
+  const normalized = value.replaceAll("\\", "/");
+  if (isAbsolute(value) || normalized.split("/").includes("..")) {
+    throw new Error(field + " must stay inside the repository");
+  }
+  if (!glob && (normalized === "." || normalized === "")) {
+    throw new Error(field + " must name a repository-relative file");
+  }
+}
+
+function validateProjectCondition(value: unknown, field: string): void {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(field + " must be an object");
+  }
+  const condition = value as Record<string, unknown>;
+  const supported = ["packageJsonHasDep", "fileExists", "globMatches", "anyOf", "allOf", "not"];
+  const present = supported.filter((key) => condition[key] !== undefined);
+  const unknown = Object.keys(condition).filter((key) => !supported.includes(key));
+  if (unknown.length) {
+    throw new Error(field + " contains unknown field(s): " + unknown.join(", "));
+  }
+  if (present.length !== 1 || Object.keys(condition).length !== 1) {
+    throw new Error(field + " must define exactly one project condition");
+  }
+
+  const key = present[0]!;
+  if (key === "packageJsonHasDep" || key === "fileExists" || key === "globMatches") {
+    const raw = condition[key];
+    if (typeof raw !== "string" || !raw.trim()) {
+      throw new Error(field + "." + key + " must be a non-empty string");
+    }
+    if (key === "fileExists") validateRepositoryRelativePath(raw, field + "." + key);
+    if (key === "globMatches") validateRepositoryRelativePath(raw, field + "." + key, true);
+    return;
+  }
+
+  if (key === "not") {
+    validateProjectCondition(condition.not, field + ".not");
+    return;
+  }
+
+  const nested = condition[key];
+  if (!Array.isArray(nested) || nested.length === 0) {
+    throw new Error(field + "." + key + " must be a non-empty array");
+  }
+  nested.forEach((item, index) => validateProjectCondition(item, field + "." + key + "[" + index + "]"));
+}
+
+function validateCoveredBy(value: unknown, ruleId: string): void {
+  if (value === undefined) return;
+  if (!Array.isArray(value) || value.length === 0) {
+    throw new Error(ruleId + ".coveredBy must be a non-empty array");
+  }
+  const ids = new Set<string>();
+  for (const [index, raw] of value.entries()) {
+    const field = ruleId + ".coveredBy[" + index + "]";
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+      throw new Error(field + " must be an object");
+    }
+    const link = raw as Record<string, unknown>;
+    const unknown = Object.keys(link).filter((key) => key !== "id" && key !== "path");
+    if (unknown.length) throw new Error(field + " contains unknown field(s): " + unknown.join(", "));
+    if (typeof link.id !== "string" || !link.id.trim()) throw new Error(field + ".id must be non-empty");
+    if (ids.has(link.id)) throw new Error(ruleId + ".coveredBy contains duplicate id: " + link.id);
+    ids.add(link.id);
+    if (typeof link.path !== "string" || !link.path.trim()) throw new Error(field + ".path must be non-empty");
+    validateRepositoryRelativePath(link.path, field + ".path");
+  }
+}
+
 function validateRule(value: unknown, index: number): JevCheckRule {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw new Error("rules[" + index + "] must be an object");
@@ -134,6 +205,10 @@ function validateRule(value: unknown, index: number): JevCheckRule {
   }
 
   validateAst(rule.ast, rule.id);
+  if (rule.projectWhen !== undefined) {
+    validateProjectCondition(rule.projectWhen, rule.id + ".projectWhen");
+  }
+  validateCoveredBy(rule.coveredBy, rule.id);
   nonEmptyStrings(rule.files, rule.id + ".files");
   nonEmptyStrings(rule.exclude, rule.id + ".exclude");
 

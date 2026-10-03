@@ -25,6 +25,19 @@ export interface RuleCriteria {
   false?: string;
 }
 
+export type ProjectCondition =
+  | { packageJsonHasDep: string }
+  | { fileExists: string }
+  | { globMatches: string }
+  | { anyOf: ProjectCondition[] }
+  | { allOf: ProjectCondition[] }
+  | { not: ProjectCondition };
+
+export interface RuleCoverageLink {
+  id: string;
+  path: string;
+}
+
 export interface RuleFixtureGroup {
   valid?: string[];
   invalid?: string[];
@@ -63,6 +76,7 @@ export interface RuleEvidenceCheck {
 export interface RuleEvidenceReport {
   ruleId: string;
   currentStatus: RuleStatus;
+  execution?: "semantic" | "covered" | "inapplicable";
   checks: RuleEvidenceCheck[];
   blockers: string[];
   warnings: string[];
@@ -85,6 +99,8 @@ export interface JevCheckRule {
   threshold?: number;
   contextLines?: number;
   criteria?: RuleCriteria;
+  projectWhen?: ProjectCondition;
+  coveredBy?: RuleCoverageLink[];
   fixtures?: RuleFixtures;
   mutants?: RuleMutant[];
 }
@@ -236,6 +252,7 @@ export interface JevCheckOptions {
   replayOnly?: boolean;
   mode?: "enforce" | "measure";
   ruleEvidenceReports?: readonly RuleEvidenceReport[];
+  projectRoot?: string;
 }
 
 export interface FixtureTestResult {

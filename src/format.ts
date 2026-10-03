@@ -394,7 +394,7 @@ export function formatRuleEvidenceStylish(reports: readonly RuleEvidenceReport[]
   if (!reports.length) return "No rules configured.";
 
   return reports.map((report) => {
-    const lines = [report.ruleId + "  " + report.currentStatus, ""];
+    const lines = [report.ruleId + "  " + report.currentStatus + "  execution=" + (report.execution ?? "semantic"), ""];
     for (const check of report.checks) {
       lines.push(
         check.id.replaceAll("-", " ").padEnd(14) +
