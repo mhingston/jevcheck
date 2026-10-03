@@ -1,3 +1,8 @@
+---
+name: jevcheck
+description: Use jevcheck for bounded semantic linting and automated code review when deterministic tooling cannot decide a concern exactly. Use when authoring or refining jevcheck rules, narrowing semantic candidates, validating evidence, calibrating or graduating rules, or running lint and review workflows.
+---
+
 # Jevcheck
 
 Use this skill when a repository uses jevcheck for semantic linting or when deciding whether a review concern should become a jevcheck rule.
@@ -242,7 +247,7 @@ Confirmation is not a tuning set. If you inspect a failed confirmation result an
 
 ## Audit rule evidence
 
-Before treating a semantic rule as reviewer-of-record, inspect its evidence without making new model calls:
+Before treating a semantic rule as blocking enforcement in linting or review, inspect its evidence without making new model calls:
 
 ~~~sh
 jevcheck rules audit
@@ -291,7 +296,7 @@ Default policy requires valid and invalid development fixtures, current calibrat
 
 A scoped recall such as `jevcheck recall src/foo.ts` is exploratory and is not persisted as graduation evidence. Run full-scope `jevcheck recall` to refresh the committed evidence artifact.
 
-Measurement commands can still run while an owned rule is blocked so evidence can be repaired. They preserve the configured status but do not let it act as a blocking reviewer during measurement.
+Measurement commands can still run while an owned rule is blocked so evidence can be repaired. They preserve the configured status but do not let it act as a blocking lint or review check during measurement.
 
 ## Suppressing known findings
 
