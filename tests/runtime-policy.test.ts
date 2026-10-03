@@ -151,4 +151,24 @@ describe("deterministic runtime policy", () => {
     expect(client.calls).toBe(0);
     expect(result.stats.requests).toBe(0);
   });
+  it("allows fully covered enforcement without constructing a provider client", async () => {
+    const checker = createJevCheck({
+      rules: [{ id: "covered-no-client", question: "Is this a violation?", wholeFile: true }],
+      mode: "enforce",
+      ruleEvidenceReports: [{
+        ruleId: "covered-no-client",
+        currentStatus: "shadow",
+        execution: "covered",
+        checks: [],
+        blockers: [],
+        warnings: [],
+        readyForOwned: true,
+      }],
+    });
+
+    const result = await checker.checkSource("src/a.ts", "const value = 1;");
+    expect(result.stats.requests).toBe(0);
+    expect(result.evaluations).toHaveLength(0);
+  });
+
 });
