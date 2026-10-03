@@ -24,6 +24,7 @@ import {
   DEFAULT_EVIDENCE_FILE,
   DEFAULT_SOURCE_INCLUDE,
   evaluateConfiguredRuleEvidence,
+  persistCoverageEvidence,
   persistDriftEvidence,
   persistMutationEvidence,
   persistRobustnessEvidence,
@@ -44,7 +45,7 @@ import { formatInspectionStylish, inspectSources } from "./inspect.js";
 import { DEFAULT_REPLAY_FILE, DiskSemanticDecisionStore } from "./replay.js";
 import type { SourceInput } from "./types.js";
 
-type Command = "check" | "test" | "list" | "inspect" | "baseline" | "record" | "replay" | "recall" | "rules-audit";
+type Command = "check" | "test" | "list" | "inspect" | "baseline" | "record" | "replay" | "recall" | "rules-audit" | "coverage-record";
 type OutputFormat = "stylish" | "json" | "sarif";
 
 interface CliOptions {
@@ -81,6 +82,7 @@ function usage(): string {
     "  jevcheck replay [patterns...] [options]",
     "  jevcheck recall [patterns...] [options]",
     "  jevcheck rules audit [options]",
+    "  jevcheck coverage record [options]",
     "",
     "Options:",
     "  --config <path>       Config file (default: jevcheck.config.json)",
@@ -105,6 +107,7 @@ function usage(): string {
     "test --drift, test --confirm, and test --robustness bypass the answer cache.",
     "robustness probes fixture judgments with nearby comments that should not change the label.",
     "recall mutates sampled real files in memory; repository files are never modified.",
+    "coverage record fingerprints declared deterministic enforcement files into evidenceFile.",
     "inspect is provider-free and prints the exact state/question request Jev would receive.",
     "",
     "Only owned error findings make the check command exit 1. Shadow findings are advisory.",
@@ -122,6 +125,9 @@ function parseArgs(argv: string[]): CliOptions {
   let command: Command = "check";
   if (args[0] === "rules" && args[1] === "audit") {
     command = "rules-audit";
+    args.splice(0, 2);
+  } else if (args[0] === "coverage" && args[1] === "record") {
+    command = "coverage-record";
     args.splice(0, 2);
   } else if (
     args[0] === "test" ||
@@ -239,10 +245,13 @@ function parseArgs(argv: string[]): CliOptions {
     throw new Error("replay is offline; --provider and --model are not valid");
   }
   if (
-    options.command === "rules-audit" &&
+    (options.command === "rules-audit" || options.command === "coverage-record") &&
     (options.changed || options.staged || options.base || options.patterns.length > 0)
   ) {
-    throw new Error("rules audit does not accept file patterns, --changed, --staged, or --base");
+    throw new Error(
+      (options.command === "rules-audit" ? "rules audit" : "coverage record") +
+      " does not accept file patterns, --changed, --staged, or --base",
+    );
   }
   if (
     (options.testRecord || options.testDrift || options.testConfirm || options.testRobustness) &&
@@ -287,6 +296,8 @@ async function main(): Promise<void> {
       threshold: rule.threshold ?? 0.8,
       source: rule.source,
       mutants: rule.mutants?.length ?? 0,
+      projectWhen: rule.projectWhen !== undefined,
+      coveredBy: rule.coveredBy?.length ?? 0,
       candidate: rule.ast ? "ast" : rule.wholeFile ? "whole-file" : rule.prefilter ? "prefilter" : "chunks",
     }));
     console.log(
@@ -305,7 +316,11 @@ async function main(): Promise<void> {
                 "  candidate=" +
                 rule.candidate +
                 "  mutants=" +
-                rule.mutants,
+                rule.mutants +
+                "  projectWhen=" +
+                (rule.projectWhen ? "yes" : "no") +
+                "  coveredBy=" +
+                rule.coveredBy,
             )
             .join("\n"),
     );
@@ -322,6 +337,16 @@ async function main(): Promise<void> {
       args.format === "json"
         ? formatJson(evaluated.reports)
         : formatRuleEvidenceStylish(evaluated.reports),
+    );
+    return;
+  }
+  if (args.command === "coverage-record") {
+    const recorded = await persistCoverageEvidence(evidenceFile, config.rules);
+    const payload = { evidenceFile, coveredRules: recorded };
+    console.log(
+      args.format === "json"
+        ? formatJson(payload)
+        : "Recorded deterministic coverage for " + recorded + " rule(s) to " + evidenceFile,
     );
     return;
   }
@@ -382,8 +407,12 @@ async function main(): Promise<void> {
       : undefined;
 
   const hasOwnedRules = config.rules.some((rule) => (rule.status ?? "shadow") === "owned");
+  const hasRuntimeRulePolicy = config.rules.some(
+    (rule) => rule.projectWhen !== undefined || (rule.coveredBy?.length ?? 0) > 0,
+  );
   const ruleEvidenceReports =
-    (args.command === "check" || args.command === "replay") && hasOwnedRules
+    (args.command === "check" || args.command === "replay") &&
+    (hasOwnedRules || hasRuntimeRulePolicy)
       ? (await evaluateConfiguredRuleEvidence(config, { modelNamespace })).reports
       : undefined;
 
