@@ -428,8 +428,14 @@ async function main(): Promise<void> {
       : args.command === "replay"
         ? new DiskSemanticDecisionStore(replayFile, true)
         : undefined;
+  const needsSemanticClient =
+    !ruleEvidenceReports ||
+    config.rules.some((rule) => {
+      const report = ruleEvidenceReports.find((item) => item.ruleId === rule.id);
+      return (report?.execution ?? "semantic") === "semantic";
+    });
   const client =
-    args.command === "replay"
+    args.command === "replay" || !needsSemanticClient
       ? undefined
       : createJevClient({ provider: args.provider, model: args.model });
   const cacheFile = resolve(config.cacheFile ?? ".jevcheck/cache.json");
