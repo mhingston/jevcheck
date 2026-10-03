@@ -1,6 +1,6 @@
 import { readFile, stat } from "node:fs/promises";
 import { isAbsolute, resolve, sep } from "node:path";
-import { discoverFiles } from "./files.js";
+import fg from "fast-glob";
 import type { ProjectCondition } from "./types.js";
 
 function projectPath(cwd: string, path: string): string {
@@ -31,7 +31,7 @@ async function packageJsonHasDependency(cwd: string, dependency: string): Promis
   const parsed = JSON.parse(raw) as Record<string, unknown>;
   for (const field of ["dependencies", "devDependencies", "peerDependencies", "optionalDependencies"]) {
     const value = parsed[field];
-    if (value && typeof value === "object" && !Array.isArray(value) && dependency in value) {
+    if (value && typeof value === "object" && !Array.isArray(value) && Object.hasOwn(value, dependency)) {
       return true;
     }
   }
@@ -55,7 +55,7 @@ export async function projectConditionMatches(
     }
   }
   if ("globMatches" in condition) {
-    return (await discoverFiles([projectPattern(condition.globMatches)], [], cwd)).length > 0;
+    return (await fg(projectPattern(condition.globMatches), { cwd, dot: true, onlyFiles: true, followSymbolicLinks: false })).length > 0;
   }
   if ("anyOf" in condition) {
     for (const item of condition.anyOf) {
