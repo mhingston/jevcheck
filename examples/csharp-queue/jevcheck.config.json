@@ -14,12 +14,7 @@
       ],
       "ast": {
         "language": "csharp",
-        "pattern": "queue.PublishAsync($A, $B)",
-        "context": {
-          "ancestor": {
-            "kind": "method_declaration"
-          }
-        }
+        "kind": "method_declaration"
       },
       "question": "Can this handler report success if queue publication fails without recovery?",
       "criteria": {
@@ -33,7 +28,8 @@
         "invalid": [
           "examples/csharp-queue/fixtures/invalid/**/*.cs"
         ]
-      }
+      },
+      "prefilter": "queue\\.PublishAsync\\("
     }
   ]
 }
