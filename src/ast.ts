@@ -139,7 +139,7 @@ export function astCandidates(
         ruleId,
         message:
           "AST candidate selection skipped because the file extension has no built-in language mapping; " +
-          "set ast.language to " + AST_LANGUAGES.join(", ") + "."",
+          "set ast.language to " + AST_LANGUAGES.join(", ") + ".",
       }],
     };
   }
