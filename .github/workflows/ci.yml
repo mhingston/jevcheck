@@ -25,4 +25,5 @@ jobs:
       - run: npm run typecheck
       - run: npm test
       - run: npm run build
+      - run: node dist/cli.js inspect examples/csharp-queue/src/MessageHandler.cs --config examples/csharp-queue/jevcheck.config.json --rule reliability/no-success-after-publish-failure --format json
       - run: npm run pack:check
