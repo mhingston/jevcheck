@@ -2,7 +2,7 @@
 
 A handler returning HTTP-style `202 Accepted` after a failed publish can lose work. This example is **production-inspired**, not a real incident or a claim of model accuracy. Both fixtures call `queue.PublishAsync`; the invalid handler catches the failure and then reports success, while the valid handler returns a failure response.
 
-The rule uses `ast.language: "csharp"` (also inferred automatically from `.cs`), selects the whole handler with `kind: "method_declaration"` and prefilters for the publish call. The method is deliberately the **focus** because both the call and the return/error paths are needed to judge the invariant. Separate selector tests cover call `pattern`, composite rules, and ancestor context. It selects a bounded, reviewable method; the model's yes/no judgement remains distinct from AST matching.
+The rule uses `ast.language: "csharp"` (also inferred automatically from `.cs`), selects the whole handler with `kind: "method_declaration"` and prefilters for the publish call. Both AST context-line settings are explicitly zero so that nearby declarations cannot inherit a matching prefilter from surrounding evidence. The method is deliberately the **focus** because both the call and the return/error paths are needed to judge the invariant. Separate selector tests cover call `pattern`, composite rules, and ancestor context. It selects a bounded, reviewable method; the model's yes/no judgement remains distinct from AST matching.
 
 From the repository root:
 
