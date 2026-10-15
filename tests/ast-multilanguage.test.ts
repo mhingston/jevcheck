@@ -15,7 +15,8 @@ const cases = [
 
 describe.each(cases)("$language AST integration", ({ language, extension, kind, ancestor }) => {
   const path = "examples/multilanguage-ast/sources/example." + extension;
-  const source = readFileSync(path, "utf8");
+  // Git checkout may use CRLF on Windows; construct exactly one CRLF per line below.
+  const source = readFileSync(path, "utf8").replace(/\r\n/g, "\n");
   const focusLine = source.split("\n").findIndex((line) => line.includes("emit(café)")) + 1;
   const focusColumn = source.split("\n")[focusLine - 1]!.indexOf("emit(café)") + 1;
 
