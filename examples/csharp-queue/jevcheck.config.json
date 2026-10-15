@@ -14,7 +14,9 @@
       ],
       "ast": {
         "language": "csharp",
-        "kind": "method_declaration"
+        "kind": "method_declaration",
+        "contextBefore": 0,
+        "contextAfter": 0
       },
       "question": "Can this handler report success if queue publication fails without recovery?",
       "criteria": {
