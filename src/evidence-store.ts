@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { parseArchitectureDecision, type ArchitectureDecision } from "./architecture-decision.js";
+import { isLocalRuleSource, parseArchitectureDecision, type ArchitectureDecision } from "./architecture-decision.js";
 import { describeProjectCondition, projectConditionMatches } from "./applicability.js";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
@@ -117,7 +117,7 @@ export async function ruleSourceProvenance(
   cwd = process.cwd(),
 ): Promise<RuleSourceProvenance> {
   if (!rule.source) return { kind: "missing" };
-  if (/^https?:\/\//i.test(rule.source)) {
+  if (!isLocalRuleSource(rule.source)) {
     return { kind: "external", reference: rule.source };
   }
 
