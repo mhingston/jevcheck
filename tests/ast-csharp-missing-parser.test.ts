@@ -8,14 +8,14 @@ vi.mock("@ast-grep/napi", async (importOriginal) => {
   };
 });
 
-describe("missing C# native parser diagnostics", () => {
+describe("native parser registration failure diagnostics", () => {
   it("provides a repair hint during explicit config validation", async () => {
     const { parseConfig } = await import("../src/config.js");
     expect(() => parseConfig({
       rules: [{ id: "csharp", question: "Is this unsafe?", ast: {
         language: "csharp", kind: "invocation_expression",
       } }],
-    })).toThrow(/Cannot load the C# AST parser.*lifecycle scripts/);
+    })).toThrow(/Cannot register native AST parser\(s\).*lifecycle scripts/);
   });
 
   it("returns an actionable offline diagnostic for inferred C# files", async () => {
@@ -29,5 +29,6 @@ describe("missing C# native parser diagnostics", () => {
     }]);
     expect(result.diagnostics[0]?.message).toContain("@ast-grep/lang-csharp");
     expect(result.diagnostics[0]?.message).toContain("--allow-build");
+    expect(result.diagnostics[0]?.message).toContain("@ast-grep/lang-python");
   });
 });

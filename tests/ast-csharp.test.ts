@@ -23,7 +23,8 @@ describe("C# AST candidate selection", () => {
   it("uses a shared language registry for explicit values and extension inference", () => {
     expect(AST_LANGUAGES).toContain("csharp");
     expect(isAstLanguage("csharp")).toBe(true);
-    expect(isAstLanguage("python")).toBe(false);
+    expect(isAstLanguage("python")).toBe(true);
+    expect(isAstLanguage("unknown-lang")).toBe(false);
     expect(inferredAstLanguage("src/Handler.CS")).toBe("csharp");
     expect(inferredAstLanguage("src/index.ts")).toBe("typescript");
     expect(inferredAstLanguage("src/index.tsx")).toBe("tsx");

@@ -84,7 +84,7 @@ Provider configuration: export `TYPESAFE_API_KEY` (default provider), or set `OP
 - **[Rule lifecycle and evidence](docs/rule-lifecycle.md)** — fixtures, calibration, drift, recall, robustness, confirmation, baselines and replay.
 - **[CLI and configuration reference](docs/reference.md)** — provider options, commands, configuration, exit codes, API and development.
 
-C# repositories can use `ast.language: "csharp"` or automatic `.cs` detection for bounded AST selection. The [C# walkthrough](examples/csharp-queue/README.md) includes safe/unsafe fixtures, native parser installation requirements, and an offline `inspect` example.
+C#, Python, Go, Java, and Rust support language-specific AST selection using `ast.language` or automatic `.cs`, `.py`, `.go`, `.java` and `.rs` detection. See the [supported-language reference](docs/reference.md#ast-language-support-and-native-parsers), [multilanguage AST examples](examples/multilanguage-ast/README.md), and the [C# walkthrough](examples/csharp-queue/README.md) includes safe/unsafe fixtures, native parser installation requirements, and an offline `inspect` example.
 
 The bundled [agent skill](skills/jevcheck/SKILL.md) guides automated rule authoring without changing the deterministic/model boundary.
 
