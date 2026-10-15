@@ -204,3 +204,16 @@ The npm package includes `skills/jevcheck/SKILL.md` for coding agents working wi
 ## License
 
 MIT
+
+## AST language support and native parsers
+
+AST candidate selection supports `javascript`, `typescript`, `tsx`, `html`, `css`, and `csharp`. Extension inference covers JS/TS/TSX/HTML/CSS and `.cs`; set `ast.language` to override inference. Pattern, kind and composite rule selectors work in C#; `ast.context.ancestor` expands bounded context, not the focus.
+
+JavaScript-family parsers are built into `@ast-grep/napi`. C# uses `@ast-grep/lang-csharp@0.0.6`. jevcheck registers all enabled native parser packs together, once per process. Arbitrary parser/plugin loading is not supported.
+
+- Use `npm ci` or `npm install` with lifecycle scripts enabled; `--ignore-scripts` may leave native parser files unprepared.
+- For pnpm 10+, permit the postinstall: `pnpm add --allow-build=@ast-grep/lang-csharp @ast-grep/lang-csharp`.
+- Native prebuilds are platform-specific. When none is available, install `tree-sitter-cli` and the required native build toolchain.
+- Parser errors name the package and repair steps; `inspect` stays provider-free. CI checks native loading on Linux, macOS and Windows.
+
+See the [runnable C# example](../examples/csharp-queue/README.md).

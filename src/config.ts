@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { isAbsolute, resolve } from "node:path";
 import { validateAstCandidate } from "./ast.js";
+import { AST_LANGUAGES, isAstLanguage } from "./ast-languages.js";
 import { compilePattern } from "./candidates.js";
 import { parseRuleEvidencePolicy } from "./evidence.js";
 import type { AstCandidateConfig, JevCheckConfig, JevCheckRule } from "./types.js";
@@ -51,15 +52,8 @@ function validateAst(value: unknown, ruleId: string): void {
   const ast = value as Record<string, unknown>;
   validateAstSelector(ast, ruleId + ".ast");
 
-  if (
-    ast.language !== undefined &&
-    ast.language !== "javascript" &&
-    ast.language !== "typescript" &&
-    ast.language !== "tsx" &&
-    ast.language !== "html" &&
-    ast.language !== "css"
-  ) {
-    throw new Error(ruleId + ".ast.language must be javascript, typescript, tsx, html, or css");
+  if (ast.language !== undefined && !isAstLanguage(ast.language)) {
+    throw new Error(ruleId + ".ast.language must be " + AST_LANGUAGES.join(", "));
   }
 
   validateNonNegativeInteger(ast.contextBefore, ruleId + ".ast.contextBefore");

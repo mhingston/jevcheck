@@ -22,7 +22,7 @@ The [queue acknowledgement walkthrough](examples/queue-ack/README.md) includes t
 From a checkout of this repository:
 
 ~~~sh
-npm install --ignore-scripts
+npm ci
 npm run build
 node dist/cli.js inspect examples/queue-ack/src/handler.ts \
   --config examples/queue-ack/jevcheck.config.json \
@@ -83,6 +83,8 @@ Provider configuration: export `TYPESAFE_API_KEY` (default provider), or set `OP
 - **[What makes a good semantic rule?](docs/concepts.md)** — applicability, architecture decisions, deterministic coverage, context sufficiency.
 - **[Rule lifecycle and evidence](docs/rule-lifecycle.md)** — fixtures, calibration, drift, recall, robustness, confirmation, baselines and replay.
 - **[CLI and configuration reference](docs/reference.md)** — provider options, commands, configuration, exit codes, API and development.
+
+C# repositories can use `ast.language: "csharp"` or automatic `.cs` detection for bounded AST selection. The [C# walkthrough](examples/csharp-queue/README.md) includes safe/unsafe fixtures, native parser installation requirements, and an offline `inspect` example.
 
 The bundled [agent skill](skills/jevcheck/SKILL.md) guides automated rule authoring without changing the deterministic/model boundary.
 

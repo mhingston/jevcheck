@@ -2,7 +2,8 @@ import type { SystemOneLikeClient } from "@mhingston5/jev-cli";
 
 export type RuleSeverity = "error" | "warning";
 export type RuleStatus = "shadow" | "owned";
-export type AstLanguage = "javascript" | "typescript" | "tsx" | "html" | "css";
+export type { AstLanguage } from "./ast-languages.js";
+import type { AstLanguage } from "./ast-languages.js";
 
 export type AstSelector =
   | { pattern: string; kind?: never; rule?: never }
