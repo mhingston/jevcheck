@@ -94,7 +94,7 @@ describe("C# AST candidate selection", () => {
 
   it("rejects invalid C# language and selector configurations", () => {
     const config = (ast: object) => ({ rules: [{ id: "sample", question: "Is this unsafe?", ast }] });
-    expect(() => parseConfig(config({ language: "python", kind: "invocation_expression" })))
+    expect(() => parseConfig(config({ language: "kotlin", kind: "invocation_expression" })))
       .toThrow("sample.ast.language must be");
     expect(() => parseConfig(config({ language: "csharp", kind: "not_a_real_csharp_node" })))
       .toThrow("sample.ast is invalid");
