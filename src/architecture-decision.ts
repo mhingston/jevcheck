@@ -22,7 +22,26 @@ function unquote(value: string): string {
 
 export function parseArchitectureDecision(content: string): ArchitectureDecision | undefined {
   const frontmatter = /^(?:\uFEFF)?---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/.exec(content);
-  if (!frontmatter) return undefined;
+  if (!frontmatter) {
+    // A malformed opt-in must not fall back to ordinary, unchecked provenance.
+    // Only inspect the initial run of metadata lines after the opening delimiter:
+    // prose and code examples later in a document do not count as opt-in.
+    const opening = /^(?:\uFEFF)?---\r?\n/.exec(content);
+    if (!opening) return undefined;
+    const lines = content.slice(opening[0].length).split(/\r?\n/);
+    for (const line of lines) {
+      const field = /^([a-z][a-z0-9-]*):[ \t]*(.*?)[ \t]*$/i.exec(line);
+      if (!field) break;
+      if (field[1]!.toLowerCase() === "jevcheck-adr" && unquote(field[2]!).toLowerCase() === "true") {
+        return {
+          status: "invalid",
+          active: false,
+          detail: "ADR metadata has no closing frontmatter delimiter",
+        };
+      }
+    }
+    return undefined;
+  }
 
   const fields = new Map<string, string[]>();
   for (const line of frontmatter[1]!.split(/\r?\n/)) {
@@ -35,8 +54,8 @@ export function parseArchitectureDecision(content: string): ArchitectureDecision
   }
 
   const markers = fields.get("jevcheck-adr");
-  if (!markers) return undefined;
-  if (markers.length !== 1 || markers[0]!.toLowerCase() !== "true") {
+  if (!markers?.some((value) => value.toLowerCase() === "true")) return undefined;
+  if (markers.length !== 1) {
     return {
       status: "invalid",
       active: false,
