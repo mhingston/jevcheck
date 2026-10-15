@@ -408,7 +408,14 @@ async function main(): Promise<void> {
 
   const hasOwnedRules = config.rules.some((rule) => (rule.status ?? "shadow") === "owned");
   const hasRuntimeRulePolicy = config.rules.some(
-    (rule) => rule.projectWhen !== undefined || (rule.coveredBy?.length ?? 0) > 0,
+    (rule) =>
+      rule.projectWhen !== undefined ||
+      (rule.coveredBy?.length ?? 0) > 0 ||
+      // Opt-in ADR metadata lives in local Markdown source files. Evaluate policy
+      // for shadow rules too, so superseded decisions never remain active.
+      (rule.source !== undefined &&
+        !/^https?:\/\//i.test(rule.source) &&
+        /\.md(?:#.*)?$/i.test(rule.source)),
   );
   const ruleEvidenceReports =
     (args.command === "check" || args.command === "replay") &&
