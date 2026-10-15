@@ -57,3 +57,32 @@ describe("queue acknowledgement onboarding example", () => {
     expect(result.inspections).toHaveLength(0);
   });
 });
+
+describe("bundled jevcheck agent skill", () => {
+  it("has valid routing frontmatter and links first use to a shipped source example", () => {
+    const skill = readFileSync(join(root, "skills/jevcheck/SKILL.md"), "utf8");
+    expect(skill).toMatch(/^---\nname: jevcheck\ndescription: .+\n---\n/);
+    expect(skill).toContain("examples/queue-ack");
+    expect(skill).toContain("node dist/cli.js inspect examples/queue-ack/src/handler.ts");
+    expect(skill).not.toContain("src/example.ts");
+  });
+
+  it("documents currently supported ADR, coverage and evidence workflows", () => {
+    const skill = readFileSync(join(root, "skills/jevcheck/SKILL.md"), "utf8");
+    for (const capability of [
+      "jevcheck-adr: true",
+      "status: accepted",
+      "projectWhen",
+      "coveredBy",
+      "jevcheck coverage record",
+      "jevcheck rules audit",
+      "jevcheck test --confirm",
+      "jevcheck test --robustness",
+      "jevcheck recall",
+      "jevcheck replay",
+      "jevcheck --staged",
+    ]) {
+      expect(skill).toContain(capability);
+    }
+  });
+});
