@@ -181,6 +181,32 @@ For programmatic replay, pass a `SemanticDecisionStore` as `decisionStore`. `Dis
 
 Generated fixes are intentionally out of scope. `jevcheck` reports bounded semantic findings; a coding agent or deterministic refactoring tool can decide what to change.
 
+## AST language support and native parsers
+
+| `ast.language` | File extension(s) | Parser | Version |
+| --- | --- | --- | --- |
+| `javascript`, `typescript`, `tsx`, `html`, `css` | `.js`, `.mjs`, `.cjs`, `.ts`, `.mts`, `.cts`, `.tsx`, `.jsx`, `.html`, `.htm`, `.css` | Built into `@ast-grep/napi` | `^0.45.3` |
+| `csharp` | `.cs` | `@ast-grep/lang-csharp` | `0.0.6` |
+| `python` | `.py` | `@ast-grep/lang-python` | `0.0.6` |
+| `go` | `.go` | `@ast-grep/lang-go` | `0.0.6` |
+| `java` | `.java` | `@ast-grep/lang-java` | `0.0.7` |
+| `rust` | `.rs` | `@ast-grep/lang-rust` | `0.0.7` |
+
+Extensions infer the parser automatically, or override with `ast.language`. All supported languages use the same `pattern`, `kind`, composite `rule`, and bounded `ast.context.ancestor` selection. AST matches identify the focus, **not** a violation; nearby context is evidence only. `jevcheck inspect` previews exact requests without a provider.
+
+### Native parser installation
+
+The five dynamic parsers are installed as regular runtime dependencies and **registered together, exactly once**. This means no arbitrary parser/plugin loading, but it also means a missing or incompatible native pack can prevent other dynamic languages from registering. Built-in JS/TS/TSX/HTML/CSS AST matching does not depend on native-pack registration. Errors name the parser whose library cannot load, or list the packages when registration fails.
+
+- Use `npm ci` or `npm install` with lifecycle scripts enabled. This repository approves the five pinned parser postinstalls through `allowScripts` for npm 11+. The **consumer's root project** may need its own script approvals. Do not assume `--ignore-scripts` works on every platform.
+- With pnpm 10+, explicitly approve builds for the required `@ast-grep/lang-*` packages (`pnpm approve-builds`, or `pnpm add --allow-build=@ast-grep/lang-python ...`).
+- Native prebuilds are platform-specific. Without a matching prebuild, `tree-sitter-cli` and platform build tools may be necessary.
+- Linux, macOS and Windows CI installs dependencies, exercises all supported parser registrations and tests provider-free inspection. Other platforms/architectures are not certified by this CI matrix.
+
+Adding every upstream grammar by default would increase package downloads, native-install surface and platform risk. The registry deliberately includes a small supported set; new languages require focused selector/context/range tests and documentation. JSON/YAML/TOML and less common parsers can be evaluated as a separate follow-up rather than implied support.
+
+See the [runnable C# walkthrough](../examples/csharp-queue/README.md) and [multilanguage AST examples](../examples/multilanguage-ast/README.md).
+
 ## Development
 
 ~~~sh

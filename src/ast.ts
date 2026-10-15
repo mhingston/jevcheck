@@ -1,4 +1,3 @@
-import { extname } from "node:path";
 import {
   Lang,
   kind,
@@ -6,9 +5,9 @@ import {
   type NapiConfig,
   type SgNode,
 } from "@ast-grep/napi";
+import { AST_LANGUAGES, inferredAstLanguage, parserForAstLanguage, type AstLanguage } from "./ast-languages.js";
 import type {
   AstCandidateConfig,
-  AstLanguage,
   AstSelector,
   Candidate,
   Diagnostic,
@@ -16,40 +15,23 @@ import type {
 
 type Matcher = string | number | NapiConfig;
 
-const EXPLICIT_LANGUAGES: Record<AstLanguage, Lang> = {
-  javascript: Lang.JavaScript,
-  typescript: Lang.TypeScript,
-  tsx: Lang.Tsx,
-  html: Lang.Html,
-  css: Lang.Css,
-};
-
-const EXTENSION_LANGUAGES: Record<string, Lang> = {
-  ".js": Lang.JavaScript,
-  ".mjs": Lang.JavaScript,
-  ".cjs": Lang.JavaScript,
-  ".jsx": Lang.Tsx,
-  ".ts": Lang.TypeScript,
-  ".mts": Lang.TypeScript,
-  ".cts": Lang.TypeScript,
-  ".tsx": Lang.Tsx,
-  ".html": Lang.Html,
-  ".htm": Lang.Html,
-  ".css": Lang.Css,
-};
-
-function resolveLanguage(path: string, config: AstCandidateConfig): Lang | undefined {
-  if (config.language) return EXPLICIT_LANGUAGES[config.language];
-  return EXTENSION_LANGUAGES[extname(path).toLowerCase()];
+function resolveLanguage(path: string, config: AstCandidateConfig): Lang | string | undefined {
+  const language: AstLanguage | undefined = config.language ?? inferredAstLanguage(path);
+  return language ? parserForAstLanguage(language) : undefined;
 }
 
-function matcherFor(selector: AstSelector, language: Lang): Matcher {
+function matcherFor(selector: AstSelector, language: Lang | string): Matcher {
   if (selector.pattern !== undefined) return selector.pattern;
-  if (selector.kind !== undefined) return kind(language, selector.kind);
+  if (selector.kind !== undefined) {
+    const id = kind(language, selector.kind);
+    // Tree-sitter may return zero rather than throw for an unknown node kind.
+    if (!id) throw new Error("Unknown AST node kind '" + selector.kind + "' for language " + language);
+    return id;
+  }
   return { rule: selector.rule as NapiConfig["rule"] };
 }
 
-function nodeMatches(node: SgNode, selector: AstSelector, language: Lang): boolean {
+function nodeMatches(node: SgNode, selector: AstSelector, language: Lang | string): boolean {
   return node.matches(matcherFor(selector, language));
 }
 
@@ -116,7 +98,7 @@ function boundedContext(
   return { start, end };
 }
 
-function contextNodeFor(match: SgNode, config: AstCandidateConfig, language: Lang): SgNode {
+function contextNodeFor(match: SgNode, config: AstCandidateConfig, language: Lang | string): SgNode {
   const ancestor = config.context?.ancestor;
   if (!ancestor) return match;
   return match.ancestors().find((node) => nodeMatches(node, ancestor, language)) ?? match;
@@ -124,7 +106,7 @@ function contextNodeFor(match: SgNode, config: AstCandidateConfig, language: Lan
 
 export function validateAstCandidate(config: AstCandidateConfig): void {
   if (!config.language) return;
-  const language = EXPLICIT_LANGUAGES[config.language];
+  const language = parserForAstLanguage(config.language);
   try {
     const root = parse(language, "").root();
     root.findAll(matcherFor(config, language));
@@ -144,7 +126,15 @@ export function astCandidates(
   ruleId: string,
   defaultContextLines = 0,
 ): { candidates: Candidate[]; diagnostics: Diagnostic[] } {
-  const language = resolveLanguage(path, config);
+  let language: Lang | string | undefined;
+  try {
+    language = resolveLanguage(path, config);
+  } catch (error) {
+    return {
+      candidates: [],
+      diagnostics: [{ level: "error", path, ruleId, message: error instanceof Error ? error.message : String(error) }],
+    };
+  }
   if (!language) {
     return {
       candidates: [],
@@ -154,7 +144,7 @@ export function astCandidates(
         ruleId,
         message:
           "AST candidate selection skipped because the file extension has no built-in language mapping; " +
-          "set ast.language to javascript, typescript, tsx, html, or css.",
+          "set ast.language to " + AST_LANGUAGES.join(", ") + ".",
       }],
     };
   }

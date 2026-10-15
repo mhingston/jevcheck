@@ -1,0 +1,99 @@
+{
+  "include": [
+    "examples/multilanguage-ast/sources/*"
+  ],
+  "rules": [
+    {
+      "id": "example/python",
+      "status": "shadow",
+      "files": [
+        "examples/multilanguage-ast/sources/example.py"
+      ],
+      "ast": {
+        "language": "python",
+        "pattern": "emit($VALUE)",
+        "contextBefore": 0,
+        "contextAfter": 0,
+        "context": {
+          "ancestor": {
+            "kind": "function_definition"
+          }
+        }
+      },
+      "question": "Does this emission call disclose a secret in the selected focus?",
+      "criteria": {
+        "true": "A secret value reaches the emission call.",
+        "false": "The selected call contains no secret value."
+      }
+    },
+    {
+      "id": "example/go",
+      "status": "shadow",
+      "files": [
+        "examples/multilanguage-ast/sources/example.go"
+      ],
+      "ast": {
+        "language": "go",
+        "pattern": "emit($VALUE)",
+        "contextBefore": 0,
+        "contextAfter": 0,
+        "context": {
+          "ancestor": {
+            "kind": "function_declaration"
+          }
+        }
+      },
+      "question": "Does this emission call disclose a secret in the selected focus?",
+      "criteria": {
+        "true": "A secret value reaches the emission call.",
+        "false": "The selected call contains no secret value."
+      }
+    },
+    {
+      "id": "example/java",
+      "status": "shadow",
+      "files": [
+        "examples/multilanguage-ast/sources/example.java"
+      ],
+      "ast": {
+        "language": "java",
+        "pattern": "emit($VALUE)",
+        "contextBefore": 0,
+        "contextAfter": 0,
+        "context": {
+          "ancestor": {
+            "kind": "method_declaration"
+          }
+        }
+      },
+      "question": "Does this emission call disclose a secret in the selected focus?",
+      "criteria": {
+        "true": "A secret value reaches the emission call.",
+        "false": "The selected call contains no secret value."
+      }
+    },
+    {
+      "id": "example/rust",
+      "status": "shadow",
+      "files": [
+        "examples/multilanguage-ast/sources/example.rs"
+      ],
+      "ast": {
+        "language": "rust",
+        "pattern": "emit($VALUE)",
+        "contextBefore": 0,
+        "contextAfter": 0,
+        "context": {
+          "ancestor": {
+            "kind": "function_item"
+          }
+        }
+      },
+      "question": "Does this emission call disclose a secret in the selected focus?",
+      "criteria": {
+        "true": "A secret value reaches the emission call.",
+        "false": "The selected call contains no secret value."
+      }
+    }
+  ]
+}

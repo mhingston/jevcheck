@@ -10,15 +10,24 @@ permissions:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 24
           registry-url: https://registry.npmjs.org
-      - run: npm install --ignore-scripts
+      - run: npm ci
       - run: npm run typecheck
       - run: npm test
       - run: npm run build
+      - run: node dist/cli.js inspect examples/csharp-queue/src/MessageHandler.cs --config examples/csharp-queue/jevcheck.config.json --rule reliability/no-success-after-publish-failure --format json
+      - run: node dist/cli.js inspect examples/multilanguage-ast/sources/example.py --config examples/multilanguage-ast/jevcheck.config.json --rule example/python --format json
+      - run: node dist/cli.js inspect examples/multilanguage-ast/sources/example.go --config examples/multilanguage-ast/jevcheck.config.json --rule example/go --format json
+      - run: node dist/cli.js inspect examples/multilanguage-ast/sources/example.java --config examples/multilanguage-ast/jevcheck.config.json --rule example/java --format json
+      - run: node dist/cli.js inspect examples/multilanguage-ast/sources/example.rs --config examples/multilanguage-ast/jevcheck.config.json --rule example/rust --format json
       - run: npm run pack:check

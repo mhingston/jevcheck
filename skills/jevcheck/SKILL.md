@@ -53,7 +53,7 @@ Use a bounded question, not an instruction such as "review this code for securit
 
 ### Candidate selection and scope
 
-- Supported `ast` selectors: exactly one of `pattern`, `kind` or `rule` (ast-grep rule object). Automatic AST language mapping covers JS/TS/TSX/HTML/CSS; `ast.language` can override.
+- Supported `ast` selectors: exactly one of `pattern`, `kind` or `rule` (ast-grep rule object). Automatic AST language mapping covers JavaScript, TypeScript, TSX, HTML, CSS, C# (`.cs`), Python (`.py`), Go (`.go`), Java (`.java`) and Rust (`.rs`); `ast.language` can override with `javascript`, `typescript`, `tsx`, `html`, `css`, `csharp`, `python`, `go`, `java` or `rust`. The last five use native `@ast-grep/lang-*` parsers; enable approved install scripts and validate with provider-free `inspect`.
 - An AST match is the **focus**, not proof of a violation. `ast.context.ancestor` and neighbouring lines are **evidence only**; they do not expand what YES is allowed to refer to.
 - Use `prefilter` and `unless` to exclude irrelevant candidate text cheaply; use `wholeFile` only for genuinely global/absence questions with safely bounded size. `ast` and `wholeFile` cannot be combined.
 - `projectWhen` can check `packageJsonHasDep`, `fileExists`, `globMatches` and compositions `anyOf` / `allOf` / `not`. Inapplicable rules skip ordinary checks; measurement can still evaluate them.
