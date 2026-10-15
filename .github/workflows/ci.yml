@@ -26,4 +26,8 @@ jobs:
       - run: npm test
       - run: npm run build
       - run: node dist/cli.js inspect examples/csharp-queue/src/MessageHandler.cs --config examples/csharp-queue/jevcheck.config.json --rule reliability/no-success-after-publish-failure --format json
+      - run: node dist/cli.js inspect examples/multilanguage-ast/sources/example.py --config examples/multilanguage-ast/jevcheck.config.json --rule example/python --format json
+      - run: node dist/cli.js inspect examples/multilanguage-ast/sources/example.go --config examples/multilanguage-ast/jevcheck.config.json --rule example/go --format json
+      - run: node dist/cli.js inspect examples/multilanguage-ast/sources/example.java --config examples/multilanguage-ast/jevcheck.config.json --rule example/java --format json
+      - run: node dist/cli.js inspect examples/multilanguage-ast/sources/example.rs --config examples/multilanguage-ast/jevcheck.config.json --rule example/rust --format json
       - run: npm run pack:check

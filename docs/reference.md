@@ -181,30 +181,6 @@ For programmatic replay, pass a `SemanticDecisionStore` as `decisionStore`. `Dis
 
 Generated fixes are intentionally out of scope. `jevcheck` reports bounded semantic findings; a coding agent or deterministic refactoring tool can decide what to change.
 
-## Development
-
-~~~sh
-npm install
-npm run typecheck
-npm test
-npm run build
-npm run pack:check
-~~~
-
-After building:
-
-~~~sh
-node dist/cli.js --help
-~~~
-
-## Agent skill
-
-The npm package includes `skills/jevcheck/SKILL.md` for coding agents working with `jevcheck` rules, evidence, suppressions, replay, and graduation.
-
-## License
-
-MIT
-
 ## AST language support and native parsers
 
 | `ast.language` | File extension(s) | Parser | Version |
@@ -230,3 +206,27 @@ The five dynamic parsers are installed as regular runtime dependencies and **reg
 Adding every upstream grammar by default would increase package downloads, native-install surface and platform risk. The registry deliberately includes a small supported set; new languages require focused selector/context/range tests and documentation. JSON/YAML/TOML and less common parsers can be evaluated as a separate follow-up rather than implied support.
 
 See the [runnable C# walkthrough](../examples/csharp-queue/README.md) and [multilanguage AST examples](../examples/multilanguage-ast/README.md).
+
+## Development
+
+~~~sh
+npm install
+npm run typecheck
+npm test
+npm run build
+npm run pack:check
+~~~
+
+After building:
+
+~~~sh
+node dist/cli.js --help
+~~~
+
+## Agent skill
+
+The npm package includes `skills/jevcheck/SKILL.md` for coding agents working with `jevcheck` rules, evidence, suppressions, replay, and graduation.
+
+## License
+
+MIT
