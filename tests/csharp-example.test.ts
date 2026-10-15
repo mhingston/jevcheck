@@ -19,6 +19,7 @@ describe("C# queue example", () => {
       expect(inspection.request.state.code).toContain("queue.PublishAsync");
       expect(inspection.request.state.code).toContain("catch (Exception ex)");
       expect(inspection.request.state.code).toContain(expectedReturn);
+      expect(inspection.request.state.code).not.toContain("public interface IQueuePublisher");
       expect(inspection.focusLineRange[0]).toBeGreaterThan(1);
       expect(inspection.focusLineRange[1]).toBeLessThan(code.split(/\r?\n/).length);
     }
