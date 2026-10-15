@@ -2,6 +2,11 @@
  * Opt-in, deliberately minimal frontmatter metadata for local ADR sources.
  * This is not a YAML parser or a semantic interpretation of ADR prose.
  */
+/** Use the same local-source boundary for CLI gating and provenance evaluation. */
+export function isLocalRuleSource(source: string | undefined): boolean {
+  return source !== undefined && !/^https?:\/\//i.test(source);
+}
+
 export interface ArchitectureDecision {
   status: string;
   active: boolean;
