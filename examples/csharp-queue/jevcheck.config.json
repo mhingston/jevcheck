@@ -1,0 +1,39 @@
+{
+  "include": [
+    "examples/csharp-queue/src/**/*.cs"
+  ],
+  "rules": [
+    {
+      "id": "reliability/no-success-after-publish-failure",
+      "why": "A successful acceptance response requires successful publication or recovery.",
+      "source": "examples/csharp-queue/README.md",
+      "status": "shadow",
+      "severity": "error",
+      "files": [
+        "examples/csharp-queue/**/*.cs"
+      ],
+      "ast": {
+        "language": "csharp",
+        "pattern": "queue.PublishAsync($A, $B)",
+        "context": {
+          "ancestor": {
+            "kind": "method_declaration"
+          }
+        }
+      },
+      "question": "Can this handler report success if queue publication fails without recovery?",
+      "criteria": {
+        "true": "A publication exception can be swallowed or merely logged before returning accepted.",
+        "false": "Publication failure returns a non-success response or must recover before returning accepted."
+      },
+      "fixtures": {
+        "valid": [
+          "examples/csharp-queue/fixtures/valid/**/*.cs"
+        ],
+        "invalid": [
+          "examples/csharp-queue/fixtures/invalid/**/*.cs"
+        ]
+      }
+    }
+  ]
+}
