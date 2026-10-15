@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { isLocalRuleSource, parseArchitectureDecision, type ArchitectureDecision } from "./architecture-decision.js";
 import { describeProjectCondition, projectConditionMatches } from "./applicability.js";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
@@ -103,6 +104,7 @@ export interface RuleSourceProvenance {
   reference?: string;
   fingerprint?: string;
   error?: string;
+  decision?: ArchitectureDecision;
 }
 
 function sourceIdentity(provenance: RuleSourceProvenance): string | null {
@@ -115,7 +117,7 @@ export async function ruleSourceProvenance(
   cwd = process.cwd(),
 ): Promise<RuleSourceProvenance> {
   if (!rule.source) return { kind: "missing" };
-  if (/^https?:\/\//i.test(rule.source)) {
+  if (!isLocalRuleSource(rule.source)) {
     return { kind: "external", reference: rule.source };
   }
 
@@ -134,6 +136,7 @@ export async function ruleSourceProvenance(
       kind: "local",
       reference: rule.source,
       fingerprint: hash(JSON.stringify({ reference: rule.source, content })),
+      decision: parseArchitectureDecision(content),
     };
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
@@ -1020,6 +1023,25 @@ export async function evaluateConfiguredRuleEvidence(
 
     const provenance = await ruleSourceProvenance(rule, cwd);
     const provenanceIdentity = sourceIdentity(provenance);
+    const architectureDecision = provenance.decision
+      ? {
+          active: provenance.decision.active,
+          message:
+            rule.source +
+            ": " +
+            provenance.decision.detail +
+            "; files=" +
+            JSON.stringify(rule.files ?? ["**/*"]) +
+            "; exclude=" +
+            JSON.stringify(rule.exclude ?? []) +
+            "; matched " +
+            sourcePaths.filter((path) => ruleAppliesToFile(rule, path)).length +
+            "/" +
+            sourcePaths.length +
+            " discovered source file(s); projectWhen=" +
+            (rule.projectWhen ? describeProjectCondition(rule.projectWhen) : "not set"),
+        }
+      : undefined;
     const sourceError = provenance.error;
     const sourceMessage = provenance.kind === "local"
       ? rule.source + " (local source fingerprinted)"
@@ -1116,6 +1138,7 @@ export async function evaluateConfiguredRuleEvidence(
           robustnessError,
           applicability,
           coverage,
+          architectureDecision,
           sourceError,
           sourceMessage,
         },
