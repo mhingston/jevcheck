@@ -252,6 +252,77 @@ Supported predicates are:
 
 When the condition is false, normal enforcement and replay skip the rule entirely. Measurement commands still exercise the semantic rule so fixtures, replay corpora, and robustness evidence can be maintained independently of the current repository state.
 
+### Architecture decisions as scoped semantic rules
+
+Architecture decision records (ADRs) can supply *provenance* for a bounded semantic rule, without making the model interpret an entire architecture document. For example, suppose ADR-004 requires customer-record writes to go through the customer service rather than accessing persistence directly.
+
+Add **opt-in** lifecycle metadata to the repository-local decision, in `docs/adr/004-customer-writes.md`:
+
+~~~md
+---
+jevcheck-adr: true
+status: accepted
+---
+
+# ADR-004: Customer record writes
+
+Customer-record writes must pass through the customer service so that auditing
+and validation are applied consistently.
+~~~
+
+Then link the rule to that decision in `jevcheck.config.json`:
+
+~~~json
+{
+  "include": ["src/**/*.ts"],
+  "rules": [
+    {
+      "id": "architecture/customer-write-boundary",
+      "source": "docs/adr/004-customer-writes.md",
+      "why": "Customer writes must pass through the service that owns auditing.",
+      "status": "shadow",
+      "severity": "warning",
+      "projectWhen": {
+        "fileExists": "src/customers/customer-service.ts"
+      },
+      "files": ["src/customers/**/*.ts"],
+      "ast": {
+        "pattern": "await $CALL",
+        "context": { "ancestor": { "kind": "function_declaration" } }
+      },
+      "question": "Does this awaited operation write a customer record directly to persistence instead of going through the customer service?",
+      "criteria": {
+        "true": "The selected operation performs a customer-record write while bypassing the customer service.",
+        "false": "It delegates to the customer service, performs no customer-record write, or lacks enough evidence of a bypass."
+      }
+    }
+  ]
+}
+~~~
+
+This example is a starting point: refine the AST selection and context against real code, inspect the request, and use labelled valid/invalid fixtures before relying on the judgement. A direct syntactic prohibition should instead use a deterministic linter.
+
+Run a provider-free audit:
+
+~~~sh
+npx jevcheck rules audit
+npx jevcheck rules audit --format json
+~~~
+
+For an opted-in local ADR, the audit reports its status, linked source, declared `files`/`exclude` scope, number of currently discovered source files matching that scope, and `projectWhen` condition. These are *explanations of configured applicability*, not semantic proof that the ADR's prose and the rule agree.
+
+| Scenario | Result |
+| --- | --- |
+| ADR is `accepted`, project condition holds, changed file is under `src/customers/**` | Rule may evaluate the selected candidate, subject to normal evidence policy |
+| Change is under `src/payments/**` | Rule does not select that file; the unrelated decision does not govern it |
+| Project does not contain the customer service | `projectWhen` makes the rule inapplicable |
+| ADR has `status: superseded` (optionally `superseded-by: ADR-009`) | Audit reports a blocker; normal check/replay skips even a shadow rule, and an owned rule fails its evidence gate |
+| Opted-in ADR has a missing, unknown, or conflicting status | It is not authoritative; audit blocks it from rule enforcement |
+
+Only local `source` Markdown with a top-of-file frontmatter marker `jevcheck-adr: true` activates this lifecycle check. The supported statuses are `accepted`, `proposed`, `superseded`, `withdrawn`, `rejected`, and `deprecated`; **only `accepted` is active**. An ADR with no marker remains an ordinary provenance source. External URLs are provenance links only: jevcheck cannot locally verify their status or freshness.
+
+Jevcheck does **not** parse the body of an ADR to discover architecture scope, conflicts, or requirements. Keep applicability deterministic with `projectWhen`, `files`, `exclude` and candidate selectors. The existing local-source fingerprint ties drift/robustness evidence to the ADR's contents; changing the decision can make that evidence stale. Use `rules audit` before promotion to `owned`, and use ordinary tests or static analysis for exactly provable constraints.
+
 ### Deterministic coverage with `coveredBy`
 
 Use `coveredBy` when an existing test or linter already enforces the same invariant exactly:
