@@ -2,6 +2,7 @@
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { createJevClient, JEV_PROVIDERS, type JevProvider } from "@mhingston5/jev-cli";
+import { isLocalRuleSource } from "./architecture-decision.js";
 import {
   DEFAULT_BASELINE_FILE,
   baselineEntry,
@@ -411,11 +412,9 @@ async function main(): Promise<void> {
     (rule) =>
       rule.projectWhen !== undefined ||
       (rule.coveredBy?.length ?? 0) > 0 ||
-      // Opt-in ADR metadata lives in local Markdown source files. Evaluate policy
-      // for shadow rules too, so superseded decisions never remain active.
-      (rule.source !== undefined &&
-        !/^https?:\/\//i.test(rule.source) &&
-        /\.md(?:#.*)?$/i.test(rule.source)),
+      // Local ADR metadata can be opted into regardless of the source extension.
+      // Include shadow rules to prevent retired decisions from remaining active.
+      isLocalRuleSource(rule.source),
   );
   const ruleEvidenceReports =
     (args.command === "check" || args.command === "replay") &&
