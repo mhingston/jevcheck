@@ -82,6 +82,10 @@ export interface RuleEvidenceInputs {
     status: "covered" | "stale";
     message: string;
   };
+  architectureDecision?: {
+    active: boolean;
+    message: string;
+  };
   sourceError?: string;
   sourceMessage?: string;
 }
@@ -290,6 +294,19 @@ export function evaluateRuleEvidence(
     ...parseRuleEvidencePolicy(policyOverrides, "rule evidence policy"),
   };
   const checks: RuleEvidenceCheck[] = [];
+
+  if (evidence.architectureDecision) {
+    checks.push({
+      id: "architecture-decision",
+      status: evidence.architectureDecision.active ? "pass" : "block",
+      message: evidence.architectureDecision.message,
+    });
+    // A retired or malformed ADR cannot authorize a semantic check, even in shadow mode
+    // or when deterministic coverage would otherwise skip the semantic judge.
+    if (!evidence.architectureDecision.active) {
+      return finishEvidenceReport(rule, checks, "inapplicable");
+    }
+  }
 
   if (evidence.applicability) {
     checks.push({
