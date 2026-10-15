@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import type { SystemOneLikeClient, SystemOneRequest, SystemOneResponse } from "@mhingston5/jev-cli";
-import { parseArchitectureDecision } from "../src/architecture-decision.js";
+import { isLocalRuleSource, parseArchitectureDecision } from "../src/architecture-decision.js";
 import { createJevCheck } from "../src/engine.js";
 import { evaluateConfiguredRuleEvidence, persistCoverageEvidence, ruleSourceProvenance } from "../src/evidence-store.js";
 import type { JevCheckConfig, JevCheckRule } from "../src/types.js";
@@ -90,6 +90,51 @@ describe("opt-in architecture decision audit", () => {
       .toMatchObject({ status: "accepted", active: false });
     expect(parseArchitectureDecision("---\njevcheck-adr: true\nstatus: novel\n---\n"))
       .toMatchObject({ status: "novel", active: false });
+  });
+
+  it("does not treat false markers or prose mentions as opted-in policy", () => {
+    expect(parseArchitectureDecision("---\njevcheck-adr: false\nstatus: superseded\n---\n"))
+      .toBeUndefined();
+    expect(parseArchitectureDecision("---\njevcheck-adr: false\njevcheck-adr: false\nstatus: superseded\n---\n"))
+      .toBeUndefined();
+    expect(parseArchitectureDecision("---\njevcheck-adr: true\njevcheck-adr: false\nstatus: accepted\n---\n"))
+      .toMatchObject({ status: "invalid", active: false });
+    expect(parseArchitectureDecision("---\nstatus: superseded\n# ADR prose\njevcheck-adr: true\n"))
+      .toBeUndefined();
+    expect(parseArchitectureDecision("---\nstatus: superseded\n---\n# ADR prose mentions jevcheck-adr: true"))
+      .toBeUndefined();
+  });
+
+  it("fails closed on an unterminated opted-in header, not a later mention", async () => {
+    const cwd = await fixtureRepository();
+    const path = join(cwd, "docs", "adr", "004-customer-writes.md");
+    await writeFile(path, "---\njevcheck-adr: true\nstatus: superseded\n# ADR");
+    const report = (await audit(cwd, [rule()])).reports[0]!;
+    expect(report.execution).toBe("inapplicable");
+    expect(report.blockers.some((message) => message.includes("no closing frontmatter delimiter")))
+      .toBe(true);
+    expect(parseArchitectureDecision("---\nstatus: superseded\n# ADR\n\njevcheck-adr: true\n"))
+      .toBeUndefined();
+  });
+
+  it("uses the same source extension boundary for audit and runtime policy", async () => {
+    const cwd = await fixtureRepository();
+    const decision = "docs/adr/004-customer-writes.markdown";
+    await writeFile(
+      join(cwd, decision),
+      acceptedAdr.replace("status: accepted", "status: superseded"),
+    );
+    const sourceRule = rule({ source: decision, projectWhen: undefined, coveredBy: undefined });
+    expect(isLocalRuleSource(sourceRule.source)).toBe(true);
+    expect(isLocalRuleSource("docs/adr/004-customer-writes.adoc")).toBe(true);
+    expect(isLocalRuleSource("https://example.org/004-customer-writes.md")).toBe(false);
+    expect(isLocalRuleSource(undefined)).toBe(false);
+
+    const reports = (await audit(cwd, [sourceRule])).reports;
+    expect(reports[0]?.checks.find((check) => check.id === "architecture-decision")?.status).toBe("block");
+    const checker = createJevCheck({ rules: [sourceRule], ruleEvidenceReports: reports, projectRoot: cwd });
+    const checked = await checker.checkSource("src/customers/store.ts", "await db.customer.update({});");
+    expect(checked.stats.requests).toBe(0);
   });
 
   it("explains ADR provenance and selects only the applicable component", async () => {
@@ -192,6 +237,11 @@ describe("opt-in architecture decision audit", () => {
     const invalid = (await audit(cwd, [rule()])).reports[0]!;
     expect(invalid.execution).toBe("inapplicable");
     expect(invalid.blockers.some((message) => message.includes("Unknown ADR status"))).toBe(true);
+
+    await writeFile(path, "---\njevcheck-adr: false\nstatus: superseded\n---\n# Opted out\n");
+    const optedOut = (await audit(cwd, [rule()])).reports[0]!;
+    expect(optedOut.checks.some((item) => item.id === "architecture-decision")).toBe(false);
+    expect(optedOut.execution).toBe("semantic");
 
     await writeFile(path, "---\nstatus: superseded\n---\n# Ordinary provenance\n");
     const ordinary = (await audit(cwd, [rule()])).reports[0]!;
