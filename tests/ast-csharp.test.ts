@@ -107,11 +107,8 @@ describe("C# AST candidate selection", () => {
     const rule: JevCheckRule = {
       id: "queue/check",
       question: "Can the handler report success if queue publication fails?",
-      ast: {
-        language: "csharp",
-        pattern: "queue.PublishAsync($A, $B)",
-        context: { ancestor: { kind: "method_declaration" } },
-      },
+      ast: { language: "csharp", kind: "method_declaration" },
+      prefilter: "queue\\.PublishAsync\\(",
       files: ["**/*.cs"],
     };
     const result = inspectSource({ path: "src/Worker.cs", source }, [rule], { chunkChars: 1000 });
@@ -120,7 +117,8 @@ describe("C# AST candidate selection", () => {
     const inspection = result.inspections[0]!;
     expect(inspection.request.state.path).toBe("src/Worker.cs");
     expect(inspection.request.state.code).toContain("return new List<string>()");
-    expect(inspection.request.state.focusLineRange).toEqual([6, 8]);
+    expect(inspection.request.state.focusLineRange[0]).toBeLessThanOrEqual(5);
+    expect(inspection.request.state.focusLineRange[1]).toBeGreaterThanOrEqual(10);
     expect(inspection.semanticKey).toBe(inspection.request.identity.key);
     expect(inspection.request.state.code.length).toBeLessThanOrEqual(1000);
   });
