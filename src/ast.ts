@@ -22,7 +22,12 @@ function resolveLanguage(path: string, config: AstCandidateConfig): Lang | strin
 
 function matcherFor(selector: AstSelector, language: Lang | string): Matcher {
   if (selector.pattern !== undefined) return selector.pattern;
-  if (selector.kind !== undefined) return kind(language, selector.kind);
+  if (selector.kind !== undefined) {
+    const id = kind(language, selector.kind);
+    // Tree-sitter may return zero rather than throw for an unknown node kind.
+    if (!id) throw new Error("Unknown AST node kind '" + selector.kind + "' for language " + language);
+    return id;
+  }
   return { rule: selector.rule as NapiConfig["rule"] };
 }
 
