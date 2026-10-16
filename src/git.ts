@@ -1,12 +1,13 @@
 import { execFile } from "node:child_process";
-import { access, mkdir, mkdtemp, readlink, readdir, realpath, rm } from "node:fs/promises";
+import { access, chmod, mkdir, mkdtemp, readlink, readdir, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { isAbsolute, join, relative, resolve, sep } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { promisify } from "node:util";
 import type { SourceInput } from "./types.js";
 
 const execFileAsync = promisify(execFile);
 const MAX_GIT_OUTPUT = 16 * 1024 * 1024;
+const MAX_BLOB_OUTPUT = 64 * 1024 * 1024;
 
 async function gitOutput(args: string[], cwd: string, env?: NodeJS.ProcessEnv): Promise<string> {
   const { stdout } = await execFileAsync("git", args, {
@@ -75,10 +76,10 @@ export interface GitEvaluationSnapshot {
 /**
  * Materialize a *single Git revision* as a read-only input workspace.
  *
- * checkout-index reads blobs from the index, not the user's working tree.
+ * Raw object blobs are materialized without autocrlf or smudge filters.
  * For HEAD we populate an isolated index with read-tree first: neither case
- * touches the real index or checkout. This lets every existing reader (config,
- * manifests, ADR, fixtures, calibration, coverage, source) use the SAME tree.
+ * touches the real index or checkout. All readers (config, manifests, ADR,
+ * fixtures, calibration, coverage, source) use the SAME byte-exact tree.
  *
  * Deliberately fail closed for external symlinks: an index symlink must not
  * redirect an evidence/config read into the live checkout or another directory.
@@ -108,14 +109,7 @@ export async function checkoutGitSnapshot(
     } else if ((await gitOutput(["ls-files", "--unmerged"], repositoryRoot)).length) {
       throw new Error("--staged requires an index without unresolved merge conflicts");
     }
-    // Git's --prefix requires a trailing slash and accepts forward-slash paths
-    // on Windows. Only tracked blobs are materialized; ignored/untracked files
-    // are intentionally absent from the evaluation.
-    await gitOutput(
-      ["checkout-index", "--all", "--force", "--prefix=" + checkout.replaceAll("\\", "/") + "/"],
-      repositoryRoot,
-      env,
-    );
+    await materializeBlobs(repositoryRoot, checkout, env);
     await rejectExternalSymlinks(checkout);
     return {
       root: temporary,
@@ -126,6 +120,62 @@ export async function checkoutGitSnapshot(
     await rm(temporary, { recursive: true, force: true });
     throw error;
   }
+}
+
+/**
+ * Materialize stage-0 blob contents rather than checkout-converted text.
+ * Bound concurrency and blob size instead of buffering the whole repository.
+ */
+async function materializeBlobs(
+  repositoryRoot: string,
+  checkout: string,
+  env: NodeJS.ProcessEnv,
+): Promise<void> {
+  const raw = await gitOutput(["ls-files", "--stage", "-z"], repositoryRoot, env);
+  const entries = raw.split("\0").filter(Boolean).map((record) => {
+    const match = /^(\d+) ([0-9a-f]{40,64}) ([0-3])\t([\s\S]+)$/.exec(record);
+    if (!match || match[3] !== "0") {
+      throw new Error("Git snapshot cannot materialize an unresolved index entry");
+    }
+    return { mode: match[1]!, sha: match[2]!, path: match[4]! };
+  });
+
+  for (const entry of entries) {
+    const dest = resolve(checkout, entry.path);
+    if (dest === checkout || !dest.startsWith(checkout + sep)) {
+      throw new Error("unsafe Git snapshot path: " + entry.path);
+    }
+  }
+
+  let next = 0;
+  const workers = Array.from({ length: Math.min(entries.length, 8) }, async () => {
+    while (next < entries.length) {
+      const entry = entries[next++]!;
+      if (entry.mode === "160000") continue; // Submodule gitlink, not a file blob.
+      if (!["100644", "100755", "120000"].includes(entry.mode)) {
+        throw new Error("unsupported Git snapshot mode: " + entry.mode + " (" + entry.path + ")");
+      }
+      const destination = resolve(checkout, entry.path);
+      await mkdir(dirname(destination), { recursive: true });
+      const { stdout } = await execFileAsync("git", ["cat-file", "blob", entry.sha], {
+        cwd: repositoryRoot,
+        encoding: "buffer",
+        maxBuffer: MAX_BLOB_OUTPUT,
+      });
+      if (entry.mode === "120000") {
+        const target = stdout.toString("utf8");
+        const resolved = resolve(dirname(destination), target);
+        if (isAbsolute(target) || (resolved !== checkout && !resolved.startsWith(checkout + sep))) {
+          throw new Error("Git snapshot contains a symlink outside the revision: " + entry.path);
+        }
+        await symlink(target, destination);
+      } else {
+        await writeFile(destination, stdout);
+        if (entry.mode === "100755") await chmod(destination, 0o755);
+      }
+    }
+  });
+  await Promise.all(workers);
 }
 
 async function rejectExternalSymlinks(root: string): Promise<void> {
