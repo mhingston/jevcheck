@@ -131,10 +131,54 @@ Use `projectWhen` when a reusable rule only makes sense for some repositories. I
 
 Supported predicates are:
 
-- `packageJsonHasDep` — matches dependencies, dev dependencies, peer dependencies, or optional dependencies in the root `package.json`.
+- `hasDependency` — ecosystem-neutral, declaration-only dependency check (Node.js, .NET, Go; details below).
+- `packageJsonHasDep` — backwards-compatible shorthand for `{ "hasDependency": { "ecosystem": "node", "name": "..." } }`; inspects root `package.json` only.
 - `fileExists` — checks a repository-relative path.
 - `globMatches` — checks whether a repository-relative glob matches at least one file.
 - `anyOf`, `allOf`, and `not` — compose predicates without introducing another model decision.
+
+
+#### Declared dependency predicates
+
+Use the same condition shape for supported ecosystems, with a **case-sensitive package name** for Node and Go and a **case-insensitive package ID** for NuGet:
+
+~~~json
+{
+  "projectWhen": {
+    "hasDependency": {
+      "ecosystem": "dotnet",
+      "name": "Microsoft.Extensions.Http",
+      "scope": "workspace"
+    }
+  }
+}
+~~~
+
+~~~json
+{
+  "projectWhen": {
+    "allOf": [
+      { "hasDependency": { "ecosystem": "go", "name": "golang.org/x/sync" } },
+      { "not": { "fileExists": "docs/legacy-exemption.md" } }
+    ]
+  }
+}
+~~~
+
+- `ecosystem` (required): `node`, `dotnet`, or `go`.
+- `name` (required): an exact declared dependency name, not a version constraint or glob.
+- `scope` (optional): `root` (default) checks repository-root manifests; `workspace` checks **any** root or nested project manifest (monorepo-wide), not only the source file under review. Match means **any** manifest declares the package. Ignored generated/vendor directories include `node_modules`, `vendor`, `target`, `obj`, `bin`, `dist` and `.git`.
+
+| Ecosystem | Read-only declarative manifests | What counts as declared |
+| --- | --- | --- |
+| Node | `package.json` | Keys in `dependencies`, `devDependencies`, `peerDependencies`, `optionalDependencies` |
+| .NET | `*.csproj`, `Directory.Packages.props` | Literal `<PackageReference Include="...">` or `<GlobalPackageReference Include="...">` values. `PackageVersion` alone does **not** add a dependency |
+| Go | `go.mod` | Single and block `require` directives, including `// indirect` declarations |
+
+These checks mean **textually declared**, not installed, resolved, active under build conditions, or reachable at runtime. They do not run build tooling, execute Gradle/MSBuild scripts, contact registries or consult lockfiles. Dynamic NuGet property expressions (for example `$(PackageName)`) are not expanded. The .NET reader recognises static MSBuild package reference tags; it is not a full MSBuild/XML evaluator. Workspace match does not imply the checked file belongs to the declaring subproject: use per-rule `files` for that scoping. Python TOML, Cargo and Maven/Gradle adapters are intentionally not part of this first supported set.
+
+Missing manifests return false; present but invalid manifests fail with a path-specific error rather than becoming a false match or silently passing through `not`. All selected manifests are examined before returning, so a valid match cannot hide a malformed sibling. Files over 2 MiB and symlinked manifests are rejected.
+
 
 When the condition is false, normal enforcement and replay skip the rule entirely. Measurement commands still exercise the semantic rule so fixtures, replay corpora, and robustness evidence can be maintained independently of the current repository state.
 
