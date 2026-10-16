@@ -40,7 +40,7 @@ async function existing(paths: string[], cwd: string): Promise<string[]> {
 export async function stagedFiles(cwd = process.cwd()): Promise<string[]> {
   // Treat renames as an added destination (and a deleted source). The old path
   // is not a source in the index. Include file type changes as well.
-  return gitPaths(["diff", "--cached", "--no-renames", "--name-only", "--diff-filter=ACMT"], cwd);
+  return gitPaths(["diff", "--cached", "--relative", "--no-renames", "--name-only", "--diff-filter=ACMT"], cwd);
 }
 
 export async function stagedSources(cwd = process.cwd()): Promise<SourceInput[]> {
@@ -48,7 +48,7 @@ export async function stagedSources(cwd = process.cwd()): Promise<SourceInput[]>
   return Promise.all(
     paths.map(async (path) => ({
       path,
-      source: await gitOutput(["show", ":" + path], cwd),
+      source: await gitOutput(["show", ":./" + path], cwd),
     })),
   );
 }
@@ -57,10 +57,10 @@ export async function changedFiles(base: string | undefined, cwd = process.cwd()
   if (base) {
     // This names files in HEAD, NOT files in the working tree. Do not discard
     // paths based on whether someone has subsequently deleted them locally.
-    return gitPaths(["diff", "--no-renames", "--name-only", "--diff-filter=ACMT", base + "...HEAD"], cwd);
+    return gitPaths(["diff", "--relative", "--no-renames", "--name-only", "--diff-filter=ACMT", base + "...HEAD"], cwd);
   }
 
-  const tracked = await gitPaths(["diff", "--no-renames", "--name-only", "--diff-filter=ACMT", "HEAD"], cwd);
+  const tracked = await gitPaths(["diff", "--relative", "--no-renames", "--name-only", "--diff-filter=ACMT", "HEAD"], cwd);
   const untracked = await gitPaths(["ls-files", "--others", "--exclude-standard"], cwd);
   return existing(Array.from(new Set([...tracked, ...untracked])).sort(), cwd);
 }
@@ -179,6 +179,7 @@ async function materializeBlobs(
 }
 
 async function rejectExternalSymlinks(root: string): Promise<void> {
+  const canonicalRoot = await realpath(root);
   async function visit(directory: string): Promise<void> {
     for (const entry of await readdir(directory, { withFileTypes: true })) {
       const path = join(directory, entry.name);
@@ -186,8 +187,19 @@ async function rejectExternalSymlinks(root: string): Promise<void> {
         await visit(path);
       } else if (entry.isSymbolicLink()) {
         const target = await readlink(path);
-        const absolute = resolve(directory, target);
-        if (isAbsolute(target) || (absolute !== root && !absolute.startsWith(root + sep))) {
+        // Lexical normalization is insufficient: alias -> "." together with a
+        // target of "alias/../outside.json" can escape through the symlink.
+        // Resolve the *actual* target only after all blobs are present.
+        let canonicalTarget: string;
+        try {
+          canonicalTarget = await realpath(path);
+        } catch {
+          throw new Error("Git snapshot contains an unresolved symlink: " + relative(root, path));
+        }
+        if (
+          isAbsolute(target) ||
+          (canonicalTarget !== canonicalRoot && !canonicalTarget.startsWith(canonicalRoot + sep))
+        ) {
           throw new Error("Git snapshot contains a symlink outside the revision: " + relative(root, path));
         }
       }
