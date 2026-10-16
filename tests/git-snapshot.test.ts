@@ -158,24 +158,24 @@ describe("Git evaluation snapshot consistency", () => {
       include: ["src/**/*.ts"],
       rules: [{ id: "local", question: "Is code invalid?", wholeFile: true }],
     }));
-    await put(cwd, "packages/app/src/a.ts", "base\\n");
-    await put(cwd, "elsewhere.ts", "base\\n");
+    await put(cwd, "packages/app/src/a.ts", "base\n");
+    await put(cwd, "elsewhere.ts", "base\n");
     await commit(cwd, "base");
     const base = await git(cwd, "rev-parse", "HEAD");
 
-    await put(cwd, "packages/app/src/a.ts", "staged nested\\n");
-    await put(cwd, "elsewhere.ts", "changed elsewhere\\n");
+    await put(cwd, "packages/app/src/a.ts", "staged nested\n");
+    await put(cwd, "elsewhere.ts", "changed elsewhere\n");
     await git(cwd, "add", "-A");
 
     expect(await stagedFiles(nested)).toEqual(["src/a.ts"]);
-    expect(await stagedSources(nested)).toEqual([{ path: "src/a.ts", source: "staged nested\\n" }]);
+    expect(await stagedSources(nested)).toEqual([{ path: "src/a.ts", source: "staged nested\n" }]);
     expect(await changedFiles(undefined, nested)).toEqual(["src/a.ts"]);
     const staged = await checkoutGitSnapshot("index", nested);
     try {
       const config = await loadConfig(join(staged.cwd, "jevcheck.config.json"));
       const selected = filterFiles(await stagedFiles(nested), config.include!, []);
       expect(selected).toEqual(["src/a.ts"]);
-      expect(await readFile(join(staged.cwd, selected[0]!), "utf8")).toBe("staged nested\\n");
+      expect(await readFile(join(staged.cwd, selected[0]!), "utf8")).toBe("staged nested\n");
     } finally {
       await staged.dispose();
     }
@@ -184,7 +184,7 @@ describe("Git evaluation snapshot consistency", () => {
     expect(await changedFiles(base, nested)).toEqual(["src/a.ts"]);
     const head = await checkoutGitSnapshot("head", nested);
     try {
-      expect(await readFile(join(head.cwd, "src/a.ts"), "utf8")).toBe("staged nested\\n");
+      expect(await readFile(join(head.cwd, "src/a.ts"), "utf8")).toBe("staged nested\n");
       expect((await loadConfig(join(head.cwd, "jevcheck.config.json"))).rules[0]?.id).toBe("local");
     } finally {
       await head.dispose();
@@ -230,12 +230,12 @@ describe("Git evaluation snapshot consistency", () => {
   it.skipIf(process.platform === "win32")("allows links to tracked files inside the snapshot", async () => {
     const cwd = await repo();
     try {
-      await put(cwd, "policy.json", "{\\"rules\\":[]}\\n");
+      await put(cwd, "policy.json", "{\"rules\":[]}\n");
       await symlink("policy.json", join(cwd, "jevcheck.config.json"));
       await git(cwd, "add", "-A");
       const snapshot = await checkoutGitSnapshot("index", cwd);
       try {
-        expect(await readFile(join(snapshot.cwd, "jevcheck.config.json"), "utf8")).toBe("{\\"rules\\":[]}\\n");
+        expect(await readFile(join(snapshot.cwd, "jevcheck.config.json"), "utf8")).toBe("{\"rules\":[]}\n");
       } finally {
         await snapshot.dispose();
       }
