@@ -22,7 +22,7 @@ function optionalNonEmptyString(value: unknown, field: string): string | undefin
 
 // Encode a literal string for the existing deterministic regex filter.
 function literalPattern(value: string): string {
-  return value.replace(/[.*+?^$()|[\]{}\\/]/g, "\\function validateNonNegativeInteger(value: unknown, field: string): void {");
+  return value.replace(/[.*+?^$()|[\]{}\\/]/g, "\\$&");
 }
 
 function validateNonNegativeInteger(value: unknown, field: string): void {
