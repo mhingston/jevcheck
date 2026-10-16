@@ -44,7 +44,8 @@ import {
 import { changedFiles, checkoutGitSnapshot, stagedFiles } from "./git.js";
 import { formatInspectionStylish, inspectSources } from "./inspect.js";
 import { DEFAULT_REPLAY_FILE, DiskSemanticDecisionStore } from "./replay.js";
-import type { JevCheckConfig, SourceInput } from "./types.js";
+import { assertSnapshotPaths } from "./snapshot-paths.js";
+import type { SourceInput } from "./types.js";
 
 type Command = "check" | "test" | "list" | "inspect" | "baseline" | "record" | "replay" | "recall" | "rules-audit" | "coverage-record";
 type OutputFormat = "stylish" | "json" | "sarif";
@@ -278,28 +279,6 @@ function parseArgs(argv: string[]): CliOptions {
     throw new Error("recall operates on working-tree files; --staged is not supported");
   }
   return options;
-}
-
-function assertSnapshotPaths(config: JevCheckConfig): void {
-  const paths = [
-    config.baselineFile, config.replayFile, config.calibrationFile,
-    config.confirmationFile, config.evidenceFile, config.cacheFile,
-    ...(config.include ?? []), ...(config.exclude ?? []),
-    ...config.rules.flatMap((rule) => [
-      ...(rule.files ?? []), ...(rule.exclude ?? []),
-      ...(rule.fixtures?.valid ?? []), ...(rule.fixtures?.invalid ?? []),
-      ...(rule.fixtures?.confirmation?.valid ?? []),
-      ...(rule.fixtures?.confirmation?.invalid ?? []),
-    ]),
-    ...config.rules.filter((rule) => isLocalRuleSource(rule.source))
-      .map((rule) => rule.source!.split("#", 1)[0]),
-  ];
-  for (const path of paths) {
-    if (!path) continue;
-    if (isAbsolute(path) || path.replaceAll("\\", "/").split("/").includes("..")) {
-      throw new Error("Git snapshots require repository-relative policy paths: " + path);
-    }
-  }
 }
 
 async function run(args: CliOptions, gitCwd: string, snapshotMode: boolean): Promise<void> {
