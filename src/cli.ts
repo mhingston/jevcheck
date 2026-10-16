@@ -284,6 +284,13 @@ function assertSnapshotPaths(config: JevCheckConfig): void {
   const paths = [
     config.baselineFile, config.replayFile, config.calibrationFile,
     config.confirmationFile, config.evidenceFile, config.cacheFile,
+    ...(config.include ?? []), ...(config.exclude ?? []),
+    ...config.rules.flatMap((rule) => [
+      ...(rule.files ?? []), ...(rule.exclude ?? []),
+      ...(rule.fixtures?.valid ?? []), ...(rule.fixtures?.invalid ?? []),
+      ...(rule.fixtures?.confirmation?.valid ?? []),
+      ...(rule.fixtures?.confirmation?.invalid ?? []),
+    ]),
     ...config.rules.filter((rule) => isLocalRuleSource(rule.source))
       .map((rule) => rule.source!.split("#", 1)[0]),
   ];
