@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { readFile } from "node:fs/promises";
-import { resolve } from "node:path";
+import { isAbsolute, resolve } from "node:path";
 import { createJevClient, JEV_PROVIDERS, type JevProvider } from "@mhingston5/jev-cli";
 import { isLocalRuleSource } from "./architecture-decision.js";
 import {
@@ -41,10 +41,10 @@ import {
   formatSarif,
   formatStylish,
 } from "./format.js";
-import { changedFiles, stagedSources } from "./git.js";
+import { changedFiles, checkoutGitSnapshot, stagedFiles } from "./git.js";
 import { formatInspectionStylish, inspectSources } from "./inspect.js";
 import { DEFAULT_REPLAY_FILE, DiskSemanticDecisionStore } from "./replay.js";
-import type { SourceInput } from "./types.js";
+import type { JevCheckConfig, SourceInput } from "./types.js";
 
 type Command = "check" | "test" | "list" | "inspect" | "baseline" | "record" | "replay" | "recall" | "rules-audit" | "coverage-record";
 type OutputFormat = "stylish" | "json" | "sarif";
@@ -89,7 +89,7 @@ function usage(): string {
     "  --config <path>       Config file (default: jevcheck.config.json)",
     "  --changed             Check working-tree changes and untracked files",
     "  --staged              Check the exact staged index snapshot",
-    "  --base <ref>          With --changed, check base...HEAD",
+    "  --base <ref>          With --changed, check files changed in base...HEAD at HEAD",
     "  --format <style>      stylish, json, or sarif (sarif: check/replay only)",
     "  --provider <name>     Jev provider inherited from @mhingston5/jev-cli",
     "  --model <name>        Override the provider model",
@@ -280,9 +280,24 @@ function parseArgs(argv: string[]): CliOptions {
   return options;
 }
 
-async function main(): Promise<void> {
-  const args = parseArgs(process.argv.slice(2));
+function assertSnapshotPaths(config: JevCheckConfig): void {
+  const paths = [
+    config.baselineFile, config.replayFile, config.calibrationFile,
+    config.confirmationFile, config.evidenceFile, config.cacheFile,
+    ...config.rules.filter((rule) => isLocalRuleSource(rule.source))
+      .map((rule) => rule.source!.split("#", 1)[0]),
+  ];
+  for (const path of paths) {
+    if (!path) continue;
+    if (isAbsolute(path) || path.replaceAll("\\", "/").split("/").includes("..")) {
+      throw new Error("Git snapshots require repository-relative policy paths: " + path);
+    }
+  }
+}
+
+async function run(args: CliOptions, gitCwd: string, snapshotMode: boolean): Promise<void> {
   const config = await loadConfig(args.config);
+  if (snapshotMode) assertSnapshotPaths(config);
 
   const modelNamespace = [
     args.provider ?? process.env.JEV_PROVIDER ?? "typesafe",
@@ -354,20 +369,10 @@ async function main(): Promise<void> {
   if (args.command === "inspect") {
     const includes = config.include ?? DEFAULT_SOURCE_INCLUDE;
     let paths: string[];
-    let stagedInputs: SourceInput[] | undefined;
     if (args.staged) {
-      const staged = await stagedSources();
-      paths = filterFiles(
-        staged.map((item) => item.path),
-        includes,
-        config.exclude ?? [],
-      );
-      const byPath = new Map(staged.map((item) => [item.path.replaceAll("\\", "/"), item]));
-      stagedInputs = paths
-        .map((path) => byPath.get(path))
-        .filter((item): item is SourceInput => item !== undefined);
+      paths = filterFiles(await stagedFiles(gitCwd), includes, config.exclude ?? []);
     } else if (args.changed) {
-      paths = filterFiles(await changedFiles(args.base), includes, config.exclude ?? []);
+      paths = filterFiles(await changedFiles(args.base, gitCwd), includes, config.exclude ?? []);
     } else {
       paths = await discoverFiles(
         args.patterns.length ? args.patterns : includes,
@@ -382,7 +387,7 @@ async function main(): Promise<void> {
       throw new Error("unknown rule id: " + args.inspectRule);
     }
 
-    const inputs = stagedInputs ?? await Promise.all(
+    const inputs = await Promise.all(
       paths.map(async (path): Promise<SourceInput> => ({
         path,
         source: await readFile(resolve(path), "utf8"),
@@ -671,18 +676,10 @@ async function main(): Promise<void> {
 
   const includes = config.include ?? DEFAULT_SOURCE_INCLUDE;
   let paths: string[];
-  let stagedInputs: SourceInput[] | undefined;
   if (args.staged) {
-    const staged = await stagedSources();
-    paths = filterFiles(
-      staged.map((item) => item.path),
-      includes,
-      config.exclude ?? [],
-    );
-    const byPath = new Map(staged.map((item) => [item.path.replaceAll("\\", "/"), item]));
-    stagedInputs = paths.map((path) => byPath.get(path)).filter((item): item is SourceInput => item !== undefined);
+    paths = filterFiles(await stagedFiles(gitCwd), includes, config.exclude ?? []);
   } else if (args.changed) {
-    paths = filterFiles(await changedFiles(args.base), includes, config.exclude ?? []);
+    paths = filterFiles(await changedFiles(args.base, gitCwd), includes, config.exclude ?? []);
   } else {
     paths = await discoverFiles(args.patterns.length ? args.patterns : includes, config.exclude ?? []);
   }
@@ -753,7 +750,7 @@ async function main(): Promise<void> {
     return;
   }
 
-  const result = stagedInputs ? await checker.checkSources(stagedInputs) : await checker.checkFiles(paths);
+  const result = await checker.checkFiles(paths);
 
   if (args.command === "record") {
     await decisionStore?.flush?.();
@@ -803,6 +800,29 @@ async function main(): Promise<void> {
     result.diagnostics.some((item) => item.level === "error")
       ? 1
       : 0;
+}
+
+async function main(): Promise<void> {
+  const args = parseArgs(process.argv.slice(2));
+  const revision = args.staged ? "index" : args.changed && args.base ? "head" : undefined;
+  if (revision && !["check", "replay", "inspect", "list"].includes(args.command)) {
+    throw new Error("--staged and --changed --base are read-only snapshot modes; use check, inspect, replay, or list");
+  }
+  if (revision && (isAbsolute(args.config) || args.config.replaceAll("\\", "/").split("/").includes(".."))) {
+    throw new Error("Git snapshots require a repository-relative --config path");
+  }
+
+  const gitCwd = process.cwd();
+  const snapshot = revision ? await checkoutGitSnapshot(revision, gitCwd) : undefined;
+  try {
+    if (snapshot) process.chdir(snapshot.cwd);
+    await run(args, gitCwd, snapshot !== undefined);
+  } finally {
+    if (snapshot) {
+      process.chdir(gitCwd);
+      await snapshot.dispose();
+    }
+  }
 }
 
 main().catch((error: unknown) => {
