@@ -229,7 +229,6 @@ export function buildCandidates(
   }
 
   if (rule.ast) {
-    if (prefilter && !prefilter.test(source)) return { candidates: [], diagnostics };
     const ast = astCandidates(
       path,
       source,
@@ -238,6 +237,7 @@ export function buildCandidates(
       rule.id,
       rule.contextLines ?? options.contextLines,
       unless,
+      prefilter,
     );
     return {
       candidates: applyCandidateFilters(ast.candidates, rule),

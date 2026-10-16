@@ -5,7 +5,7 @@ import {
   type NapiConfig,
   type SgNode,
 } from "@ast-grep/napi";
-import { AST_LANGUAGES, inferredAstLanguage, parserForAstLanguage, type AstLanguage } from "./ast-languages.js";
+import { AST_LANGUAGES, inferredAstLanguage, NativeAstParserError, parserForAstLanguage, type AstLanguage } from "./ast-languages.js";
 import type {
   AstCandidateConfig,
   AstSelector,
@@ -15,9 +15,14 @@ import type {
 
 type Matcher = string | number | NapiConfig;
 
-function resolveLanguage(path: string, config: AstCandidateConfig): Lang | string | undefined {
-  const language: AstLanguage | undefined = config.language ?? inferredAstLanguage(path);
-  return language ? parserForAstLanguage(language) : undefined;
+interface ResolvedLanguage {
+  name: AstLanguage;
+  parser: Lang | string;
+}
+
+function resolveLanguage(path: string, config: AstCandidateConfig): ResolvedLanguage | undefined {
+  const name: AstLanguage | undefined = config.language ?? inferredAstLanguage(path);
+  return name ? { name, parser: parserForAstLanguage(name) } : undefined;
 }
 
 function matcherFor(selector: AstSelector, language: Lang | string): Matcher {
@@ -104,17 +109,20 @@ function contextNodeFor(match: SgNode, config: AstCandidateConfig, language: Lan
   return match.ancestors().find((node) => nodeMatches(node, ancestor, language)) ?? match;
 }
 
+function validateAstSelectors(config: AstCandidateConfig, language: Lang | string): void {
+  // Validate against the effective grammar, not just an explicitly configured
+  // language. Empty-source matching also rejects malformed ast-grep rule objects.
+  const root = parse(language, "").root();
+  root.findAll(matcherFor(config, language));
+  if (config.context?.ancestor) {
+    root.findAll(matcherFor(config.context.ancestor, language));
+  }
+}
+
 export function validateAstCandidate(config: AstCandidateConfig): void {
-  if (!config.language) return;
-  const language = parserForAstLanguage(config.language);
-  try {
-    const root = parse(language, "").root();
-    root.findAll(matcherFor(config, language));
-    if (config.context?.ancestor) {
-      root.findAll(matcherFor(config.context.ancestor, language));
-    }
-  } catch (error) {
-    throw new Error(error instanceof Error ? error.message : String(error));
+  // Language-less rules are validated against each file's inferred grammar.
+  if (config.language) {
+    validateAstSelectors(config, parserForAstLanguage(config.language));
   }
 }
 
@@ -126,19 +134,34 @@ export function astCandidates(
   ruleId: string,
   defaultContextLines = 0,
   excludedOversizedMatch?: RegExp,
+  prefilter?: RegExp,
 ): { candidates: Candidate[]; diagnostics: Diagnostic[] } {
-  let language: Lang | string | undefined;
+  const candidates: Candidate[] = [];
+  const diagnostics: Diagnostic[] = [];
+  let resolved: ResolvedLanguage | undefined;
   try {
-    language = resolveLanguage(path, config);
+    resolved = resolveLanguage(path, config);
   } catch (error) {
+    // A missing native grammar is a hard evaluation error, never a no-match.
+    // Return it as a diagnostic so the CLI can still report other files.
     return {
-      candidates: [],
-      diagnostics: [{ level: "error", path, ruleId, message: error instanceof Error ? error.message : String(error) }],
+      candidates,
+      diagnostics: [{
+        code: "incomplete-evaluation",
+        level: error instanceof NativeAstParserError ? "error" : "warning",
+        path,
+        ruleId,
+        message:
+          "AST language resolution failed for language '" +
+          (config.language ?? inferredAstLanguage(path) ?? "unknown") + "': " +
+          (error instanceof Error ? error.message : String(error)),
+      }],
     };
   }
-  if (!language) {
+
+  if (!resolved) {
     return {
-      candidates: [],
+      candidates,
       diagnostics: [{
         code: "incomplete-evaluation",
         level: "warning",
@@ -151,68 +174,89 @@ export function astCandidates(
     };
   }
 
-  const lines = source.split(/\r?\n/);
-  const root = parse(language, source).root();
-  const matches = root.findAll(matcherFor(config, language));
-  const candidates: Candidate[] = [];
-  const diagnostics: Diagnostic[] = [];
-  const seen = new Set<string>();
-  const before = config.contextBefore ?? defaultContextLines;
-  const after = config.contextAfter ?? defaultContextLines;
+  const { name, parser } = resolved;
+  let stage = "selector validation";
+  try {
+    // Run this even when the source prefilter misses, otherwise a broken
+    // selector can silently pass as a legitimate zero-candidate check.
+    validateAstSelectors(config, parser);
+    if (prefilter && !prefilter.test(source)) return { candidates, diagnostics };
 
-  for (const node of matches) {
-    const range = node.range();
-    const identity = [range.start.line, range.start.column, range.end.line, range.end.column].join(":");
-    if (seen.has(identity)) continue;
-    seen.add(identity);
+    stage = "source parsing";
+    const root = parse(parser, source).root();
+    stage = "candidate matching";
+    const matches = root.findAll(matcherFor(config, parser));
 
-    const end = normalizedEnd(range, lines);
-    const focusStart = range.start.line;
-    const focusEnd = end.line;
-    const related = contextNodeFor(node, config, language);
-    const relatedRange = related.range();
-    const relatedEnd = normalizedEnd(relatedRange, lines);
-    const desiredStart = Math.max(0, relatedRange.start.line - before);
-    const desiredEnd = Math.min(lines.length - 1, relatedEnd.line + after);
-    const context = boundedContext(
-      lines,
-      desiredStart,
-      desiredEnd,
-      focusStart,
-      focusEnd,
-      maxChars,
-    );
+    const lines = source.split(/\r?\n/);
+    const seen = new Set<string>();
+    const before = config.contextBefore ?? defaultContextLines;
+    const after = config.contextAfter ?? defaultContextLines;
 
-    if (!context) {
-      // Evaluate an exclusion against this matched node, not the whole file:
-      // a different exempt call must not conceal an oversized unsafe match.
-      if (excludedOversizedMatch?.test(node.text())) continue;
-      diagnostics.push({
-        code: "incomplete-evaluation",
-        level: "warning",
-        path,
-        ruleId,
-        message:
-          "AST candidate at lines " +
-          (focusStart + 1) +
-          "-" +
-          (focusEnd + 1) +
-          " skipped because its matched node exceeds chunkChars (" +
-          maxChars +
-          ").",
+    stage = "match context extraction";
+    for (const node of matches) {
+      const range = node.range();
+      const identity = [range.start.line, range.start.column, range.end.line, range.end.column].join(":");
+      if (seen.has(identity)) continue;
+      seen.add(identity);
+
+      const end = normalizedEnd(range, lines);
+      const focusStart = range.start.line;
+      const focusEnd = end.line;
+      const related = contextNodeFor(node, config, parser);
+      const relatedRange = related.range();
+      const relatedEnd = normalizedEnd(relatedRange, lines);
+      const desiredStart = Math.max(0, relatedRange.start.line - before);
+      const desiredEnd = Math.min(lines.length - 1, relatedEnd.line + after);
+      const context = boundedContext(
+        lines,
+        desiredStart,
+        desiredEnd,
+        focusStart,
+        focusEnd,
+        maxChars,
+      );
+
+      if (!context) {
+        // Evaluate an exclusion against this matched node, not the whole file:
+        // a different exempt call must not conceal an oversized unsafe match.
+        if (excludedOversizedMatch?.test(node.text())) continue;
+        diagnostics.push({
+          code: "incomplete-evaluation",
+          level: "warning",
+          path,
+          ruleId,
+          message:
+            "AST candidate at lines " +
+            (focusStart + 1) +
+            "-" +
+            (focusEnd + 1) +
+            " skipped because its matched node exceeds chunkChars (" +
+            maxChars +
+            ").",
+        });
+        continue;
+      }
+
+      candidates.push({
+        text: lines.slice(context.start, context.end + 1).join("\n"),
+        startLine: context.start + 1,
+        endLine: context.end + 1,
+        focusStartLine: focusStart + 1,
+        focusEndLine: focusEnd + 1,
+        focusStartColumn: oneBasedColumn(range.start.column),
+        focusEndColumn: end.column,
+        focusKind: String(node.kind()),
       });
-      continue;
     }
-
-    candidates.push({
-      text: lines.slice(context.start, context.end + 1).join("\n"),
-      startLine: context.start + 1,
-      endLine: context.end + 1,
-      focusStartLine: focusStart + 1,
-      focusEndLine: focusEnd + 1,
-      focusStartColumn: oneBasedColumn(range.start.column),
-      focusEndColumn: end.column,
-      focusKind: String(node.kind()),
+  } catch (error) {
+    diagnostics.push({
+      code: "incomplete-evaluation",
+      level: error instanceof NativeAstParserError ? "error" : "warning",
+      path,
+      ruleId,
+      message:
+        "AST " + stage + " failed for language '" + name + "': " +
+        (error instanceof Error ? error.message : String(error)),
     });
   }
 
