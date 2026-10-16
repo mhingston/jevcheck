@@ -24,8 +24,8 @@ function inspect(path: string) {
 }
 
 describe("queue acknowledgement onboarding example", () => {
-  it("has one bounded function candidate with the failure path and response visible", () => {
-    const result = inspect(folder + "/src/handler.ts");
+  it("has one bounded function candidate with the failure path and response visible", async () => {
+    const result = await inspect(folder + "/src/handler.ts");
     expect(result.diagnostics).toEqual([]);
     expect(result.inspections).toHaveLength(1);
     const candidate = result.inspections[0]!;
@@ -37,20 +37,20 @@ describe("queue acknowledgement onboarding example", () => {
     expect(candidate.request.question).toBeDefined();
   });
 
-  it("includes one valid and one invalid fixture without provider access", () => {
+  it("includes one valid and one invalid fixture without provider access", async () => {
     for (const [kind, filename] of [
       ["valid", "rejects-with-503.ts"],
       ["invalid", "logs-then-accepts.ts"],
     ]) {
-      const result = inspect(folder + "/fixtures/" + kind + "/" + filename);
+      const result = await inspect(folder + "/fixtures/" + kind + "/" + filename);
       expect(result.diagnostics).toEqual([]);
       expect(result.inspections).toHaveLength(1);
       expect(result.inspections[0]?.request.state.code).toContain("queue.publish(job)");
     }
   });
 
-  it("rejects unrelated functions using the deterministic prefilter", () => {
-    const result = inspectSource({
+  it("rejects unrelated functions using the deterministic prefilter", async () => {
+    const result = await inspectSource({
       path: folder + "/src/unrelated.ts",
       source: "export function square(n: number) { return n * n; }",
     }, config.rules);

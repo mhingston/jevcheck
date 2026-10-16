@@ -9,7 +9,7 @@ function rule(extra: Record<string, unknown>) {
 }
 
 describe("JSON configuration shorthands", () => {
-  it("normalizes AST kinds and literal filters to canonical rules", () => {
+  it("normalizes AST kinds and literal filters to canonical rules", async () => {
     const simple = parseConfig({
       include: ["src/**/*.ts"],
       rules: [rule({ ast: "function_declaration", contains: "queue.publish(" })],
@@ -22,21 +22,21 @@ describe("JSON configuration shorthands", () => {
     expect(simple).toEqual(canonical);
     expect(simple.rules[0]).not.toHaveProperty("contains");
     const input = { path: "src/handler.ts", source: "function handler() { queue.publish(job); }" };
-    const simplified = inspectSource(input, simple.rules);
-    const verbose = inspectSource(input, canonical.rules);
+    const simplified = await inspectSource(input, simple.rules);
+    const verbose = await inspectSource(input, canonical.rules);
     expect(simplified.inspections).toHaveLength(1);
     expect(simplified.inspections[0]?.semanticKey).toBe(verbose.inspections[0]?.semanticKey);
   });
 
-  it("matches punctuation literally, not as regular expression syntax", () => {
+  it("matches punctuation literally, not as regular expression syntax", async () => {
     const config = parseConfig({
       rules: [rule({ ast: "function_declaration", contains: "queue.publish(" })],
     });
-    const matched = inspectSource({
+    const matched = await inspectSource({
       path: "src/handler.ts",
       source: "function correct() { queue.publish(job); }",
     }, config.rules);
-    const notMatched = inspectSource({
+    const notMatched = await inspectSource({
       path: "src/handler.ts",
       source: "function other() { queueXpublish(job); }",
     }, config.rules);
@@ -44,16 +44,16 @@ describe("JSON configuration shorthands", () => {
     expect(notMatched.inspections).toHaveLength(0);
   });
 
-  it("escapes a leading slash rather than interpreting regex delimiter syntax", () => {
+  it("escapes a leading slash rather than interpreting regex delimiter syntax", async () => {
     const config = parseConfig({
       rules: [rule({ wholeFile: true, contains: "/route(" })],
     });
     expect(config.rules[0]?.prefilter).toBe("\\/route\\(");
-    expect(inspectSource({ path: "src/a.ts", source: 'const x = "/route(";'}, config.rules).inspections).toHaveLength(1);
-    expect(inspectSource({ path: "src/a.ts", source: 'const x = "/routeX";'}, config.rules).inspections).toHaveLength(0);
+    expect((await inspectSource({ path: "src/a.ts", source: 'const x = "/route(";'}, config.rules)).inspections).toHaveLength(1);
+    expect((await inspectSource({ path: "src/a.ts", source: 'const x = "/routeX";'}, config.rules)).inspections).toHaveLength(0);
   });
 
-  it("rejects ambiguous or invalid shorthand rather than silently changing scope", () => {
+  it("rejects ambiguous or invalid shorthand rather than silently changing scope", async () => {
     expect(() => parseConfig({ rules: [rule({ contains: "" })] }))
       .toThrow("reliability/queue-ack.contains must be a non-empty string");
     expect(() => parseConfig({ rules: [rule({ contains: "foo", prefilter: "bar" })] }))

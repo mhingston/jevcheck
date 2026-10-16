@@ -4,14 +4,14 @@ import { parseConfig } from "../src/config.js";
 import { inspectSource } from "../src/inspect.js";
 
 describe("C# queue example", () => {
-  it("focuses the whole decision-relevant handler in safe and unsafe fixtures", () => {
+  it("focuses the whole decision-relevant handler in safe and unsafe fixtures", async () => {
     const config = parseConfig(JSON.parse(readFileSync("examples/csharp-queue/jevcheck.config.json", "utf8")));
     for (const [fixture, expectedReturn] of [
       ["examples/csharp-queue/fixtures/valid/rejects-failure.cs", "return 503"],
       ["examples/csharp-queue/fixtures/invalid/acknowledges-failure.cs", "return 202"],
     ]) {
       const code = readFileSync(fixture, "utf8");
-      const result = inspectSource({ path: fixture, source: code }, config.rules);
+      const result = await inspectSource({ path: fixture, source: code }, config.rules);
       expect(result.diagnostics).toEqual([]);
       expect(result.inspections).toHaveLength(1);
       const inspection = result.inspections[0]!;

@@ -20,7 +20,7 @@ describe.each(cases)("$language AST integration", ({ language, extension, kind, 
   const focusLine = source.split("\n").findIndex((line) => line.includes("emit(café)")) + 1;
   const focusColumn = source.split("\n")[focusLine - 1]!.indexOf("emit(café)") + 1;
 
-  it("registers explicit language and infers extension", () => {
+  it("registers explicit language and infers extension", async () => {
     expect(AST_LANGUAGES).toContain(language);
     expect(isAstLanguage(language)).toBe(true);
     expect(inferredAstLanguage(path.toUpperCase())).toBe(language);
@@ -28,7 +28,7 @@ describe.each(cases)("$language AST integration", ({ language, extension, kind, 
       .not.toThrow();
   });
 
-  it("selects pattern, kind and composite rules", () => {
+  it("selects pattern, kind and composite rules", async () => {
     const pattern = astCandidates(path, source, { pattern: "emit($VALUE)" }, 1000, "example");
     const byKind = astCandidates(path, source, { language, kind }, 1000, "example");
     const composite = astCandidates(path, source, {
@@ -43,7 +43,7 @@ describe.each(cases)("$language AST integration", ({ language, extension, kind, 
     }
   });
 
-  it("uses ancestor context without moving focus, preserving CRLF and Unicode columns", () => {
+  it("uses ancestor context without moving focus, preserving CRLF and Unicode columns", async () => {
     const crlf = source.replaceAll("\n", "\r\n");
     const result = astCandidates(path, crlf, {
       language, pattern: "emit($VALUE)",
@@ -65,7 +65,7 @@ describe.each(cases)("$language AST integration", ({ language, extension, kind, 
     expect(selected.text).not.toContain("\r");
   });
 
-  it("rejects unknown selectors and refuses oversize matches", () => {
+  it("rejects unknown selectors and refuses oversize matches", async () => {
     expect(() => parseConfig({ rules: [{ id: "invalid", question: "Inspect?", ast: {
       language, kind: "never_a_tree_sitter_kind",
     } }] })).toThrow("Unknown AST node kind");
@@ -77,7 +77,7 @@ describe.each(cases)("$language AST integration", ({ language, extension, kind, 
     expect(result.diagnostics[0]?.message).toContain("matched node exceeds chunkChars");
   });
 
-  it("produces a provider-free, bounded inspect request", () => {
+  it("produces a provider-free, bounded inspect request", async () => {
     const rule: JevCheckRule = {
       id: "example/" + language,
       files: ["**/*." + extension],
@@ -89,7 +89,7 @@ describe.each(cases)("$language AST integration", ({ language, extension, kind, 
         context: { ancestor: { kind: ancestor } },
       },
     };
-    const result = inspectSource({ path, source }, [rule], { chunkChars: 1000 });
+    const result = await inspectSource({ path, source }, [rule], { chunkChars: 1000 });
     expect(result.diagnostics).toEqual([]);
     expect(result.inspections).toHaveLength(1);
     const inspected = result.inspections[0]!;
@@ -103,11 +103,11 @@ describe.each(cases)("$language AST integration", ({ language, extension, kind, 
 });
 
 describe("multi-language example configuration", () => {
-  it("validates and selects exactly one AST focus for every supported example", () => {
+  it("validates and selects exactly one AST focus for every supported example", async () => {
     const config = parseConfig(JSON.parse(readFileSync("examples/multilanguage-ast/jevcheck.config.json", "utf8")));
     for (const { extension } of cases) {
       const path = "examples/multilanguage-ast/sources/example." + extension;
-      const result = inspectSource({ path, source: readFileSync(path, "utf8") }, config.rules);
+      const result = await inspectSource({ path, source: readFileSync(path, "utf8") }, config.rules);
       expect(result.diagnostics).toEqual([]);
       expect(result.inspections).toHaveLength(1);
       expect(result.inspections[0]?.request.state.code).toContain('café');
