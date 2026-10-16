@@ -160,7 +160,7 @@ function validateProjectCondition(value: unknown, field: string): void {
     throw new Error(field + " must be an object");
   }
   const condition = value as Record<string, unknown>;
-  const supported = ["packageJsonHasDep", "fileExists", "globMatches", "anyOf", "allOf", "not"];
+  const supported = ["hasDependency", "packageJsonHasDep", "fileExists", "globMatches", "anyOf", "allOf", "not"];
   const present = supported.filter((key) => condition[key] !== undefined);
   const unknown = Object.keys(condition).filter((key) => !supported.includes(key));
   if (unknown.length) {
@@ -171,6 +171,24 @@ function validateProjectCondition(value: unknown, field: string): void {
   }
 
   const key = present[0]!;
+  if (key === "hasDependency") {
+    const value = condition.hasDependency;
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+      throw new Error(field + ".hasDependency must be an object");
+    }
+    const dep = value as Record<string, unknown>;
+    rejectUnknownKeys(dep, ["ecosystem", "name", "scope"], field + ".hasDependency");
+    if (!["node", "dotnet", "go"].includes(String(dep.ecosystem))) {
+      throw new Error(field + ".hasDependency.ecosystem must be node, dotnet, or go");
+    }
+    if (typeof dep.name !== "string" || !dep.name.trim()) {
+      throw new Error(field + ".hasDependency.name must be a non-empty string");
+    }
+    if (dep.scope !== undefined && dep.scope !== "root" && dep.scope !== "workspace") {
+      throw new Error(field + ".hasDependency.scope must be root or workspace");
+    }
+    return;
+  }
   if (key === "packageJsonHasDep" || key === "fileExists" || key === "globMatches") {
     const raw = condition[key];
     if (typeof raw !== "string" || !raw.trim()) {
