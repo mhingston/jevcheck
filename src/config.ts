@@ -6,6 +6,60 @@ import { compilePattern } from "./candidates.js";
 import { parseRuleEvidencePolicy } from "./evidence.js";
 import type { AstCandidateConfig, JevCheckConfig, JevCheckRule } from "./types.js";
 
+// These are jevcheck-owned config keys. ast.rule is intentionally opaque: its
+// nested schema belongs to ast-grep and must not be frozen by our validator.
+const CONFIG_FIELDS = [
+  "include", "exclude", "chunkChars", "overlapLines", "contextLines",
+  "cacheFile", "baselineFile", "replayFile", "calibrationFile", "confirmationFile",
+  "evidenceFile", "driftThreshold", "graduation", "suppressionMarker", "rules",
+] as const satisfies readonly (keyof JevCheckConfig)[];
+
+const RULE_FIELDS = [
+  "id", "question", "why", "source", "severity", "status", "files", "exclude",
+  "contains", "prefilter", "unless", "ast", "wholeFile", "threshold",
+  "contextLines", "criteria", "projectWhen", "coveredBy", "fixtures", "mutants",
+] as const satisfies readonly (keyof JevCheckRule | "contains")[];
+
+const AST_SELECTOR_FIELDS = ["pattern", "kind", "rule"] as const;
+const AST_FIELDS = [
+  ...AST_SELECTOR_FIELDS, "language", "contextBefore", "contextAfter", "context",
+] as const;
+const FIXTURE_FIELDS = ["valid", "invalid"] as const;
+
+// Small Levenshtein check for actionable typo hints, not fuzzy acceptance.
+function editDistance(left: string, right: string): number {
+  let previous = Array.from({ length: right.length + 1 }, (_, index) => index);
+  for (let i = 1; i <= left.length; i += 1) {
+    const current = [i];
+    for (let j = 1; j <= right.length; j += 1) {
+      current.push(Math.min(
+        current[j - 1]! + 1,
+        previous[j]! + 1,
+        previous[j - 1]! + (left[i - 1] === right[j - 1] ? 0 : 1),
+      ));
+    }
+    previous = current;
+  }
+  return previous[right.length]!;
+}
+
+function rejectUnknownKeys(
+  value: Record<string, unknown>,
+  allowed: readonly string[],
+  path: string,
+): void {
+  for (const key of Object.keys(value)) {
+    if (allowed.includes(key)) continue;
+    const close = allowed
+      .map((candidate) => ({ candidate, distance: editDistance(key, candidate) }))
+      .sort((a, b) => a.distance - b.distance || a.candidate.localeCompare(b.candidate))[0];
+    const hint = close && close.distance <= Math.min(3, Math.max(1, Math.floor(key.length / 3)))
+      ? " (did you mean " + close.candidate + "?)"
+      : "";
+    throw new Error(path + "." + key + ": unknown field" + hint);
+  }
+}
+
 function nonEmptyStrings(value: unknown, field: string): string[] | undefined {
   if (value === undefined) return undefined;
   if (!Array.isArray(value) || value.some((item) => typeof item !== "string" || !item.trim())) {
@@ -31,7 +85,12 @@ function validateNonNegativeInteger(value: unknown, field: string): void {
   }
 }
 
-function validateAstSelector(value: Record<string, unknown>, field: string): void {
+function validateAstSelector(
+  value: Record<string, unknown>,
+  field: string,
+  allowedFields: readonly string[] = AST_SELECTOR_FIELDS,
+): void {
+  rejectUnknownKeys(value, allowedFields, field);
   const hasPattern = value.pattern !== undefined;
   const hasKind = value.kind !== undefined;
   const hasRule = value.rule !== undefined;
@@ -55,7 +114,7 @@ function validateAst(value: unknown, ruleId: string): void {
     throw new Error(ruleId + ".ast must be an object");
   }
   const ast = value as Record<string, unknown>;
-  validateAstSelector(ast, ruleId + ".ast");
+  validateAstSelector(ast, ruleId + ".ast", AST_FIELDS);
 
   if (ast.language !== undefined && !isAstLanguage(ast.language)) {
     throw new Error(ruleId + ".ast.language must be " + AST_LANGUAGES.join(", "));
@@ -69,6 +128,7 @@ function validateAst(value: unknown, ruleId: string): void {
       throw new Error(ruleId + ".ast.context must be an object");
     }
     const context = ast.context as Record<string, unknown>;
+    rejectUnknownKeys(context, ["ancestor"], ruleId + ".ast.context");
     if (context.ancestor !== undefined) {
       if (!context.ancestor || typeof context.ancestor !== "object" || Array.isArray(context.ancestor)) {
         throw new Error(ruleId + ".ast.context.ancestor must be an ast selector");
@@ -161,6 +221,7 @@ function validateRule(value: unknown, index: number): JevCheckRule {
   }
 
   const rule = value as Record<string, unknown>;
+  rejectUnknownKeys(rule, RULE_FIELDS, "rules[" + index + "]");
   if (typeof rule.id !== "string" || !rule.id.trim()) throw new Error("rules[" + index + "].id must be non-empty");
   if (typeof rule.question !== "string" || !rule.question.trim()) {
     throw new Error("rules[" + index + "].question must be non-empty");
@@ -231,6 +292,7 @@ function validateRule(value: unknown, index: number): JevCheckRule {
       throw new Error(rule.id + ".criteria must be an object");
     }
     const criteria = rule.criteria as Record<string, unknown>;
+    rejectUnknownKeys(criteria, ["true", "false"], "rules[" + index + "].criteria");
     optionalNonEmptyString(criteria.true, rule.id + ".criteria.true");
     optionalNonEmptyString(criteria.false, rule.id + ".criteria.false");
   }
@@ -240,6 +302,7 @@ function validateRule(value: unknown, index: number): JevCheckRule {
       throw new Error(rule.id + ".fixtures must be an object");
     }
     const fixtures = rule.fixtures as Record<string, unknown>;
+    rejectUnknownKeys(fixtures, [...FIXTURE_FIELDS, "confirmation"], "rules[" + index + "].fixtures");
     nonEmptyStrings(fixtures.valid, rule.id + ".fixtures.valid");
     nonEmptyStrings(fixtures.invalid, rule.id + ".fixtures.invalid");
     if (fixtures.confirmation !== undefined) {
@@ -251,6 +314,7 @@ function validateRule(value: unknown, index: number): JevCheckRule {
         throw new Error(rule.id + ".fixtures.confirmation must be an object");
       }
       const confirmation = fixtures.confirmation as Record<string, unknown>;
+      rejectUnknownKeys(confirmation, FIXTURE_FIELDS, "rules[" + index + "].fixtures.confirmation");
       nonEmptyStrings(confirmation.valid, rule.id + ".fixtures.confirmation.valid");
       nonEmptyStrings(confirmation.invalid, rule.id + ".fixtures.confirmation.invalid");
     }
@@ -266,6 +330,7 @@ function validateRule(value: unknown, index: number): JevCheckRule {
         throw new Error(rule.id + ".mutants[" + mutantIndex + "] must be an object");
       }
       const mutant = value as Record<string, unknown>;
+      rejectUnknownKeys(mutant, ["id", "pattern", "replacement", "replaceAll"], "rules[" + index + "].mutants[" + mutantIndex + "]");
       if (typeof mutant.id !== "string" || !mutant.id.trim()) {
         throw new Error(rule.id + ".mutants[" + mutantIndex + "].id must be non-empty");
       }
@@ -302,6 +367,7 @@ function validateRule(value: unknown, index: number): JevCheckRule {
 export function parseConfig(value: unknown): JevCheckConfig {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("config must be an object");
   const config = value as Record<string, unknown>;
+  rejectUnknownKeys(config, CONFIG_FIELDS, "config");
   if (!Array.isArray(config.rules) || config.rules.length === 0) throw new Error("config.rules must contain at least one rule");
 
   const rules = config.rules.map(validateRule);

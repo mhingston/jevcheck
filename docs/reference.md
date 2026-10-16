@@ -75,7 +75,7 @@ Start with a bounded, non-blocking rule in `jevcheck.config.json`:
 - Default `status` is `shadow`, default `severity` is `error` and default `threshold` is `0.8`. Shadow findings do **not** block CI.
 - Run `jevcheck inspect --rule reliability/queue-ack src/handler.ts` to verify candidates before calling a model. Zero matches means no judgement: revisit file scope, filters and context.
 
-JSON config shorthands are normalised to canonical AST selectors and regex prefilters **before** fingerprinting and evidence persistence. The TypeScript `createJevCheck` API continues to accept canonical AST objects and regex prefilters.
+JSON config shorthands are normalised to canonical AST selectors and regex prefilters **before** fingerprinting and evidence persistence. Configuration parsing rejects unknown keys at the top level and within rules, selectors, context, criteria, fixtures, confirmation fixtures, and mutants. A typo such as `contain` produces a path-specific error like `rules[0].contain: unknown field (did you mean contains?)` instead of silently changing rule behaviour. The nested `ast.rule` object is passed through to ast-grep so valid composite matcher syntax remains available; use its own grammar and validation rules. This is a **breaking configuration-validation change in v0.7.0**: correct any previously ignored fields before upgrading. The TypeScript `createJevCheck` API continues to accept canonical AST objects and regex prefilters.
 
 ### Advanced rule configuration
 
