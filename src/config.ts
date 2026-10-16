@@ -53,7 +53,7 @@ function rejectUnknownKeys(
     const close = allowed
       .map((candidate) => ({ candidate, distance: editDistance(key, candidate) }))
       .sort((a, b) => a.distance - b.distance || a.candidate.localeCompare(b.candidate))[0];
-    const hint = close && close.distance <= Math.min(3, Math.max(1, Math.floor(key.length / 3)))
+    const hint = close && close.distance <= Math.min(3, Math.max(2, Math.floor(key.length / 3)))
       ? " (did you mean " + close.candidate + "?)"
       : "";
     throw new Error(path + "." + key + ": unknown field" + hint);
