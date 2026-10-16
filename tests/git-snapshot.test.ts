@@ -86,7 +86,7 @@ describe("Git evaluation snapshot consistency", () => {
       expect(evaluated.reports[0]?.execution).toBe("covered");
       expect(evaluated.reports[0]?.checks.find((check) => check.id === "applicability")?.message)
         .toContain("applies");
-      expect(evaluated.reports[0]?.checks.find((check) => check.id === "architecture")?.message)
+      expect(evaluated.reports[0]?.checks.find((check) => check.id === "architecture-decision")?.message)
         .toContain("accepted");
       expect(evaluated.sourcePaths).toContain("src/a.ts");
     } finally {
