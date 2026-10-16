@@ -52,7 +52,8 @@ export function formatStylish(result: CheckResult): string {
       (diagnostic.level === "error" ? "error" : "warning") +
         (location ? " " + location : "") +
         ": " +
-        diagnostic.message,
+        diagnostic.message +
+        (diagnostic.code ? " [" + diagnostic.code + "]" : ""),
     );
   }
 
@@ -168,6 +169,7 @@ export function formatSarif(result: CheckResult): string {
               (diagnostic.path || diagnostic.ruleId ? ": " : "") +
               diagnostic.message,
           },
+          ...(diagnostic.code ? { properties: { code: diagnostic.code } } : {}),
         })),
       }],
     }],

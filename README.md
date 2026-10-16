@@ -82,7 +82,7 @@ real review concern -> write invariant -> select bounded code -> inspect (offlin
                    -> audit evidence -> owned/CI (only if dependable)
 ~~~
 
-You can stop at `shadow` and keep a useful advisory check. `owned` error rules block only when the documented evidence gates are met, and fail closed when that evidence goes stale. Run `jevcheck rules audit` before promoting a rule.
+You can stop at `shadow` and keep a useful advisory check. `owned` error rules block only when the documented evidence gates are met, and fail closed when that evidence goes stale. They also **fail closed when applicable code cannot be evaluated** (e.g. an unsupported AST language or `chunkChars` bound); genuine zero-matches remain successful. Incomplete evaluation is warning-only for shadow and owned warning rules. Run `jevcheck rules audit` before promoting a rule.
 
 | Goal | Command |
 | --- | --- |

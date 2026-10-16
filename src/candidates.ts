@@ -41,6 +41,7 @@ function lineChunksDetailed(
   maxChars: number,
   overlapLines: number,
   baseLine: number,
+  excludedOversizedLine?: RegExp,
 ): ChunkResult {
   if (!lines.length) return { candidates: [], skippedLines: [] };
 
@@ -50,7 +51,11 @@ function lineChunksDetailed(
 
   while (start < lines.length) {
     if (lines[start].length > maxChars) {
-      skippedLines.push(baseLine + start);
+      // Apply unless to the skipped line only; exempting one line must not
+      // suppress diagnostics for a different oversized source line.
+      if (!excludedOversizedLine?.test(lines[start])) {
+        skippedLines.push(baseLine + start);
+      }
       start += 1;
       continue;
     }
@@ -158,6 +163,7 @@ function appendOversizedLineDiagnostics(
 ): void {
   for (const line of skippedLines) {
     diagnostics.push({
+      code: "incomplete-evaluation",
       level: "warning",
       path,
       ruleId,
@@ -192,11 +198,16 @@ export function buildCandidates(
 ): CandidateResult {
   const diagnostics: Diagnostic[] = [];
   const prefilter = rule.prefilter ? compilePattern(rule.prefilter) : undefined;
+  const unless = rule.unless ? compilePattern(rule.unless) : undefined;
 
   if (rule.wholeFile) {
     if (prefilter && !prefilter.test(source)) return { candidates: [], diagnostics };
+    // The whole-file exclusion is deterministic even when the source exceeds
+    // the semantic bound: excluded code was never an applicable candidate.
+    if (unless?.test(source)) return { candidates: [], diagnostics };
     if (source.length > options.chunkChars) {
       diagnostics.push({
+        code: "incomplete-evaluation",
         level: "warning",
         path,
         ruleId: rule.id,
@@ -214,7 +225,6 @@ export function buildCandidates(
       focusStartLine: 1,
       focusEndLine: lineCount,
     };
-    if (rule.unless && compilePattern(rule.unless).test(candidate.text)) return { candidates: [], diagnostics };
     return { candidates: [candidate], diagnostics };
   }
 
@@ -227,6 +237,7 @@ export function buildCandidates(
       options.chunkChars,
       rule.id,
       rule.contextLines ?? options.contextLines,
+      unless,
     );
     return {
       candidates: applyCandidateFilters(ast.candidates, rule),
@@ -240,7 +251,7 @@ export function buildCandidates(
     const windows = prefilterWindows(source, rule.prefilter, rule.contextLines ?? options.contextLines);
     const chunked = windows.map((window) => {
       const selected = lines.slice(window.start, window.end + 1);
-      return lineChunksDetailed(selected, options.chunkChars, options.overlapLines, window.start + 1);
+      return lineChunksDetailed(selected, options.chunkChars, options.overlapLines, window.start + 1, unless);
     });
     candidates = chunked.flatMap((item) => item.candidates);
     appendOversizedLineDiagnostics(
@@ -251,13 +262,12 @@ export function buildCandidates(
       options.chunkChars,
     );
   } else {
-    const chunked = lineChunksDetailed(source.split(/\r?\n/), options.chunkChars, options.overlapLines, 1);
+    const chunked = lineChunksDetailed(source.split(/\r?\n/), options.chunkChars, options.overlapLines, 1, unless);
     candidates = chunked.candidates;
     appendOversizedLineDiagnostics(diagnostics, path, rule.id, chunked.skippedLines, options.chunkChars);
   }
 
-  if (rule.unless) {
-    const unless = compilePattern(rule.unless);
+  if (unless) {
     candidates = candidates.filter((candidate) => !unless.test(candidate.text));
   }
 

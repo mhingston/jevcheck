@@ -111,7 +111,7 @@ function usage(): string {
     "coverage record fingerprints declared deterministic enforcement files into evidenceFile.",
     "inspect is provider-free and prints the exact state/question request Jev would receive.",
     "",
-    "Only owned error findings make the check command exit 1. Shadow findings are advisory.",
+    "Owned error findings and incomplete owned/error evaluations fail check/replay. Shadow findings are advisory.",
   ].join("\n");
 }
 

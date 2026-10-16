@@ -249,12 +249,19 @@ export function createJevCheck(options: JevCheckOptions): JevCheck {
         overlapLines,
         contextLines,
       });
-      result.diagnostics.push(...built.diagnostics);
+      const severity = rule.severity ?? "error";
+      const status = rule.status ?? "shadow";
+      // Zero matches are fine; skipping applicable code due to parser or size
+      // limits is not fine when an owned error rule is enforcing the check.
+      const failClosed = mode === "enforce" && status === "owned" && severity === "error";
+      result.diagnostics.push(...built.diagnostics.map((diagnostic) =>
+        failClosed && diagnostic.code === "incomplete-evaluation"
+          ? { ...diagnostic, level: "error" as const }
+          : diagnostic,
+      ));
 
       const rHash = ruleFingerprint(rule);
       const threshold = rule.threshold ?? DEFAULT_THRESHOLD;
-      const severity = rule.severity ?? "error";
-      const status = rule.status ?? "shadow";
       const occurrenceCounts = new Map<string, number>();
 
       for (const candidate of built.candidates) {

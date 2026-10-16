@@ -146,7 +146,7 @@ A qualified rule can add provenance, AST context, fixtures, mutants and other ev
 | `1` | Blocking finding or failed measurement/test command |
 | `2` | Configuration, runtime, or provider error |
 
-For normal checks, only owned error findings are blocking.
+For normal checks, owned error findings **and incomplete evaluations of applicable owned/error rules** fail enforcement. A genuine rule with no matching candidates remains successful. Incomplete evaluation means applicable content could not be judged because of an unsupported AST language or a `chunkChars` bound. Shadow rules, owned warning rules, and measurement commands report advisory warnings instead. JSON diagnostics expose `code: "incomplete-evaluation"`; SARIF includes the diagnostic and marks execution unsuccessful for blocking incompleteness. Oversized semantic requests are never sent. For oversized AST matches and source lines, a deterministic `unless` exclusion is checked against **the skipped match or line**, never against unrelated source: excluded content is a genuine no-match, while other skipped candidates still fail closed.
 
 ## Programmatic API
 
