@@ -158,7 +158,8 @@ function appendOversizedLineDiagnostics(
 ): void {
   for (const line of skippedLines) {
     diagnostics.push({
-      level: "warning",
+      code: "incomplete-evaluation",
+        level: "warning",
       path,
       ruleId,
       message:
@@ -197,6 +198,7 @@ export function buildCandidates(
     if (prefilter && !prefilter.test(source)) return { candidates: [], diagnostics };
     if (source.length > options.chunkChars) {
       diagnostics.push({
+        code: "incomplete-evaluation",
         level: "warning",
         path,
         ruleId: rule.id,

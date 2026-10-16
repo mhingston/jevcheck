@@ -182,6 +182,8 @@ export interface BaselineEntry {
 }
 
 export interface Diagnostic {
+  /** Applicable content was not evaluated (not an intentional no-match). */
+  code?: "incomplete-evaluation";
   level: "warning" | "error";
   message: string;
   path?: string;

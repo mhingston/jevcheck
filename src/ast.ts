@@ -139,6 +139,7 @@ export function astCandidates(
     return {
       candidates: [],
       diagnostics: [{
+        code: "incomplete-evaluation",
         level: "warning",
         path,
         ruleId,
@@ -183,6 +184,7 @@ export function astCandidates(
 
     if (!context) {
       diagnostics.push({
+        code: "incomplete-evaluation",
         level: "warning",
         path,
         ruleId,
