@@ -178,7 +178,7 @@ function validateProjectCondition(value: unknown, field: string): void {
     }
     const dep = value as Record<string, unknown>;
     rejectUnknownKeys(dep, ["ecosystem", "name", "scope"], field + ".hasDependency");
-    if (!["node", "dotnet", "go"].includes(String(dep.ecosystem))) {
+    if (typeof dep.ecosystem !== "string" || !["node", "dotnet", "go"].includes(dep.ecosystem)) {
       throw new Error(field + ".hasDependency.ecosystem must be node, dotnet, or go");
     }
     if (typeof dep.name !== "string" || !dep.name.trim()) {
