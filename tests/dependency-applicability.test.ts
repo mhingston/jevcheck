@@ -180,9 +180,9 @@ describe("manifest-aware project applicability", () => {
         "  github.com/example/old2 v1.1.0 => github.com/example/new v1.2.0",
         ")",
         "exclude github.com/example/bad v1.0.0",
-        "retract ([v1.0.0, v1.1.0])",
+        "retract [v1.0.0, v1.1.0]",
         "tool golang.org/x/tools/cmd/stringer",
-      ].filter((line) => !line.startsWith("retract (")).concat("retract [v1.0.0, v1.1.0]").join("\n"),
+      ].join("\n"),
     });
     expect(await projectConditionMatches(dep("go", "github.com/google/uuid"), valid)).toBe(true);
 
