@@ -44,8 +44,15 @@ export function inferredAstLanguage(path: string): AstLanguage | undefined {
 let registered = false;
 let registrationError: Error | undefined;
 
-function actionableNativeParserError(stage: string, packages: string[], error: unknown): Error {
-  return new Error(
+export class NativeAstParserError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "NativeAstParserError";
+  }
+}
+
+function actionableNativeParserError(stage: string, packages: string[], error: unknown): NativeAstParserError {
+  return new NativeAstParserError(
     "Cannot " + stage + " AST parser(s): " + packages.join(", ") + ". " +
     "Install native parser packages with lifecycle scripts enabled (npm ci, not --ignore-scripts); " +
     "approve their install scripts under npm allowScripts or pnpm 10 --allow-build. " +
