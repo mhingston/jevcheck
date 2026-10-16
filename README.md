@@ -93,6 +93,7 @@ You can stop at `shadow` and keep a useful advisory check. `owned` error rules b
 | Preview ownership/evidence readiness | `npx jevcheck rules audit` |
 | Produce code-scanning results | `npx jevcheck --changed --base origin/main --format sarif` |
 
+**Revision consistency:** `--staged` evaluates the Git index, including staged rules, manifests, ADRs, fixtures and evidence; unstaged edits cannot change the judgement. `--changed --base <ref>` selects paths changed by `<ref>...HEAD` and evaluates their **committed HEAD versions**, not local edits. Both modes require policy artifacts to exist in that revision (ignored/untracked evidence does not count). See [Git snapshot semantics](docs/reference.md#git-snapshot-semantics).
 Provider configuration: export `TYPESAFE_API_KEY` (default provider), or set `OPENROUTER_API_KEY` plus `JEV_PROVIDER=openrouter`. Never put credentials in rules. Model-visible code is sent to your selected provider: exclude secrets, private keys and sensitive source. See [provider details](docs/reference.md#provider-configuration).
 
 ## Documentation

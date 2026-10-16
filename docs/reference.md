@@ -33,6 +33,22 @@ npx jevcheck --changed --base origin/main --format sarif > jevcheck.sarif
 
 SARIF contains active findings only. Shadow findings are emitted as notes, owned warnings as warnings, and owned errors as errors.
 
+## Git snapshot semantics
+
+A check resolves **source and all associated policy inputs together**, rather than mixing the index with the working tree. Run these commands from within a Git repository. The Git snapshot modes are read-only inputs; temporary checkouts are removed afterwards.
+
+| Mode | Selected source paths | Source content | Rules, project conditions, ADRs, fixtures, calibration and coverage evidence |
+| --- | --- | --- | --- |
+| Default (no Git flag) | Configured working-tree files | Working tree | Working tree |
+| `--changed` | Tracked changes against HEAD (staged **or** unstaged), plus untracked non-ignored files | Working tree | Working tree |
+| `--staged` | Added/modified/type-changed destinations in the Git index relative to HEAD | **Index** | **Index** |
+| `--changed --base <ref>` | Added/modified/type-changed destinations in `<ref>...HEAD` (merge-base diff) | **HEAD commit** | **HEAD commit** |
+
+- Deletions are not evaluated as source files. Renames are treated as deletion + addition, so only the destination is checked. Partially staged files use exactly the staged blob under `--staged`.
+- The index/HEAD snapshot includes only Git-tracked files in that revision. Unstaged, untracked, and ignored policy files **cannot silently affect** a snapshot run. A required config missing from the revision is an error; unavailable evidence fails the normal ownership/coverage gates rather than borrowing working-tree data.
+- `--config` and configured local evidence/ADR paths must stay repository-relative for snapshot runs, so an absolute external file cannot change policy results. External HTTP(S) rule sources remain externally referenced, not fingerprinted by Git.
+- `--staged` and `--changed --base` support `check`, `inspect`, `replay`, and `list`. Commands that write calibration, baselines, replay corpora, or evidence must run against the working tree instead. Cache writes from snapshot runs are temporary and not persisted in the working tree.
+- To check the **working-tree version** of a branch's changed files, use `--changed` without `--base` (which also considers other local/untracked changes). To inspect exactly what a branch PR will change in CI, use `--changed --base <ref>` after fetching that base ref.
 ## Provider configuration
 
 Provider and model selection are inherited from `@mhingston5/jev-cli`.
