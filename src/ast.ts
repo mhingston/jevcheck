@@ -125,6 +125,7 @@ export function astCandidates(
   maxChars: number,
   ruleId: string,
   defaultContextLines = 0,
+  excludedOversizedMatch?: RegExp,
 ): { candidates: Candidate[]; diagnostics: Diagnostic[] } {
   let language: Lang | string | undefined;
   try {
@@ -183,6 +184,9 @@ export function astCandidates(
     );
 
     if (!context) {
+      // Evaluate an exclusion against this matched node, not the whole file:
+      // a different exempt call must not conceal an oversized unsafe match.
+      if (excludedOversizedMatch?.test(node.text())) continue;
       diagnostics.push({
         code: "incomplete-evaluation",
         level: "warning",

@@ -171,4 +171,83 @@ describe("incomplete semantic evaluation", () => {
     )).toBe(true);
     expect(client.calls).toBeGreaterThan(0);
   });
+
+
+  it("excludes an oversized AST match containing unless without hiding other oversized matches", async () => {
+    const rule: JevCheckRule = {
+      id: "test/ast-exemption",
+      question: "Does the call violate the invariant?",
+      status: "owned",
+      severity: "error",
+      ast: { pattern: "console.log($A)", contextBefore: 0, contextAfter: 0 },
+      unless: "exempt",
+    };
+    const client = new CountingClient();
+    const exempt = 'console.log("' + "x".repeat(150) + "exempt" + "x".repeat(150) + '");';
+    const nonExempt = 'console.log("' + "x".repeat(300) + '");';
+
+    const skippedOnly = await checker(rule, client).checkSource("src/a.ts", exempt);
+    expect(skippedOnly.diagnostics).toEqual([]);
+    expect(skippedOnly.evaluations).toEqual([]);
+    expect(client.calls).toBe(0);
+
+    const mixed = await checker(rule, client).checkSource("src/a.ts", [exempt, nonExempt].join("\n"));
+    expect(mixed.diagnostics).toEqual([
+      expect.objectContaining({
+        code: "incomplete-evaluation",
+        level: "error",
+        message: expect.stringContaining("lines 2-2"),
+      }),
+    ]);
+    expect(client.calls).toBe(0);
+  });
+
+  it("excludes an oversized line containing unless without exempting unrelated lines", async () => {
+    const rule: JevCheckRule = {
+      id: "test/line-exemption",
+      question: "Is the source unsafe?",
+      status: "owned",
+      severity: "error",
+      unless: "exempt",
+    };
+    const client = new CountingClient();
+    const exempt = "exempt " + "x".repeat(300);
+    const nonExempt = "unsafe " + "x".repeat(300);
+
+    const excludedOnly = await checker(rule, client).checkSource("src/a.ts", exempt);
+    expect(excludedOnly.diagnostics).toEqual([]);
+    expect(excludedOnly.evaluations).toEqual([]);
+
+    const mixed = await checker(rule, client).checkSource("src/a.ts", [exempt, nonExempt, "const ok = true;"].join("\n"));
+    expect(mixed.diagnostics).toEqual([
+      expect.objectContaining({
+        code: "incomplete-evaluation",
+        level: "error",
+        message: expect.stringContaining("Line 2 skipped"),
+      }),
+    ]);
+    expect(mixed.evaluations).toHaveLength(1);
+    expect(client.requestLengths.every((length) => length <= 256)).toBe(true);
+  });
+
+  it("applies oversized-line exclusions inside prefilter windows without hiding a later match", async () => {
+    const rule: JevCheckRule = {
+      id: "test/prefilter-exemption",
+      question: "Is the call unsafe?",
+      status: "owned",
+      severity: "error",
+      prefilter: "publish",
+      contextLines: 0,
+      unless: "exempt",
+    };
+    const source = ["publish exempt " + "x".repeat(300), "publish unsafe " + "x".repeat(300)].join("\n");
+    const result = await checker(rule, new CountingClient()).checkSource("src/a.ts", source);
+    expect(result.diagnostics).toEqual([
+      expect.objectContaining({
+        code: "incomplete-evaluation",
+        level: "error",
+        message: expect.stringContaining("Line 2 skipped"),
+      }),
+    ]);
+  });
 });
