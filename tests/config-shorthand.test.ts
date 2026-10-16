@@ -32,12 +32,16 @@ describe("JSON configuration shorthands", () => {
     const config = parseConfig({
       rules: [rule({ ast: "function_declaration", contains: "queue.publish(" })],
     });
-    const inspected = inspectSource({
+    const matched = inspectSource({
       path: "src/handler.ts",
-      source: "function correct() { queue.publish(job); }\nfunction other() { queueXpublish(job); }",
+      source: "function correct() { queue.publish(job); }",
     }, config.rules);
-    expect(inspected.inspections).toHaveLength(1);
-    expect(inspected.inspections[0]?.focusLineRange[0]).toBe(1);
+    const notMatched = inspectSource({
+      path: "src/handler.ts",
+      source: "function other() { queueXpublish(job); }",
+    }, config.rules);
+    expect(matched.inspections).toHaveLength(1);
+    expect(notMatched.inspections).toHaveLength(0);
   });
 
   it("escapes a leading slash rather than interpreting regex delimiter syntax", () => {
