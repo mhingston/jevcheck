@@ -29,7 +29,7 @@ node dist/cli.js inspect examples/queue-ack/src/handler.ts \
   --rule reliability/no-success-after-publish-failure
 ~~~
 
-`inspect` requires no provider credentials. You can verify that the candidate is one bounded handler and that its failure path and response are both visible. **Inspection does not assert a violation.** To ask a model for a judgement, configure a provider and run the same rule in shadow mode; see the [walkthrough](examples/queue-ack/README.md#3-run-a-semantic-check-optional).
+`inspect` requires no provider credentials. It reports whether a rule is eligible for semantic checking, deterministically covered, or inapplicable (with a reason), before showing selected bounded requests. Use `--preview-skipped` to see hypothetical candidates for policy-skipped rules. **Inspection does not assert a violation.** See [inspect policy semantics](docs/reference.md#inspect-runtime-policy-provider-free). To ask a model for a judgement, configure a provider and run the same rule in shadow mode; see the [walkthrough](examples/queue-ack/README.md#3-run-a-semantic-check-optional).
 
 To install it in your own repository:
 

@@ -20,7 +20,7 @@ const source = [
 ].join("\n");
 
 describe("C# AST candidate selection", () => {
-  it("uses a shared language registry for explicit values and extension inference", () => {
+  it("uses a shared language registry for explicit values and extension inference", async () => {
     expect(AST_LANGUAGES).toContain("csharp");
     expect(isAstLanguage("csharp")).toBe(true);
     expect(isAstLanguage("python")).toBe(true);
@@ -31,7 +31,7 @@ describe("C# AST candidate selection", () => {
     expect(inferredAstLanguage("src/unknown.vue")).toBeUndefined();
   });
 
-  it("matches multiline C# invocation patterns and keeps bounded ancestor context", () => {
+  it("matches multiline C# invocation patterns and keeps bounded ancestor context", async () => {
     const result = astCandidates("src/Worker.cs", source, {
       pattern: "queue.PublishAsync($A, $B)",
       context: { ancestor: { kind: "method_declaration" } },
@@ -49,7 +49,7 @@ describe("C# AST candidate selection", () => {
     expect(result.candidates[0]?.text.length).toBeLessThanOrEqual(1000);
   });
 
-  it("supports kind, composite rule, attribute and generic selectors", () => {
+  it("supports kind, composite rule, attribute and generic selectors", async () => {
     const call = astCandidates("src/Worker.cs", source,
       { language: "csharp", kind: "invocation_expression" }, 1000, "calls");
     expect(call.candidates.some((c) => c.text.includes("PublishAsync"))).toBe(true);
@@ -68,7 +68,7 @@ describe("C# AST candidate selection", () => {
     expect(generics.candidates.some((c) => c.text.includes("List<string>"))).toBe(true);
   });
 
-  it("preserves UTF-16 focus columns and CRLF line ranges for C#", () => {
+  it("preserves UTF-16 focus columns and CRLF line ranges for C#", async () => {
     const line = '    var café = "🧪"; Console.WriteLine(café);';
     const crlf = ["class Example {", "  void Run() {", line, "  }", "}"].join("\r\n");
     const result = astCandidates("Example.cs", crlf,
@@ -84,7 +84,7 @@ describe("C# AST candidate selection", () => {
     expect(result.candidates[0]?.text).toBe(line);
   });
 
-  it("skips oversize C# matches without sending a truncated request", () => {
+  it("skips oversize C# matches without sending a truncated request", async () => {
     const big = 'class A { void Run() { Console.WriteLine("' + "x".repeat(400) + '"); } }';
     const result = astCandidates("A.cs", big,
       { pattern: "Console.WriteLine($A)" }, 256, "bounded");
@@ -92,7 +92,7 @@ describe("C# AST candidate selection", () => {
     expect(result.diagnostics[0]?.message).toContain("matched node exceeds chunkChars");
   });
 
-  it("rejects invalid C# language and selector configurations", () => {
+  it("rejects invalid C# language and selector configurations", async () => {
     const config = (ast: object) => ({ rules: [{ id: "sample", question: "Is this unsafe?", ast }] });
     expect(() => parseConfig(config({ language: "kotlin", kind: "invocation_expression" })))
       .toThrow("sample.ast.language must be");
@@ -104,7 +104,7 @@ describe("C# AST candidate selection", () => {
       .toThrow("exactly one of");
   });
 
-  it("inspects a C# rule's exact bounded provider-free semantic request", () => {
+  it("inspects a C# rule's exact bounded provider-free semantic request", async () => {
     const rule: JevCheckRule = {
       id: "queue/check",
       question: "Can the handler report success if queue publication fails?",
@@ -112,7 +112,7 @@ describe("C# AST candidate selection", () => {
       prefilter: "queue\\.PublishAsync\\(",
       files: ["**/*.cs"],
     };
-    const result = inspectSource({ path: "src/Worker.cs", source }, [rule], { chunkChars: 1000 });
+    const result = await inspectSource({ path: "src/Worker.cs", source }, [rule], { chunkChars: 1000 });
     expect(result.diagnostics).toEqual([]);
     expect(result.inspections).toHaveLength(1);
     const inspection = result.inspections[0]!;

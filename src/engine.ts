@@ -1,8 +1,9 @@
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
-import { minimatch } from "minimatch";
-import { projectConditionMatches } from "./applicability.js";
+import { createRuleExecutionResolver } from "./execution-policy.js";
+export { ruleAppliesToFile } from "./execution-policy.js";
+import { ruleAppliesToFile } from "./execution-policy.js";
 import {
   DEFAULT_SUPPRESSION_MARKER,
   findingFingerprint,
@@ -62,13 +63,6 @@ function normalizedRule(rule: JevCheckRule): Record<string, unknown> {
 
 function ruleFingerprint(rule: JevCheckRule): string {
   return hash(JSON.stringify(normalizedRule(rule)));
-}
-
-export function ruleAppliesToFile(rule: JevCheckRule, path: string): boolean {
-  const normalized = path.replaceAll("\\", "/");
-  const includes = rule.files ?? ["**/*"];
-  if (!includes.some((pattern) => minimatch(normalized, pattern, { dot: true }))) return false;
-  return !(rule.exclude ?? []).some((pattern) => minimatch(normalized, pattern, { dot: true }));
 }
 
 export const ROBUSTNESS_PERTURBATIONS = [
@@ -206,17 +200,9 @@ export function createJevCheck(options: JevCheckOptions): JevCheck {
   const baseline = new Set(
     (options.baseline ?? []).map((entry) => baselineKey(entry.ruleId, entry.path, entry.fingerprint)),
   );
-  const projectApplicability = new Map<string, Promise<boolean>>();
-
-  function projectApplies(rule: JevCheckRule): Promise<boolean> {
-    if (!rule.projectWhen) return Promise.resolve(true);
-    let pending = projectApplicability.get(rule.id);
-    if (!pending) {
-      pending = projectConditionMatches(rule.projectWhen, options.projectRoot ?? process.cwd());
-      projectApplicability.set(rule.id, pending);
-    }
-    return pending;
-  }
+  const resolveExecution = createRuleExecutionResolver(
+    options.ruleEvidenceReports, options.projectRoot ?? process.cwd(), mode,
+  );
 
   async function checkSourceInternal(
     path: string,
@@ -232,17 +218,8 @@ export function createJevCheck(options: JevCheckOptions): JevCheck {
     const selected = onlyRuleIds ? new Set(onlyRuleIds) : undefined;
     for (const rule of options.rules) {
       if (selected && !selected.has(rule.id)) continue;
-      const recordedExecution = executionByRule.get(rule.id);
-      if (mode === "enforce" && recordedExecution && recordedExecution !== "semantic") continue;
-      if (
-        mode === "enforce" &&
-        !recordedExecution &&
-        rule.projectWhen &&
-        !(await projectApplies(rule))
-      ) {
-        continue;
-      }
-      if (!ignoreFileScope && !ruleAppliesToFile(rule, path)) continue;
+      const execution = await resolveExecution(rule, path, { ignoreFileScope });
+      if (execution.execution !== "semantic") continue;
 
       const built = buildCandidates(path, source, rule, {
         chunkChars,

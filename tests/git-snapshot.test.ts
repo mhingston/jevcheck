@@ -8,6 +8,8 @@ import { projectConditionMatches } from "../src/applicability.js";
 import { loadConfig } from "../src/config.js";
 import { currentCoverageEvidence } from "../src/coverage.js";
 import { evaluateConfiguredRuleEvidence, persistCoverageEvidence, ruleSourceProvenance } from "../src/evidence-store.js";
+import { createJevCheck } from "../src/engine.js";
+import { inspectSource } from "../src/inspect.js";
 import { changedFiles, checkoutGitSnapshot, stagedFiles, stagedSources } from "../src/git.js";
 import { filterFiles } from "../src/files.js";
 import { assertSnapshotPaths } from "../src/snapshot-paths.js";
@@ -91,6 +93,25 @@ describe("Git evaluation snapshot consistency", () => {
       expect(evaluated.reports[0]?.checks.find((check) => check.id === "architecture-decision")?.message)
         .toContain("accepted");
       expect(evaluated.sourcePaths).toContain("src/a.ts");
+
+      // Inspect and enforcement must use the SAME index snapshot and policy.
+      // The working tree intentionally contains retired ADR, stale coverage,
+      // a different manifest and different source at this point.
+      const stagedContent = await readFile(join(snapshot.cwd, "src/a.ts"), "utf8");
+      const inspected = await inspectSource(
+        { path: "src/a.ts", source: stagedContent },
+        snapshotConfig.rules,
+        { ruleEvidenceReports: evaluated.reports, projectRoot: snapshot.cwd },
+      );
+      const checked = await createJevCheck({
+        rules: snapshotConfig.rules,
+        ruleEvidenceReports: evaluated.reports,
+        projectRoot: snapshot.cwd,
+      }).checkSource("src/a.ts", stagedContent);
+      expect(inspected.rules[0]?.execution).toBe("covered");
+      expect(inspected.rules[0]?.reason).toContain("fingerprints are current");
+      expect(inspected.inspections).toHaveLength(0);
+      expect(checked.stats.requests).toBe(inspected.inspections.length);
     } finally {
       await snapshot.dispose();
       await rm(cwd, { recursive: true, force: true });
