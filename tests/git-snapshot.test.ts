@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -8,7 +8,9 @@ import { projectConditionMatches } from "../src/applicability.js";
 import { loadConfig } from "../src/config.js";
 import { currentCoverageEvidence } from "../src/coverage.js";
 import { evaluateConfiguredRuleEvidence, persistCoverageEvidence, ruleSourceProvenance } from "../src/evidence-store.js";
-import { changedFiles, checkoutGitSnapshot, stagedFiles } from "../src/git.js";
+import { changedFiles, checkoutGitSnapshot, stagedFiles, stagedSources } from "../src/git.js";
+import { filterFiles } from "../src/files.js";
+import { assertSnapshotPaths } from "../src/snapshot-paths.js";
 import type { JevCheckConfig, JevCheckRule } from "../src/types.js";
 
 const execFileAsync = promisify(execFile);
@@ -149,4 +151,97 @@ describe("Git evaluation snapshot consistency", () => {
       await rm(cwd, { recursive: true, force: true });
     }
   });
+  it("checks staged and base changes relative to a nested invocation directory", async () => {
+    const cwd = await repo();
+    const nested = join(cwd, "packages", "app");
+    await put(cwd, "packages/app/jevcheck.config.json", JSON.stringify({
+      include: ["src/**/*.ts"],
+      rules: [{ id: "local", question: "Is code invalid?", wholeFile: true }],
+    }));
+    await put(cwd, "packages/app/src/a.ts", "base\\n");
+    await put(cwd, "elsewhere.ts", "base\\n");
+    await commit(cwd, "base");
+    const base = await git(cwd, "rev-parse", "HEAD");
+
+    await put(cwd, "packages/app/src/a.ts", "staged nested\\n");
+    await put(cwd, "elsewhere.ts", "changed elsewhere\\n");
+    await git(cwd, "add", "-A");
+
+    expect(await stagedFiles(nested)).toEqual(["src/a.ts"]);
+    expect(await stagedSources(nested)).toEqual([{ path: "src/a.ts", source: "staged nested\\n" }]);
+    expect(await changedFiles(undefined, nested)).toEqual(["src/a.ts"]);
+    const staged = await checkoutGitSnapshot("index", nested);
+    try {
+      const config = await loadConfig(join(staged.cwd, "jevcheck.config.json"));
+      const selected = filterFiles(await stagedFiles(nested), config.include!, []);
+      expect(selected).toEqual(["src/a.ts"]);
+      expect(await readFile(join(staged.cwd, selected[0]!), "utf8")).toBe("staged nested\\n");
+    } finally {
+      await staged.dispose();
+    }
+
+    await commit(cwd, "nested change");
+    expect(await changedFiles(base, nested)).toEqual(["src/a.ts"]);
+    const head = await checkoutGitSnapshot("head", nested);
+    try {
+      expect(await readFile(join(head.cwd, "src/a.ts"), "utf8")).toBe("staged nested\\n");
+      expect((await loadConfig(join(head.cwd, "jevcheck.config.json"))).rules[0]?.id).toBe("local");
+    } finally {
+      await head.dispose();
+      await rm(cwd, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects trimmed absolute ADR sources and escaping source/fixture patterns", () => {
+    const rule: JevCheckRule = { id: "path", question: "Is this unsafe?" };
+    const base: JevCheckConfig = { rules: [rule] };
+    expect(() => assertSnapshotPaths({ ...base, rules: [{ ...rule, source: " /tmp/live-policy.md" }] }))
+      .toThrow("Git snapshots require repository-relative policy paths");
+    expect(() => assertSnapshotPaths({ ...base, include: ["../live/**/*.ts"] }))
+      .toThrow("Git snapshots require repository-relative policy paths");
+    expect(() => assertSnapshotPaths({
+      ...base,
+      rules: [{ ...rule, fixtures: { valid: ["../fixtures/*.ts"] } }],
+    })).toThrow("Git snapshots require repository-relative policy paths");
+    expect(() => assertSnapshotPaths({
+      ...base,
+      rules: [{ ...rule, fixtures: { confirmation: { invalid: ["../confirmation/*.ts"] } } }],
+    })).toThrow("Git snapshots require repository-relative policy paths");
+    expect(() => assertSnapshotPaths({
+      ...base,
+      rules: [{ ...rule, source: "docs/accepted.md" }],
+    })).not.toThrow();
+  });
+
+  it.skipIf(process.platform === "win32")("rejects symlink traversal through intermediate symlinks", async () => {
+    const cwd = await repo();
+    try {
+      await symlink(".", join(cwd, "alias"));
+      // The lexical path remains under checkout, but resolving alias then
+      // '..' points to checkout's parent, outside the immutable snapshot.
+      await symlink("alias/../outside.json", join(cwd, "jevcheck.config.json"));
+      await git(cwd, "add", "-A");
+      await expect(checkoutGitSnapshot("index", cwd)).rejects.toThrow(/symlink/);
+    } finally {
+      await rm(cwd, { recursive: true, force: true });
+    }
+  });
+
+  it.skipIf(process.platform === "win32")("allows links to tracked files inside the snapshot", async () => {
+    const cwd = await repo();
+    try {
+      await put(cwd, "policy.json", "{\\"rules\\":[]}\\n");
+      await symlink("policy.json", join(cwd, "jevcheck.config.json"));
+      await git(cwd, "add", "-A");
+      const snapshot = await checkoutGitSnapshot("index", cwd);
+      try {
+        expect(await readFile(join(snapshot.cwd, "jevcheck.config.json"), "utf8")).toBe("{\\"rules\\":[]}\\n");
+      } finally {
+        await snapshot.dispose();
+      }
+    } finally {
+      await rm(cwd, { recursive: true, force: true });
+    }
+  });
+
 });
