@@ -42,55 +42,281 @@ function nodeDependencies(source: string): string[] {
   return names;
 }
 
-// Static declarations only. PackageVersion sets a centrally managed version but
-// does not itself add a project dependency; GlobalPackageReference does.
+// Non-resolving XML reader for declarative MSBuild package references.
+// It validates tag nesting and does not expand DTDs or external entities.
+function xmlUnescape(text: string): string {
+  let result = "";
+  let cursor = 0;
+  while (cursor < text.length) {
+    const amp = text.indexOf("&", cursor);
+    if (amp === -1) return result + text.slice(cursor);
+    result += text.slice(cursor, amp);
+    const end = text.indexOf(";", amp + 1);
+    if (end === -1) throw new Error("unclosed XML entity");
+    const name = text.slice(amp + 1, end);
+    const entities: Record<string, string> = {
+      amp: "&", lt: "<", gt: ">", quot: '"', apos: "'",
+    };
+    if (Object.hasOwn(entities, name)) {
+      result += entities[name]!;
+    } else if (/^#(?:x[0-9a-fA-F]+|[0-9]+)$/.test(name)) {
+      const code = name[1] === "x"
+        ? Number.parseInt(name.slice(2), 16)
+        : Number.parseInt(name.slice(1), 10);
+      if (code > 0x10ffff || (code >= 0xd800 && code <= 0xdfff) ||
+        (code < 32 && code !== 9 && code !== 10 && code !== 13)) {
+        throw new Error("invalid XML character reference");
+      }
+      result += String.fromCodePoint(code);
+    } else {
+      throw new Error("unsupported XML entity: &" + name + ";");
+    }
+    cursor = end + 1;
+  }
+  return result;
+}
+
 function dotnetDependencies(source: string): string[] {
-  if (/<!DOCTYPE\b/i.test(source)) throw new Error("DOCTYPE is not supported");
-  const withoutComments = source.replace(/<!--[\s\S]*?-->/g, "");
-  if (withoutComments.includes("<!--")) throw new Error("unclosed XML comment");
-  if (!/<Project(?:\s|>)/.test(withoutComments) || !/<\/Project\s*>/.test(withoutComments)) {
-    throw new Error("expected a closed Project element");
-  }
   const names: string[] = [];
-  const tags = /<(PackageReference|GlobalPackageReference)\b([^<>]*)>/g;
-  for (const match of withoutComments.matchAll(tags)) {
-    const attributes = match[2]!;
-    const include = /(?:^|\s)Include\s*=\s*(["'])(.*?)\1/s.exec(attributes);
-    if (include && include[2]) names.push(include[2]);
+  const stack: string[] = [];
+  let sawRoot = false;
+  let cursor = 0;
+
+  while (cursor < source.length) {
+    if (source[cursor] !== "<") {
+      const end = source.indexOf("<", cursor);
+      const text = source.slice(cursor, end === -1 ? undefined : end);
+      if (!stack.length && text.trim()) throw new Error("XML text outside Project element");
+      xmlUnescape(text);
+      cursor = end === -1 ? source.length : end;
+      continue;
+    }
+    if (source.startsWith("<!--", cursor)) {
+      const end = source.indexOf("-->", cursor + 4);
+      if (end === -1 || source.slice(cursor + 4, end).includes("--")) {
+        throw new Error("malformed XML comment");
+      }
+      cursor = end + 3;
+      continue;
+    }
+    if (source.startsWith("<![CDATA[", cursor)) {
+      if (!stack.length) throw new Error("CDATA outside Project element");
+      const end = source.indexOf("]]>", cursor + 9);
+      if (end === -1) throw new Error("unclosed XML CDATA section");
+      cursor = end + 3;
+      continue;
+    }
+    if (source.startsWith("<?", cursor)) {
+      const end = source.indexOf("?>", cursor + 2);
+      if (end === -1) throw new Error("unclosed XML processing instruction");
+      cursor = end + 2;
+      continue;
+    }
+    if (source.startsWith("<!", cursor)) {
+      throw new Error("DTD and external entities are not supported");
+    }
+    let end = cursor + 1;
+    let quote: string | undefined;
+    for (; end < source.length; end += 1) {
+      const ch = source[end]!;
+      if (quote) {
+        if (ch === quote) quote = undefined;
+      } else if (ch === '"' || ch === "'") {
+        quote = ch;
+      } else if (ch === "<") {
+        throw new Error("nested < within XML tag");
+      } else if (ch === ">") {
+        break;
+      }
+    }
+    if (end >= source.length || quote) throw new Error("unclosed XML tag");
+    const tag = source.slice(cursor + 1, end).trim();
+    cursor = end + 1;
+
+    if (tag.startsWith("/")) {
+      const close = /^\/([A-Za-z_:][\w.:-]*)\s*$/.exec(tag);
+      if (!close || stack.pop() !== close[1]) throw new Error("mismatched XML end tag: " + tag);
+      continue;
+    }
+    const selfClosing = tag.endsWith("/");
+    const bare = selfClosing ? tag.slice(0, -1).trimEnd() : tag;
+    const opening = /^([A-Za-z_:][\w.:-]*)([\s\S]*)$/.exec(bare);
+    if (!opening) throw new Error("invalid XML opening tag");
+    const name = opening[1]!;
+    let remaining = opening[2]!;
+    const attributes = new Map<string, string>();
+    while (remaining) {
+      const attr = /^\s+([A-Za-z_:][\w.:-]*)\s*=\s*(["'])([\s\S]*?)\2/.exec(remaining);
+      if (!attr || attr[3]!.includes("<") || attributes.has(attr[1]!)) {
+        throw new Error("invalid or duplicate XML attribute on " + name);
+      }
+      attributes.set(attr[1]!, xmlUnescape(attr[3]!));
+      remaining = remaining.slice(attr[0].length);
+    }
+    if (!sawRoot) {
+      if (name !== "Project") throw new Error("XML root must be Project");
+      sawRoot = true;
+    } else if (stack.length === 0) {
+      throw new Error("multiple XML root elements");
+    }
+    if ((name === "PackageReference" || name === "GlobalPackageReference") &&
+      attributes.has("Include")) {
+      const dependency = attributes.get("Include")!;
+      if (dependency && !/[$%]\(/.test(dependency)) names.push(dependency);
+    }
+    if (!selfClosing) stack.push(name);
   }
+  if (!sawRoot || stack.length) throw new Error("unclosed or missing Project element");
   return names;
+}
+
+// Shared Go tokenization handles comments and decoded quoted module paths.
+function goTokens(line: string): string[] {
+  const tokens: string[] = [];
+  let cursor = 0;
+  while (cursor < line.length) {
+    if (/\s/.test(line[cursor]!)) {
+      cursor += 1;
+      continue;
+    }
+    if (line.startsWith("//", cursor)) break;
+    if (line.startsWith("=>", cursor)) {
+      tokens.push("=>");
+      cursor += 2;
+      continue;
+    }
+    const ch = line[cursor]!;
+    if (ch === "(" || ch === ")") {
+      tokens.push(ch);
+      cursor += 1;
+      continue;
+    }
+    if (ch === '"' || ch.charCodeAt(0) === 96) {
+      const raw = ch.charCodeAt(0) === 96;
+      cursor += 1;
+      let value = "";
+      let closed = false;
+      while (cursor < line.length) {
+        const next = line[cursor++]!;
+        if (next === ch) {
+          closed = true;
+          break;
+        }
+        if (next !== "\\" || raw) {
+          value += next;
+          continue;
+        }
+        if (cursor >= line.length) throw new Error("unterminated Go escape");
+        const escape = line[cursor++]!;
+        const simple: Record<string, string> = {
+          a: "\u0007", b: "\b", f: "\f", n: "\n", r: "\r", t: "\t",
+          v: "\u000b", "\\": "\\", '"': '"',
+        };
+        if (Object.hasOwn(simple, escape)) {
+          value += simple[escape]!;
+        } else if (escape === "x" || escape === "u" || escape === "U") {
+          const size = escape === "x" ? 2 : escape === "u" ? 4 : 8;
+          const digits = line.slice(cursor, cursor + size);
+          if (digits.length !== size || !/^[0-9a-fA-F]+$/.test(digits)) {
+            throw new Error("invalid Go hex escape");
+          }
+          const point = Number.parseInt(digits, 16);
+          if (point > 0x10ffff || (point >= 0xd800 && point <= 0xdfff)) {
+            throw new Error("invalid Go Unicode escape");
+          }
+          value += String.fromCodePoint(point);
+          cursor += size;
+        } else {
+          throw new Error("unsupported Go string escape: " + escape);
+        }
+      }
+      if (!closed) throw new Error("unclosed Go quoted string");
+      if (cursor < line.length && !/\s/.test(line[cursor]!) &&
+        !line.startsWith("//", cursor) && line[cursor] !== ")") {
+        throw new Error("unexpected text after Go quoted string");
+      }
+      tokens.push(value);
+      continue;
+    }
+    const start = cursor;
+    while (cursor < line.length && !/\s/.test(line[cursor]!) &&
+      !line.startsWith("//", cursor) && !line.startsWith("=>", cursor) &&
+      line[cursor] !== "(" && line[cursor] !== ")") cursor += 1;
+    if (cursor === start) throw new Error("invalid Go token");
+    tokens.push(line.slice(start, cursor));
+  }
+  return tokens;
 }
 
 function goDependencies(source: string): string[] {
   const names: string[] = [];
-  let inRequire = false;
-  let hasModule = false;
-  for (const original of source.split(/\r?\n/)) {
-    const line = original.replace(/\/\/.*$/, "").trim();
-    if (!line) continue;
-    if (/^module\s+\S+/.test(line)) hasModule = true;
-    if (inRequire) {
-      if (line === ")") {
-        inRequire = false;
+  const blocks = new Set(["require", "replace", "exclude", "retract", "godebug", "tool"]);
+  let activeBlock: string | undefined;
+  let sawModule = false;
+  for (const [index, original] of source.split(/\r?\n/).entries()) {
+    try {
+      const tokens = goTokens(original);
+      if (!tokens.length) continue;
+      if (activeBlock && tokens.length === 1 && tokens[0] === ")") {
+        activeBlock = undefined;
         continue;
       }
-      const entry = /^(\S+)\s+\S+$/.exec(line);
-      if (!entry) throw new Error("malformed require entry: " + line);
-      names.push(entry[1]!);
-      continue;
-    }
-    if (/^require\s*\($/.test(line)) {
-      inRequire = true;
-      continue;
-    }
-    if (/^require\b/.test(line)) {
-      const entry = /^require\s+(\S+)\s+\S+$/.exec(line);
-      if (!entry) throw new Error("malformed require directive: " + line);
-      names.push(entry[1]!);
+      if (tokens.length === 2 && tokens[1] === "(" && !activeBlock) {
+        if (!blocks.has(tokens[0]!)) throw new Error("unsupported Go directive block: " + tokens[0]);
+        activeBlock = tokens[0]!;
+        continue;
+      }
+      const directive = activeBlock ?? tokens[0]!;
+      const args = activeBlock ? tokens : tokens.slice(1);
+      if (args.includes("(") || args.includes(")") || (!activeBlock && tokens[0] === ")")) {
+        throw new Error("invalid Go directive parentheses");
+      }
+
+      switch (directive) {
+        case "module":
+          if (activeBlock || sawModule || args.length !== 1) throw new Error("invalid module directive");
+          sawModule = true;
+          break;
+        case "go":
+        case "toolchain":
+        case "tool":
+          if (args.length !== 1) throw new Error("invalid " + directive + " directive");
+          break;
+        case "require":
+        case "exclude":
+          if (args.length !== 2) throw new Error("invalid " + directive + " entry");
+          if (directive === "require") names.push(args[0]!);
+          break;
+        case "replace": {
+          const arrow = args.indexOf("=>");
+          if (arrow < 1 || arrow > 2 || args.lastIndexOf("=>") !== arrow ||
+            args.length - arrow < 2 || args.length - arrow > 3) {
+            throw new Error("invalid replace entry");
+          }
+          break;
+        }
+        case "retract": {
+          const value = args.join(" ");
+          if (!/^\S+$/.test(value) && !/^\[[^\s,]+,\s*[^\s,]+\]$/.test(value)) {
+            throw new Error("invalid retract entry");
+          }
+          break;
+        }
+        case "godebug":
+          if (args.length !== 1 || !/^[^=\s]+=[^\s]+$/.test(args[0]!)) {
+            throw new Error("invalid godebug directive");
+          }
+          break;
+        default:
+          throw new Error("unsupported Go directive: " + directive);
+      }
+    } catch (error) {
+      throw new Error("line " + (index + 1) + ": " +
+        (error instanceof Error ? error.message : String(error)));
     }
   }
-  if (inRequire) throw new Error("unclosed require block");
-  if (!hasModule) throw new Error("missing module directive");
+  if (activeBlock) throw new Error("unclosed " + activeBlock + " block");
+  if (!sawModule) throw new Error("missing module directive");
   return names;
 }
 
