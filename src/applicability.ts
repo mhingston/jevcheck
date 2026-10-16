@@ -145,7 +145,7 @@ function dotnetDependencies(source: string): string[] {
     const name = opening[1]!;
     let remaining = opening[2]!;
     const attributes = new Map<string, string>();
-    while (remaining) {
+    while (remaining.trim()) {
       const attr = /^\s+([A-Za-z_:][\w.:-]*)\s*=\s*(["'])([\s\S]*?)\2/.exec(remaining);
       if (!attr || attr[3]!.includes("<") || attributes.has(attr[1]!)) {
         throw new Error("invalid or duplicate XML attribute on " + name);
