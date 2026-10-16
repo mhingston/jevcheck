@@ -151,7 +151,10 @@ export function astCandidates(
         level: error instanceof NativeAstParserError ? "error" : "warning",
         path,
         ruleId,
-        message: "AST language resolution failed: " + (error instanceof Error ? error.message : String(error)),
+        message:
+          "AST language resolution failed for language '" +
+          (config.language ?? inferredAstLanguage(path) ?? "unknown") + "': " +
+          (error instanceof Error ? error.message : String(error)),
       }],
     };
   }
