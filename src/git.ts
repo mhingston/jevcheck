@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { access, mkdir, mkdtemp, readlink, readdir, rm } from "node:fs/promises";
+import { access, mkdir, mkdtemp, readlink, readdir, realpath, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { promisify } from "node:util";
@@ -88,7 +88,14 @@ export async function checkoutGitSnapshot(
   cwd = process.cwd(),
 ): Promise<GitEvaluationSnapshot> {
   const repositoryRoot = (await gitOutput(["rev-parse", "--show-toplevel"], cwd)).trim();
-  const relativeCwd = relative(repositoryRoot, resolve(cwd));
+  // Git may return /private/var on macOS for Node's /var, or a short
+  // 8.3 directory name on Windows. Canonicalize BOTH paths before taking
+  // their relative difference, or join(checkout, relativeCwd) could escape
+  // the snapshot and read the user's live working tree.
+  const relativeCwd = relative(await realpath(repositoryRoot), await realpath(cwd));
+  if (isAbsolute(relativeCwd) || relativeCwd === ".." || relativeCwd.startsWith(".." + sep)) {
+    throw new Error("Git snapshot working directory is outside the repository");
+  }
   const temporary = await mkdtemp(join(tmpdir(), "jevcheck-snapshot-"));
   const checkout = join(temporary, "checkout");
   try {
