@@ -7,13 +7,7 @@
       "id": "reliability/no-success-after-publish-failure",
       "why": "A successful acceptance response requires successful publication or recovery.",
       "source": "examples/csharp-queue/README.md",
-      "status": "shadow",
-      "severity": "error",
-      "files": [
-        "examples/csharp-queue/**/*.cs"
-      ],
       "ast": {
-        "language": "csharp",
         "kind": "method_declaration",
         "contextBefore": 0,
         "contextAfter": 0
@@ -31,7 +25,7 @@
           "examples/csharp-queue/fixtures/invalid/**/*.cs"
         ]
       },
-      "prefilter": "queue\\.PublishAsync\\("
+      "contains": "queue.PublishAsync("
     }
   ]
 }

@@ -53,7 +53,33 @@ See [jev-cli provider documentation](https://github.com/mhingston/jev-cli#provid
 
 ## Configuration example
 
-A more complete rule can include provenance, AST context, fixtures, and mutants:
+Start with a bounded, non-blocking rule in `jevcheck.config.json`:
+
+~~~json
+{
+  "include": ["src/**/*.ts"],
+  "rules": [
+    {
+      "id": "reliability/queue-ack",
+      "ast": "function_declaration",
+      "contains": "queue.publish(",
+      "question": "Can this handler return success if queue publication fails without recovery?"
+    }
+  ]
+}
+~~~
+
+- `include` limits scanned files; per-rule `files` narrows the scope only when needed.
+- `ast: "function_declaration"` is equivalent to `ast: { "kind": "function_declaration" }`. A string means an AST **kind**, not an AST pattern; use the object form for `pattern`, `rule`, `language` and context options.
+- `contains` is literal and case-sensitive; punctuation such as `.`, `(` and `/` need no escaping. Use `prefilter` for a **regex** instead; combining both is an error.
+- Default `status` is `shadow`, default `severity` is `error` and default `threshold` is `0.8`. Shadow findings do **not** block CI.
+- Run `jevcheck inspect --rule reliability/queue-ack src/handler.ts` to verify candidates before calling a model. Zero matches means no judgement: revisit file scope, filters and context.
+
+JSON config shorthands are normalised to canonical AST selectors and regex prefilters **before** fingerprinting and evidence persistence. The TypeScript `createJevCheck` API continues to accept canonical AST objects and regex prefilters.
+
+### Advanced rule configuration
+
+A qualified rule can add provenance, AST context, fixtures, mutants and other evidence controls:
 
 ~~~json
 {

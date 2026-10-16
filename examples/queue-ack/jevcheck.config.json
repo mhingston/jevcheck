@@ -7,15 +7,7 @@
       "id": "reliability/no-success-after-publish-failure",
       "why": "An accepted response must not be returned if publishing work failed without a successful recovery.",
       "source": "examples/queue-ack/INVARIANT.md",
-      "status": "shadow",
-      "severity": "error",
-      "files": [
-        "examples/queue-ack/**/*.ts"
-      ],
-      "ast": {
-        "kind": "function_declaration"
-      },
-      "prefilter": "queue\\.publish\\(",
+      "ast": "function_declaration",
       "question": "Can this handler return a successful acceptance response on a path where queue.publish failed and no successful recovery completed?",
       "criteria": {
         "true": "An exception or rejected publish can reach a success/accepted response after only logging, swallowing the failure, or otherwise failing to recover.",
@@ -28,7 +20,8 @@
         "invalid": [
           "examples/queue-ack/fixtures/invalid/**/*.ts"
         ]
-      }
+      },
+      "contains": "queue.publish("
     }
   ]
 }

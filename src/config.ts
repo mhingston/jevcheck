@@ -20,6 +20,11 @@ function optionalNonEmptyString(value: unknown, field: string): string | undefin
   return value;
 }
 
+// Encode a literal string for the existing deterministic regex filter.
+function literalPattern(value: string): string {
+  return value.replace(/[.*+?^$()|[\]{}\\/]/g, "\\$&");
+}
+
 function validateNonNegativeInteger(value: unknown, field: string): void {
   if (value !== undefined && (!Number.isInteger(value) || (value as number) < 0)) {
     throw new Error(field + " must be a non-negative integer");
@@ -160,6 +165,21 @@ function validateRule(value: unknown, index: number): JevCheckRule {
   if (typeof rule.question !== "string" || !rule.question.trim()) {
     throw new Error("rules[" + index + "].question must be non-empty");
   }
+  // Normalize JSON shorthands before candidate selection and evidence fingerprints.
+  const normalizedRule = { ...rule };
+  if (rule.contains !== undefined) {
+    const literal = optionalNonEmptyString(rule.contains, rule.id + ".contains")!;
+    if (rule.prefilter !== undefined) {
+      throw new Error(rule.id + " cannot use contains and prefilter together");
+    }
+    normalizedRule.prefilter = literalPattern(literal);
+  }
+  delete normalizedRule.contains;
+  if (typeof rule.ast === "string") {
+    const kind = optionalNonEmptyString(rule.ast, rule.id + ".ast")!;
+    normalizedRule.ast = { kind };
+  }
+
   if (rule.severity !== undefined && rule.severity !== "error" && rule.severity !== "warning") {
     throw new Error(rule.id + ".severity must be error or warning");
   }
@@ -187,7 +207,7 @@ function validateRule(value: unknown, index: number): JevCheckRule {
   optionalNonEmptyString(rule.source, rule.id + ".source");
 
   for (const field of ["prefilter", "unless"] as const) {
-    const raw = rule[field];
+    const raw = normalizedRule[field];
     if (raw !== undefined) {
       if (typeof raw !== "string" || !raw.trim()) throw new Error(rule.id + "." + field + " must be non-empty");
       try {
@@ -198,7 +218,7 @@ function validateRule(value: unknown, index: number): JevCheckRule {
     }
   }
 
-  validateAst(rule.ast, rule.id);
+  validateAst(normalizedRule.ast, rule.id);
   if (rule.projectWhen !== undefined) {
     validateProjectCondition(rule.projectWhen, rule.id + ".projectWhen");
   }
@@ -276,7 +296,7 @@ function validateRule(value: unknown, index: number): JevCheckRule {
     }
   }
 
-  return rule as unknown as JevCheckRule;
+  return normalizedRule as unknown as JevCheckRule;
 }
 
 export function parseConfig(value: unknown): JevCheckConfig {
