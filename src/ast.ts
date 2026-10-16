@@ -142,14 +142,13 @@ export function astCandidates(
   try {
     resolved = resolveLanguage(path, config);
   } catch (error) {
-    // A missing or broken native grammar is an installation failure, not a
-    // source-level no-match. Keep the actionable installation error fatal.
-    if (error instanceof NativeAstParserError) throw error;
+    // A missing native grammar is a hard evaluation error, never a no-match.
+    // Return it as a diagnostic so the CLI can still report other files.
     return {
       candidates,
       diagnostics: [{
         code: "incomplete-evaluation",
-        level: "warning",
+        level: error instanceof NativeAstParserError ? "error" : "warning",
         path,
         ruleId,
         message: "AST language resolution failed: " + (error instanceof Error ? error.message : String(error)),
@@ -247,10 +246,9 @@ export function astCandidates(
       });
     }
   } catch (error) {
-    if (error instanceof NativeAstParserError) throw error;
     diagnostics.push({
       code: "incomplete-evaluation",
-      level: "warning",
+      level: error instanceof NativeAstParserError ? "error" : "warning",
       path,
       ruleId,
       message:
