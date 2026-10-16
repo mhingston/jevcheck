@@ -37,7 +37,25 @@ To install it in your own repository:
 npm install --save-dev @mhingston5/jevcheck
 ~~~
 
-Then create a repository-local `jevcheck.config.json` based on a concern your team has actually reviewed. [Rule-authoring guidance](docs/concepts.md#design-the-invariant-before-writing-config) explains how to decide if that concern belongs here.
+Create a repository-local `jevcheck.config.json` based on a concern your team has actually reviewed:
+
+~~~json
+{
+  "include": ["src/**/*.ts"],
+  "rules": [
+    {
+      "id": "reliability/queue-ack",
+      "ast": "function_declaration",
+      "contains": "queue.publish(",
+      "question": "Can this handler return success when queue publication fails without recovery?"
+    }
+  ]
+}
+~~~
+
+`ast` as a string means an AST **node kind**, and `contains` matches literal text without regex escaping. Rules default to advisory `shadow` mode. Run `npx jevcheck inspect --rule reliability/queue-ack src/handler.ts` to preview candidates and the exact model request without an API key. For AST patterns, regex filtering and evidence controls see the [configuration reference](docs/reference.md#configuration-example).
+
+[Rule-authoring guidance](docs/concepts.md#design-the-invariant-before-writing-config) explains how to decide if that concern belongs here. [Rule-authoring guidance](docs/concepts.md#design-the-invariant-before-writing-config) explains how to decide if that concern belongs here.
 
 ## When should I use it?
 

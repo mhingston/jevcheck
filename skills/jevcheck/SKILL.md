@@ -43,7 +43,7 @@ For a project-local installation use `npm install --save-dev @mhingston5/jevchec
 
 1. **Start with evidence:** record an actual bug, review decision, ADR or explicit contract and what correct behaviour means. Don't start from a generic AI instruction.
 2. **Write an atomic invariant:** YES means *violation present*. Document accepted and violating behaviour in `criteria.true` / `criteria.false`, including exceptions and abstain-by-scope cases.
-3. **Identify applicability deterministically:** choose `files` / `exclude`; optionally `projectWhen` at repo scope; prefer `ast`, `prefilter` and `unless` to find a small code focus. Verify enough context is available and no unrelated code is judged.
+3. **Identify applicability deterministically:** start with top-level `include`, add per-rule `files` / `exclude` only when needed, and optionally use `projectWhen` at repo scope. Prefer `ast` plus literal `contains` to find a small focus; use regex `prefilter` and `unless` when necessary. Verify enough context is available and no unrelated code is judged.
 4. **Check exact coverage:** do not duplicate an equivalent deterministic rule or test with another model decision. Use `coveredBy` only for *reviewed* exact enforcement.
 5. **Set `status: "shadow"`:** never start a new or unvalidated rule as blocking. Add `why` and `source` provenance when possible.
 6. **Inspect the request:** run `jevcheck inspect --rule <id> <path>`. Inspect the focus, surrounding context, question, semantic identity and model-visible source. Resolve "no candidates" or oversized/skipped focuses before model calls.
@@ -53,9 +53,10 @@ Use a bounded question, not an instruction such as "review this code for securit
 
 ### Candidate selection and scope
 
-- Supported `ast` selectors: exactly one of `pattern`, `kind` or `rule` (ast-grep rule object). Automatic AST language mapping covers JavaScript, TypeScript, TSX, HTML, CSS, C# (`.cs`), Python (`.py`), Go (`.go`), Java (`.java`) and Rust (`.rs`); `ast.language` can override with `javascript`, `typescript`, `tsx`, `html`, `css`, `csharp`, `python`, `go`, `java` or `rust`. The last five use native `@ast-grep/lang-*` parsers; enable approved install scripts and validate with provider-free `inspect`.
+- JSON syntax: `"ast": "function_declaration"` is shorthand for `"ast": { "kind": "function_declaration" }` (node kind, not AST pattern), and `"contains": "queue.publish("` is a case-sensitive **literal** filter. `contains` and regex `prefilter` cannot be combined. The parser normalises them before execution and fingerprints; the TypeScript API uses canonical rule objects.
+- Supported `ast` object selectors: exactly one of `pattern`, `kind` or `rule` (ast-grep rule object). Automatic AST language mapping covers JavaScript, TypeScript, TSX, HTML, CSS, C# (`.cs`), Python (`.py`), Go (`.go`), Java (`.java`) and Rust (`.rs`); `ast.language` can override with `javascript`, `typescript`, `tsx`, `html`, `css`, `csharp`, `python`, `go`, `java` or `rust`. The last five use native `@ast-grep/lang-*` parsers; enable approved install scripts and validate with provider-free `inspect`.
 - An AST match is the **focus**, not proof of a violation. `ast.context.ancestor` and neighbouring lines are **evidence only**; they do not expand what YES is allowed to refer to.
-- Use `prefilter` and `unless` to exclude irrelevant candidate text cheaply; use `wholeFile` only for genuinely global/absence questions with safely bounded size. `ast` and `wholeFile` cannot be combined.
+- Prefer literal `contains`; use regex `prefilter` and `unless` when needed. Use `wholeFile` only for genuinely global/absence questions with safely bounded size. `ast` and `wholeFile` cannot be combined.
 - `projectWhen` can check `packageJsonHasDep`, `fileExists`, `globMatches` and compositions `anyOf` / `allOf` / `not`. Inapplicable rules skip ordinary checks; measurement can still evaluate them.
 - Large focuses are skipped rather than silently truncated. Do not inflate `chunkChars` until a broad or irrelevant request fits.
 
