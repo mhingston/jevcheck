@@ -196,6 +196,9 @@ export function buildCandidates(
 
   if (rule.wholeFile) {
     if (prefilter && !prefilter.test(source)) return { candidates: [], diagnostics };
+    // The whole-file exclusion is deterministic even when the source exceeds
+    // the semantic bound: excluded code was never an applicable candidate.
+    if (rule.unless && compilePattern(rule.unless).test(source)) return { candidates: [], diagnostics };
     if (source.length > options.chunkChars) {
       diagnostics.push({
         code: "incomplete-evaluation",
@@ -216,7 +219,6 @@ export function buildCandidates(
       focusStartLine: 1,
       focusEndLine: lineCount,
     };
-    if (rule.unless && compilePattern(rule.unless).test(candidate.text)) return { candidates: [], diagnostics };
     return { candidates: [candidate], diagnostics };
   }
 
