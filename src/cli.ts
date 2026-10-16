@@ -67,6 +67,7 @@ interface CliOptions {
   sampleSize: number;
   sampleSizeSet: boolean;
   inspectRule?: string;
+  previewSkipped: boolean;
   patterns: string[];
 }
 
@@ -100,7 +101,8 @@ function usage(): string {
     "  --confirm             With test, evaluate and record untouched confirmation fixtures",
     "  --robustness          With test, probe label-preserving adversarial context",
     "  --sample-size <n>     With recall, files sampled per mutant (default: 12)",
-    "  --rule <id>            With inspect, preview only one configured rule",
+    "  --rule <id>           With inspect, select a configured rule",
+    "  --preview-skipped      With inspect, show hypothetical candidates for skipped rules",
     "  -h, --help            Show help",
     "",
     "record captures semantic decisions to replayFile (default: .jevcheck/replay.json).",
@@ -110,7 +112,7 @@ function usage(): string {
     "robustness probes fixture judgments with nearby comments that should not change the label.",
     "recall mutates sampled real files in memory; repository files are never modified.",
     "coverage record fingerprints declared deterministic enforcement files into evidenceFile.",
-    "inspect is provider-free and prints the exact state/question request Jev would receive.",
+    "inspect is provider-free and shows runtime policy before previewing requests; it never judges violations.",
     "",
     "Owned error findings and incomplete owned/error evaluations fail check/replay. Shadow findings are advisory.",
   ].join("\n");
@@ -156,6 +158,7 @@ function parseArgs(argv: string[]): CliOptions {
     testRobustness: false,
     sampleSize: 12,
     sampleSizeSet: false,
+    previewSkipped: false,
     patterns: [],
   };
 
@@ -217,6 +220,9 @@ function parseArgs(argv: string[]): CliOptions {
         options.inspectRule = requireValue(args, i, arg);
         i += 1;
         break;
+      case "--preview-skipped":
+        options.previewSkipped = true;
+        break;
       case "--sample-size": {
         const value = Number(requireValue(args, i, arg));
         if (!Number.isSafeInteger(value) || value < 1) {
@@ -274,6 +280,9 @@ function parseArgs(argv: string[]): CliOptions {
   }
   if (options.inspectRule && options.command !== "inspect") {
     throw new Error("--rule is only valid with inspect");
+  }
+  if (options.previewSkipped && options.command !== "inspect") {
+    throw new Error("--preview-skipped is only valid with inspect");
   }
   if (options.command === "recall" && options.staged) {
     throw new Error("recall operates on working-tree files; --staged is not supported");
@@ -379,10 +388,20 @@ async function run(args: CliOptions, gitCwd: string, snapshotMode: boolean): Pro
         source: await readFile(resolve(path), "utf8"),
       })),
     );
-    const inspected = inspectSources(inputs, selectedRules, {
-      chunkChars: config.chunkChars,
-      overlapLines: config.overlapLines,
-      contextLines: config.contextLines,
+    const hasRuntimePolicy = config.rules.some((rule) =>
+      rule.status === "owned" ||
+      rule.projectWhen !== undefined ||
+      (rule.coveredBy?.length ?? 0) > 0 ||
+      isLocalRuleSource(rule.source));
+    const reports = hasRuntimePolicy
+      ? (await evaluateConfiguredRuleEvidence(config, { modelNamespace })).reports
+      : undefined;
+    const inspected = await inspectSources(inputs, selectedRules, {
+      config,
+      ruleEvidenceReports: reports,
+      projectRoot: process.cwd(),
+      modelNamespace,
+      previewSkipped: args.previewSkipped,
     });
     console.log(
       args.format === "json"

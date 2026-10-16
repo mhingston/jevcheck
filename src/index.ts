@@ -10,6 +10,8 @@ export * from "./coverage.js";
 export * from "./engine.js";
 export * from "./evidence.js";
 export * from "./evidence-store.js";
+export { createRuleExecutionResolver } from "./execution-policy.js";
+export type { RuleExecution, RuleExecutionDecision } from "./execution-policy.js";
 export * from "./graduation.js";
 export * from "./files.js";
 export * from "./format.js";

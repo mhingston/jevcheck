@@ -272,3 +272,23 @@ The npm package includes `skills/jevcheck/SKILL.md` for coding agents working wi
 ## License
 
 MIT
+
+### Inspect runtime policy (provider-free)
+
+`jevcheck inspect` previews whether **enforcement would call a semantic judge** for each selected rule and source file in the current revision. It never makes a provider request or decides whether a violation exists:
+
+~~~sh
+npx jevcheck inspect src/handler.ts --rule reliability/queue-ack
+npx jevcheck inspect src/handler.ts --format json
+npx jevcheck inspect src/handler.ts --preview-skipped
+~~~
+
+The output has one rule/file policy entry with `execution` (`semantic`, `covered`, or `inapplicable`), a human-readable `reason`, selector description, candidate count, and selector diagnostics. JSON exposes these in `rules[]`; `inspections[]` contains bounded requests for candidates actually eligible for semantic judging. `diagnostics[]` contains selector diagnostics from eligible rules only. A rule that matches no candidates is **not** the same as a policy-skipped rule.
+
+- `semantic` means the rule is eligible for a provider judgement **if** its selector finds candidates. It does not mean a violation was found. Project conditions, accepted ADRs and fingerprinted coverage are resolved before selection.
+- `covered` means recorded deterministic coverage is current, so no model request would be made; stale or missing coverage falls back to `semantic`.
+- `inapplicable` means a file is out of the rule's files/exclude scope, a project condition is false, or an opt-in ADR is retired or invalid.
+- `--preview-skipped` runs selectors even for covered/inapplicable rules, marking candidate requests `previewOnly: true` with an explicit warning in stylish output. These **hypothetical** requests are never counted as enforcement requests, and their selector diagnostics do not cause an inspect failure.
+- `--staged` and `--changed --base <ref>` use the same isolated snapshot for policy, source, and recorded evidence as `check`.
+
+The JavaScript `inspectSource` / `inspectSources` APIs return Promises as of v0.8.0. For custom evidence paths, pass `config` and `projectRoot`; or pass the `ruleEvidenceReports` already produced by `evaluateConfiguredRuleEvidence` on the same revision. Do not use a report from an unrelated snapshot.
