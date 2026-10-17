@@ -308,6 +308,12 @@ Missing or failed checks, another run/job/attempt, absent CI metadata, or Git SH
 the checked-out HEAD cannot authorize an owned skip. Failed checks block owned readiness;
 missing/stale evidence takes the semantic fallback under normal owned evidence gates.
 
+Verification is serialized per evidence file: concurrently starting another check or
+re-recording returns an error rather than risking lost results. While the lock directory
+`<evidenceFile>.lock` exists, owned coverage cannot authorize a skip. If a process
+is interrupted, verify that it has stopped before removing the stranded lock manually;
+then rerun the affected check(s). In a CI job, run verification steps sequentially.
+
 **Trust assumptions and limits:**
 
 - Maintainers must confirm each `coveredBy` check enforces the same invariant. A fingerprint
