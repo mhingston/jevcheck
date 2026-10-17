@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { readFile } from "node:fs/promises";
+import { spawnSync } from "node:child_process";
 import { isAbsolute, resolve } from "node:path";
 import { createJevClient, JEV_PROVIDERS, type JevProvider } from "@mhingston5/jev-cli";
 import { isLocalRuleSource } from "./architecture-decision.js";
@@ -26,6 +27,7 @@ import {
   DEFAULT_SOURCE_INCLUDE,
   evaluateConfiguredRuleEvidence,
   persistCoverageEvidence,
+  persistCoverageCheckResult,
   persistDriftEvidence,
   persistMutationEvidence,
   persistRobustnessEvidence,
@@ -47,7 +49,7 @@ import { DEFAULT_REPLAY_FILE, DiskSemanticDecisionStore } from "./replay.js";
 import { assertSnapshotPaths } from "./snapshot-paths.js";
 import type { SourceInput } from "./types.js";
 
-type Command = "check" | "test" | "list" | "inspect" | "baseline" | "record" | "replay" | "recall" | "rules-audit" | "coverage-record";
+type Command = "check" | "test" | "list" | "inspect" | "baseline" | "record" | "replay" | "recall" | "rules-audit" | "coverage-record" | "coverage-verify";
 type OutputFormat = "stylish" | "json" | "sarif";
 
 interface CliOptions {
@@ -68,6 +70,9 @@ interface CliOptions {
   sampleSizeSet: boolean;
   inspectRule?: string;
   previewSkipped: boolean;
+  attestReviewed: boolean;
+  coverageCheck?: string;
+  verificationCommand?: string[];
   patterns: string[];
 }
 
@@ -85,7 +90,8 @@ function usage(): string {
     "  jevcheck replay [patterns...] [options]",
     "  jevcheck recall [patterns...] [options]",
     "  jevcheck rules audit [options]",
-    "  jevcheck coverage record [options]",
+    "  jevcheck coverage record [--attest-reviewed] [options]",
+    "  jevcheck coverage verify --check <id> -- <command> [args...]",
     "",
     "Options:",
     "  --config <path>       Config file (default: jevcheck.config.json)",
@@ -103,6 +109,8 @@ function usage(): string {
     "  --sample-size <n>     With recall, files sampled per mutant (default: 12)",
     "  --rule <id>           With inspect, select a configured rule",
     "  --preview-skipped      With inspect, show hypothetical candidates for skipped rules",
+    "  --attest-reviewed      With coverage record, explicitly assert reviewed deterministic coverage",
+    "  --check <id>          With coverage verify, the coveredBy check ID",
     "  -h, --help            Show help",
     "",
     "record captures semantic decisions to replayFile (default: .jevcheck/replay.json).",
@@ -111,7 +119,9 @@ function usage(): string {
     "test --drift, test --confirm, and test --robustness bypass the answer cache.",
     "robustness probes fixture judgments with nearby comments that should not change the label.",
     "recall mutates sampled real files in memory; repository files are never modified.",
-    "coverage record fingerprints declared deterministic enforcement files into evidenceFile.",
+    "coverage record fingerprints files; --attest-reviewed adds a human review declaration, not a CI pass.",
+    "coverage verify executes a named deterministic check in GitHub Actions and records its real exit status.",
+    "Owned semantic skips require reviewed fingerprints and passing checks in the same CI run/checkout.",
     "inspect is provider-free and shows runtime policy before previewing requests; it never judges violations.",
     "",
     "Owned error findings and incomplete owned/error evaluations fail check/replay. Shadow findings are advisory.",
@@ -132,6 +142,9 @@ function parseArgs(argv: string[]): CliOptions {
     args.splice(0, 2);
   } else if (args[0] === "coverage" && args[1] === "record") {
     command = "coverage-record";
+    args.splice(0, 2);
+  } else if (args[0] === "coverage" && args[1] === "verify") {
+    command = "coverage-verify";
     args.splice(0, 2);
   } else if (
     args[0] === "test" ||
@@ -159,6 +172,7 @@ function parseArgs(argv: string[]): CliOptions {
     sampleSize: 12,
     sampleSizeSet: false,
     previewSkipped: false,
+    attestReviewed: false,
     patterns: [],
   };
 
@@ -223,6 +237,18 @@ function parseArgs(argv: string[]): CliOptions {
       case "--preview-skipped":
         options.previewSkipped = true;
         break;
+      case "--attest-reviewed":
+        options.attestReviewed = true;
+        break;
+      case "--check":
+        options.coverageCheck = requireValue(args, i, arg);
+        i += 1;
+        break;
+      case "--":
+        if (options.command !== "coverage-verify") throw new Error("-- is only valid with coverage verify");
+        options.verificationCommand = args.slice(i + 1);
+        i = args.length;
+        break;
       case "--sample-size": {
         const value = Number(requireValue(args, i, arg));
         if (!Number.isSafeInteger(value) || value < 1) {
@@ -253,11 +279,11 @@ function parseArgs(argv: string[]): CliOptions {
     throw new Error("replay is offline; --provider and --model are not valid");
   }
   if (
-    (options.command === "rules-audit" || options.command === "coverage-record") &&
+    (options.command === "rules-audit" || options.command === "coverage-record" || options.command === "coverage-verify") &&
     (options.changed || options.staged || options.base || options.patterns.length > 0)
   ) {
     throw new Error(
-      (options.command === "rules-audit" ? "rules audit" : "coverage record") +
+      (options.command === "rules-audit" ? "rules audit" : options.command === "coverage-record" ? "coverage record" : "coverage verify") +
       " does not accept file patterns, --changed, --staged, or --base",
     );
   }
@@ -283,6 +309,15 @@ function parseArgs(argv: string[]): CliOptions {
   }
   if (options.previewSkipped && options.command !== "inspect") {
     throw new Error("--preview-skipped is only valid with inspect");
+  }
+  if (options.attestReviewed && options.command !== "coverage-record") {
+    throw new Error("--attest-reviewed is only valid with coverage record");
+  }
+  if (options.coverageCheck && options.command !== "coverage-verify") {
+    throw new Error("--check is only valid with coverage verify");
+  }
+  if (options.command === "coverage-verify" && (!options.coverageCheck || !options.verificationCommand?.length)) {
+    throw new Error("coverage verify requires --check <coveredBy-id> -- <command> [args...]");
   }
   if (options.command === "recall" && options.staged) {
     throw new Error("recall operates on working-tree files; --staged is not supported");
@@ -352,12 +387,33 @@ async function run(args: CliOptions, gitCwd: string, snapshotMode: boolean): Pro
     return;
   }
   if (args.command === "coverage-record") {
-    const recorded = await persistCoverageEvidence(evidenceFile, config.rules);
-    const payload = { evidenceFile, coveredRules: recorded };
+    const recorded = await persistCoverageEvidence(evidenceFile, config.rules, process.cwd(), args.attestReviewed);
+    const payload = { evidenceFile, coveredRules: recorded, reviewed: args.attestReviewed };
     console.log(
       args.format === "json"
         ? formatJson(payload)
-        : "Recorded deterministic coverage for " + recorded + " rule(s) to " + evidenceFile,
+        : (args.attestReviewed ? "Reviewed and recorded" : "Recorded (not reviewed)") +
+          " deterministic coverage for " + recorded + " rule(s) to " + evidenceFile,
+    );
+    return;
+  }
+  if (args.command === "coverage-verify") {
+    const checkId = args.coverageCheck!;
+    // Fail first, before launching the check; a retry or interrupted command must
+    // never leave an earlier passing result authoritative for this same CI run.
+    await persistCoverageCheckResult(evidenceFile, config.rules, checkId, "failed");
+    const [executable, ...parameters] = args.verificationCommand!;
+    const result = spawnSync(executable, parameters, { stdio: "inherit", shell: false });
+    if (result.error) throw new Error("coverage check " + checkId + " failed to start: " + result.error.message);
+    if (result.status === 0) {
+      await persistCoverageCheckResult(evidenceFile, config.rules, checkId, "passed");
+    } else {
+      process.exitCode = result.status && result.status > 0 ? result.status : 1;
+    }
+    console.log(
+      args.format === "json"
+        ? formatJson({ checkId, status: result.status === 0 ? "passed" : "failed", evidenceFile })
+        : "Coverage CI check " + checkId + ": " + (result.status === 0 ? "passed" : "failed"),
     );
     return;
   }
