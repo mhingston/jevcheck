@@ -27,10 +27,11 @@ npm ci
 npm run build
 node dist/cli.js inspect examples/queue-ack/src/handler.ts \
   --config examples/queue-ack/jevcheck.config.json \
-  --rule reliability/no-success-after-publish-failure
+  --rule reliability/no-success-after-publish-failure \
+  --verbose
 ~~~
 
-`inspect` requires no provider credentials. It reports whether a rule is eligible for semantic checking, deterministically covered, or inapplicable (with a reason), before showing selected bounded requests. Use `--preview-skipped` to see hypothetical candidates for policy-skipped rules. **Inspection does not assert a violation.** See [inspect policy semantics](docs/reference.md#inspect-runtime-policy-provider-free). To ask a model for a judgement, configure a provider and run the same rule in shadow mode; see the [walkthrough](examples/queue-ack/README.md#3-run-a-semantic-check-optional).
+`inspect` requires no provider credentials. By default it summarises whether a rule is eligible for semantic checking, deterministically covered, or inapplicable (with a reason), plus candidate counts. Add `--verbose` to show full bounded requests and semantic keys, or use `--format json` for structured `data.inspections[]`. Use `--preview-skipped` to see hypothetical candidates for policy-skipped rules. **Inspection does not assert a violation.** See [inspect policy semantics](docs/reference.md#inspect-runtime-policy-provider-free). To ask a model for a judgement, configure a provider and run the same rule in shadow mode; see the [walkthrough](examples/queue-ack/README.md#3-run-a-semantic-check-optional).
 
 To install it in your own repository:
 
@@ -54,9 +55,9 @@ Create a repository-local `jevcheck.config.json` based on a concern your team ha
 }
 ~~~
 
-`ast` as a string means an AST **node kind**, and `contains` matches literal text without regex escaping. Rules default to advisory `shadow` mode. Run `npx jevcheck inspect --rule reliability/queue-ack src/handler.ts` to preview candidates and the exact model request without an API key. For AST patterns, regex filtering and evidence controls see the [configuration reference](docs/reference.md#configuration-example).
+`ast` as a string means an AST **node kind**, and `contains` matches literal text without regex escaping. Rules default to advisory `shadow` mode. Run `npx jevcheck inspect --rule reliability/queue-ack src/handler.ts --verbose` to preview candidates and the exact model request without an API key. For AST patterns, regex filtering and evidence controls see the [configuration reference](docs/reference.md#configuration-example).
 
-[Rule-authoring guidance](docs/concepts.md#design-the-invariant-before-writing-config) explains how to decide if that concern belongs here. [Rule-authoring guidance](docs/concepts.md#design-the-invariant-before-writing-config) explains how to decide if that concern belongs here.
+[Rule-authoring guidance](docs/concepts.md#design-the-invariant-before-writing-config) explains how to decide if that concern belongs here.
 
 ## When should I use it?
 
@@ -118,4 +119,4 @@ MIT licensed.
 
 Default `stylish` output begins with a summary. `check` groups findings by file/rule, `rules audit` shows readiness and actionable blockers, and `inspect` summarises runtime policy without printing requests. Use `inspect --verbose` for exact requests/keys or `rules audit --verbose` for every evidence check. Reviewed coverage and CI-verified coverage are displayed as distinct states.
 
-**Breaking JSON output change:** `--format json` now returns one consistent object with `schemaVersion`, `command`, `outcome`, `summary`, `diagnostics`, and `data` fields for every supported command, including structured errors. Previous raw objects/arrays are now under `data`; there is no separate JSON version flag. For example, run `jevcheck rules audit --format json` to get actionable evidence for agents. See the [CLI output contract](docs/reference.md#human-output-and-json-for-agents).
+**Breaking JSON output change:** `--format json` now returns one consistent object with `schemaVersion`, `command`, `outcome`, `summary`, `diagnostics`, and `data` fields for every supported command, including structured errors. Previous raw objects/arrays are now under `data`; there is no separate JSON version flag. For example, run `jevcheck rules audit --format json` to get actionable evidence for agents. Audit `outcome: "block"` indicates readiness blockers even when the audit command exits 0; an owned-rule failure returns `outcome: "error"`, gate diagnostics and `data.evidenceReports[]`. See the [CLI output contract](docs/reference.md#human-output-and-json-for-agents).
