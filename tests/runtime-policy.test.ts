@@ -420,16 +420,23 @@ describe("reviewed coverage and CI execution evidence", () => {
     githubRun(cwd);
     await persistCoverageEvidence(evidenceFile, [rule], cwd, true);
     let release!: () => void;
+    let acquired!: () => void;
     const gate = new Promise<void>((resolve) => { release = resolve; });
+    const lockReady = new Promise<void>((resolve) => { acquired = resolve; });
     const holding = withCoverageArtifactLock(evidenceFile, async () => {
+      acquired(); // The lock directory now definitely exists.
       await gate;
       return 7;
     });
-    await expect(executeCoverageCheck(
-      evidenceFile, [rule], "tests", [process.execPath, "-e", "process.exit(0)"], cwd,
-    )).rejects.toThrow("coverage verification already in progress");
-    release();
-    expect(await holding).toBe(7);
+    await lockReady;
+    try {
+      await expect(executeCoverageCheck(
+        evidenceFile, [rule], "tests", [process.execPath, "-e", "process.exit(0)"], cwd,
+      )).rejects.toThrow("coverage verification already in progress");
+    } finally {
+      release();
+      expect(await holding).toBe(7);
+    }
     expect(await executeCoverageCheck(
       evidenceFile, [rule], "tests",
       [process.execPath, "-e", "process.stdout.write('output'); process.exit(1)"], cwd, true,
