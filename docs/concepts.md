@@ -317,7 +317,7 @@ Each `ast` selector defines exactly one of:
 }
 ~~~
 
-Language is inferred for JavaScript, TypeScript, TSX, HTML, and CSS. You can override it with `ast.language` when needed.
+Language is inferred for JavaScript, TypeScript, TSX, HTML, CSS, C#, Python, Go, Java and Rust. You can override it with `ast.language` only for compatible source syntax. Default source discovery also includes Ruby, PHP, Vue and Svelte **for text/chunk selection**, not for AST parsing; unsupported AST extensions yield an incomplete evaluation. See the [discovery and parser matrix](reference.md#ast-language-support-and-native-parsers).
 
 The matched AST node remains the exact semantic focus. If the model needs nearby structural context, add the nearest matching ancestor:
 

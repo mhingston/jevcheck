@@ -106,6 +106,8 @@ Provider configuration: export `TYPESAFE_API_KEY` (default provider), or set `OP
 
 C#, Python, Go, Java, and Rust support language-specific AST selection using `ast.language` or automatic `.cs`, `.py`, `.go`, `.java` and `.rs` detection. See the [supported-language reference](docs/reference.md#ast-language-support-and-native-parsers), [multilanguage AST examples](examples/multilanguage-ast/README.md), and the [C# walkthrough](examples/csharp-queue/README.md). The C# walkthrough includes safe/unsafe fixtures, native parser installation requirements, and an offline `inspect` example.
 
+**Source discovery is not AST support.** With no `include` override, jevcheck discovers JS/TS, Python, Go, Rust, Java, C#, HTML (`.html`/`.htm`), CSS, Ruby (`.rb`), PHP (`.php`), Vue (`.vue`) and Svelte (`.svelte`) files. All discovered UTF-8 files can be examined with text/chunk semantic selectors. Ruby, PHP, Vue and Svelte have **no built-in AST inference or grammar**: a rule using `ast` on them emits `incomplete-evaluation`, blocking an applicable owned/error rule rather than silently passing. Scope mixed-language AST rules with `files`/`exclude` or explicitly configure `ast.language` **only for compatible syntax**. See the [discovery/AST matrix](docs/reference.md#ast-language-support-and-native-parsers).
+
 The bundled [agent skill](skills/jevcheck/SKILL.md) guides automated rule authoring without changing the deterministic/model boundary.
 
 MIT licensed.

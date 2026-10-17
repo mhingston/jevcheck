@@ -45,7 +45,7 @@ const MUTATION_IDENTITY_VERSION = "v3";
 const ROBUSTNESS_IDENTITY_VERSION = "v2";
 
 export const DEFAULT_SOURCE_INCLUDE = [
-  "**/*.{js,jsx,ts,tsx,mjs,cjs,mts,cts,py,go,rs,java,cs,rb,php,vue,svelte}",
+  "**/*.{js,jsx,ts,tsx,mjs,cjs,mts,cts,py,go,rs,java,cs,rb,php,vue,svelte,html,htm,css}",
 ];
 
 export interface PersistedDriftEvidence extends RuleDriftEvidence {

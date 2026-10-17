@@ -1,3 +1,4 @@
+import { extname } from "node:path";
 import {
   Lang,
   kind,
@@ -168,8 +169,12 @@ export function astCandidates(
         path,
         ruleId,
         message:
-          "AST candidate selection skipped because the file extension has no built-in language mapping; " +
-          "set ast.language to " + AST_LANGUAGES.join(", ") + ".",
+          "No built-in AST language mapping for extension '" +
+          (extname(path).toLowerCase() || "(none)") +
+          "'; AST rule '" + ruleId + "' was not evaluated for " + path + ". " +
+          "Restrict rule.files/exclude to supported extensions, remove ast for text/chunk selection, " +
+          "or set ast.language only if the file syntax matches a supported grammar (" +
+          AST_LANGUAGES.join(", ") + ").",
       }],
     };
   }
