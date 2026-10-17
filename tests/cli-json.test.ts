@@ -62,9 +62,52 @@ describe("CLI JSON stdout contract (built binary)", () => {
     const help = execute(cwd, ["--format", "stylish", "--format", "json", "--help"]);
     expect(help.code).toBe(0);
     expect(JSON.parse(help.stdout)).toMatchObject({ schemaVersion: 1, command: "help" });
+    const missingOverride = execute(cwd, ["inspect", "--format", "json", "--format", "--help"]);
+    expect(missingOverride.code).toBe(2);
+    expect(missingOverride.stderr).toBe("");
+    expect(JSON.parse(missingOverride.stdout)).toMatchObject({
+      command: "inspect", outcome: "error",
+      error: { code: "INVALID_ARGUMENT" },
+    });
+    const invalidOverride = execute(cwd, ["inspect", "--format", "json", "--format", "bogus"]);
+    expect(invalidOverride.code).toBe(2);
+    expect(JSON.parse(invalidOverride.stdout)).toMatchObject({
+      command: "inspect", error: { code: "INVALID_ARGUMENT" },
+    });
+
     const obsolete = execute(cwd, ["inspect", "--format", "json-v2"]);
     expect(obsolete.code).toBe(2);
     expect(obsolete.stderr).toContain("--format must be stylish, json, or sarif");
+  }));
+
+  it("uses structured CONFIG_ERROR for invalid rule configuration", () => project((cwd) => {
+    writeFileSync(join(cwd, "jevcheck.config.json"), JSON.stringify({
+      rules: [{ id: "sample/coverage", question: "Problem?", threshold: 2 }],
+    }));
+    const result = execute(cwd, ["inspect", "--format", "json"]);
+    expect(result.code).toBe(2);
+    expect(result.stderr).toBe("");
+    expect(JSON.parse(result.stdout)).toMatchObject({
+      command: "inspect", outcome: "error",
+      error: { code: "CONFIG_ERROR" }, data: null,
+    });
+  }));
+
+  it("returns detailed evidence blockers on owned-rule enforcement failures", () => project((cwd) => {
+    const result = execute(cwd, ["--format", "json"]);
+    expect(result.code).toBe(2);
+    expect(result.stderr).toBe("");
+    const output = JSON.parse(result.stdout);
+    expect(output).toMatchObject({
+      command: "check", outcome: "error",
+      error: { code: "OWNED_RULE_EVIDENCE_BLOCKED", ruleId: "sample/coverage" },
+    });
+    expect(output.data.evidenceReports[0]).toMatchObject({
+      ruleId: "sample/coverage", currentStatus: "owned", readyForOwned: false,
+    });
+    expect(output.data.evidenceReports[0].blockers.length).toBeGreaterThan(0);
+    expect(output.diagnostics.some((d: { ruleId?: string; code: string }) =>
+      d.ruleId === "sample/coverage" && d.code.startsWith("EVIDENCE_"))).toBe(true);
   }));
 
   it("keeps inspection complete in JSON and concise for humans", () => project((cwd) => {
