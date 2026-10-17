@@ -24,48 +24,91 @@ For first use see [README](../README.md) and [the executable example](../example
 | `jevcheck list` | List configured rules without provider credentials |
 | `jevcheck inspect` | Preview exact semantic requests without a provider call |
 
-Use `--format json` for backward-compatible machine-readable output. Existing objects and raw arrays remain intact; the additional `state` and `diagnostics` fields in rule audits are additive.
+Use `--format json` for a single structured machine-readable response. **Breaking change:** previous JSON outputs were command-specific raw objects or arrays; they are now all wrapped in a consistent result object. `--format sarif` remains unchanged.
 
-### Human output and agent JSON
+### Human output and JSON for agents
 
-Default `stylish` output is summary-first for `check`, `rules audit`, and `inspect`. Findings are grouped by file and rule. Audits show states, blockers and next actions first, with all evidence checks available via `rules audit --verbose`. `inspect` hides the full request bodies and semantic keys by default; `inspect --verbose` shows exact bounded requests without executing them.
+Default `stylish` output is summary-first for `check`, `rules audit`, and `inspect`. `rules audit --verbose` shows every evidence check; `inspect --verbose` shows exact request bodies and semantic keys. Neither command calls a judgement provider.
 
-The existing `--format json` retains each command's original top-level structure (including raw arrays for `list` and `rules audit`), and is extended with optional machine-readable evidence diagnostics. The opt-in `--format json-v2` uses a consistent envelope for agent integrations:
+Use the same `--format json` across all commands:
 
 ~~~sh
-jevcheck rules audit --format json-v2
-jevcheck inspect src/handler.ts --format json-v2
-jevcheck --changed --format json-v2
-jevcheck coverage verify --check unit --format json-v2 -- npm test
+jevcheck rules audit --format json
+jevcheck inspect src/handler.ts --format json
+jevcheck --changed --format json
+jevcheck coverage verify --check unit --format json -- npm test
 ~~~
+
+Every supported command emits **exactly one JSON object** on stdout, including errors:
 
 ~~~json
 {
-  "schemaVersion": 2,
+  "schemaVersion": 1,
   "command": "rules-audit",
   "outcome": "block",
-  "summary": {"rules": 1, "blocked": 1, "warnings": 0, "ready": 0, "inapplicable": 0, "reviewedOnly": 0, "ciVerified": 0, "semanticFallback": 0},
-  "diagnostics": [{"code": "EVIDENCE_FIXTURES", "level": "error", "message": "no invalid fixtures", "ruleId": "example", "remediation": "Add or fix valid and invalid fixtures.", "suggestedCommand": "jevcheck test"}],
-  "data": [{"ruleId": "example", "currentStatus": "shadow", "checks": [], "blockers": ["no invalid fixtures"], "warnings": [], "readyForOwned": false, "execution": "semantic", "state": "blocked", "outcome": "block", "diagnostics": []}]
+  "summary": {
+    "rules": 1,
+    "blocked": 1,
+    "warnings": 0,
+    "ready": 0,
+    "inapplicable": 0,
+    "reviewedOnly": 0,
+    "ciVerified": 0,
+    "semanticFallback": 0
+  },
+  "diagnostics": [
+    {
+      "code": "EVIDENCE_FIXTURES",
+      "level": "error",
+      "message": "no invalid fixtures",
+      "ruleId": "example",
+      "remediation": "Add or fix valid and invalid fixtures.",
+      "suggestedCommand": "jevcheck test"
+    }
+  ],
+  "data": [
+    {
+      "ruleId": "example",
+      "currentStatus": "shadow",
+      "execution": "semantic",
+      "checks": [{"id": "fixtures", "status": "block", "message": "no invalid fixtures"}],
+      "blockers": ["no invalid fixtures"],
+      "warnings": [],
+      "readyForOwned": false,
+      "state": "blocked",
+      "outcome": "block",
+      "diagnostics": [
+        {
+          "code": "EVIDENCE_FIXTURES",
+          "level": "error",
+          "message": "no invalid fixtures",
+          "ruleId": "example",
+          "remediation": "Add or fix valid and invalid fixtures.",
+          "suggestedCommand": "jevcheck test"
+        }
+      ]
+    }
+  ]
 }
 ~~~
 
-The example is illustrative; the `data` field contains the **complete per-command result**, including evidence checks and bounded inspection requests. An error after requesting JSON returns a single value with `outcome: "error"`, structured `error` and `diagnostics` plus exit code 2; `json-v2` also includes `data: null`. Diagnostic codes are stable identifiers, with optional `path`, `ruleId`, `remediation` and `suggestedCommand`. Child stdout is routed to stderr for `coverage verify` in both JSON modes. Put `--format` *before* `--`; flags after `--` belong to the child.
+The stable top-level fields are `schemaVersion` (JSON contract version), `command`, `outcome` (`pass` / `warn` / `block` / `error`), `summary`, `diagnostics`, and `data`. The `data` property retains **all** detailed command results, including evidence checks, findings, requests and statistics. Machine-actionable diagnostics have `code`, `level` and `message` plus optional `path`, `ruleId`, `remediation`, `suggestedCommand`.
+
+An argument/config/runtime error returns the same envelope with `outcome: "error"`, `data: null`, and an additional `error` field containing the primary diagnostic. JSON output is clean: subprocess stdout from `coverage verify` is redirected to stderr. Put `--format json` before `--`; anything after `--` belongs to the child process.
 
 ### JSON command payloads and outcomes
 
-| Command | `data` in `json-v2` (top-level value in legacy `json`) | Outcome semantics |
+| Command | `data` shape | Outcome semantics |
 | --- | --- | --- |
-| `check` / `replay` | `{ findings[], suppressedFindings[], evaluations[], diagnostics[], stats }` | `block` for blocking owned findings, error diagnostics, or replay misses; `warn` for advisory findings |
-| `rules audit` | `[{ruleId,currentStatus,execution,checks[],blockers[],warnings[],readyForOwned,state,outcome,diagnostics[]},...]` | `block` for evidence blockers; this does **not** change the audit's exit code (0) |
-| `inspect` | `{ rules[], inspections[], diagnostics[] }` with request payloads retained | `block` for error diagnostics, `warn` for warnings; no provider call |
-| `coverage verify` | `{checkId,status,evidenceFile}` | `block` when the named CI check fails; subprocess exit status is propagated |
-| CLI/config/runtime error | A single `{command,outcome,summary,diagnostics[],error}` in legacy mode, or the versioned envelope with `data:null` | `error`, exit code 2 |
+| `check` / `replay` | `{ findings[], suppressedFindings[], evaluations[], diagnostics[], stats }` | `block` for blocking findings, error diagnostics or replay misses; `warn` for advisory findings |
+| `rules audit` | `[{ruleId,currentStatus,execution,checks[],blockers[],warnings[],readyForOwned,state,outcome,diagnostics[]},...]` | `block` for evidence blockers, but the audit process exits 0: it is a readiness assessment |
+| `inspect` | `{ rules[], inspections[], diagnostics[] }` with full requests | `block` for error diagnostics; `warn` for warnings; provider-free |
+| `coverage verify` | `{checkId,status,evidenceFile}` | `block` for failed CI checks, propagating the child exit code |
+| `test` | Fixture or robustness results and evidence status | Failed fixtures, unrecorded calibration/confirmation, drift differences or incomplete robustness gates produce `block` |
+| `list`, `recall`, `record`, `baseline`, `coverage record` | Their complete existing command-specific detail | Common machine-readable command/outcome/diagnostics envelope |
+| Errors | `null` plus top-level `error` diagnostic | `error`, exit code 2 |
 
-Other supported commands (`list`, `test`, `recall`, `record`, `baseline`, `coverage record`) preserve their detailed legacy payloads under `data`; fixture failures and incomplete robustness gates also surface blocking outcomes in `json-v2`. Individual diagnostics are additive to existing normal results rather than a replacement for their detailed evidence.
-
-The audit `state` distinguishes `semantic`, `blocked`, `semantic-fallback`, `inapplicable`, `reviewed-only`, and `ci-verified`. Human-reviewed coverage does **not** prove CI execution; inapplicable rules are **not** evidence-ready. Audits can return `outcome: "block"` while exiting 0: this is a graduation-readiness signal rather than a failed command. Check/inspect/fixture failures exit 1; `coverage verify` propagates the command's positive failure code; argument/config/runtime errors exit 2. SARIF output is unchanged.
-
+Audit `state` values distinguish `semantic`, `blocked`, `semantic-fallback`, `inapplicable`, `reviewed-only`, and `ci-verified`. Human-reviewed declarations are **not** passing CI results; inapplicable rules are **not** evidence-ready. Failing check/inspect/fixture gates normally exit 1; `coverage verify` propagates the child failure code; argument/config/runtime errors exit 2. The structured `outcome` is always a separate concept from the process exit code.
 
 For code-scanning integrations:
 
