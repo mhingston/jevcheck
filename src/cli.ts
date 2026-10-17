@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { readFile } from "node:fs/promises";
-import { formatCommandError, formatCommandJson, requestedCommand, requestedFormat, type OutputFormat } from "./cli-output.js";
+import { CliConfigError, formatCommandError, formatCommandJson, requestedCommand, requestedFormat, type OutputFormat } from "./cli-output.js";
 import { isAbsolute, resolve } from "node:path";
 import { createJevClient, JEV_PROVIDERS, type JevProvider } from "@mhingston5/jev-cli";
 import { isLocalRuleSource } from "./architecture-decision.js";
@@ -336,7 +336,7 @@ function parseArgs(argv: string[]): CliOptions {
 
 async function run(args: CliOptions, gitCwd: string, snapshotMode: boolean): Promise<void> {
   const jsonMode = args.format === "json";
-  const config = await loadConfig(args.config);
+  const config = await loadConfig(args.config).catch((error: unknown) => { throw new CliConfigError(error); });
   if (snapshotMode) assertSnapshotPaths(config);
 
   const modelNamespace = [
