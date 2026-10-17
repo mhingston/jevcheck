@@ -533,7 +533,7 @@ function validateArtifact(value: unknown): RuleEvidenceArtifact {
           if (check.status !== "passed" && check.status !== "failed") {
             throw new Error(checkField + ".status must be passed or failed");
           }
-          return { id, status: check.status };
+          return { id, status: check.status as "passed" | "failed" };
         });
         verification = {
           provenance: {
@@ -1116,7 +1116,9 @@ export async function evaluateConfiguredRuleEvidence(
           const verification = recorded.verification;
           const sameRun = ciRun && verification &&
             sameGithubActionsRun(ciRun, verification.provenance);
-          const statuses = new Map(sameRun ? verification.checks.map((check) => [check.id, check.status]) : []);
+          const statuses = new Map<string, "passed" | "failed">(sameRun
+            ? verification.checks.map((check): [string, "passed" | "failed"] => [check.id, check.status])
+            : []);
           const failed = current.links.filter((link) => statuses.get(link.id) === "failed");
           const missing = current.links.filter((link) => statuses.get(link.id) !== "passed");
           coverage = failed.length
