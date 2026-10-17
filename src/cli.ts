@@ -97,7 +97,7 @@ function usage(): string {
     "  --changed             Check working-tree changes and untracked files",
     "  --staged              Check the exact staged index snapshot",
     "  --base <ref>          With --changed, check files changed in base...HEAD at HEAD",
-    "  --format <style>      stylish, json, json-v2, or sarif (sarif: check/replay only)",
+    "  --format <style>      stylish, json, or sarif (sarif: check/replay only)",
     "  --verbose             Detailed inspection/audit evidence and semantic requests",
     "  --provider <name>     Jev provider inherited from @mhingston5/jev-cli",
     "  --model <name>        Override the provider model",
@@ -123,7 +123,7 @@ function usage(): string {
     "coverage verify executes a named deterministic check in GitHub Actions and records its real exit status.",
     "Owned semantic skips require reviewed fingerprints and passing checks in the same CI run/checkout.",
     "inspect is provider-free and defaults to compact policy; --verbose shows full requests.",
-    "json preserves existing shapes; json-v2 adds a versioned agent-friendly envelope.",
+    "json returns one structured result/error envelope for coding agents.",
     "",
     "Owned error findings and incomplete owned/error evaluations fail check/replay. Shadow findings are advisory.",
   ].join("\n");
@@ -187,8 +187,8 @@ function parseArgs(argv: string[]): CliOptions {
         break;
       case "--format": {
         const value = requireValue(args, i, arg);
-        if (value !== "stylish" && value !== "json" && value !== "json-v2" && value !== "sarif") {
-          throw new Error("--format must be stylish, json, json-v2, or sarif");
+        if (value !== "stylish" && value !== "json" && value !== "sarif") {
+          throw new Error("--format must be stylish, json, or sarif");
         }
         options.format = value;
         i += 1;
@@ -267,7 +267,7 @@ function parseArgs(argv: string[]): CliOptions {
       case "-h":
       case "--help":
         const requested = requestedFormat(argv);
-        console.log(requested ? formatCommandJson("help", { usage: usage() }, requested) : usage());
+        console.log(requested ? formatCommandJson("help", { usage: usage() }) : usage());
         process.exit(0);
         break;
       default:
@@ -335,7 +335,7 @@ function parseArgs(argv: string[]): CliOptions {
 }
 
 async function run(args: CliOptions, gitCwd: string, snapshotMode: boolean): Promise<void> {
-  const jsonMode = args.format === "json" || args.format === "json-v2";
+  const jsonMode = args.format === "json";
   const config = await loadConfig(args.config);
   if (snapshotMode) assertSnapshotPaths(config);
 
@@ -358,7 +358,7 @@ async function run(args: CliOptions, gitCwd: string, snapshotMode: boolean): Pro
     }));
     console.log(
       jsonMode
-        ? formatCommandJson(args.command, value, args.format)
+        ? formatCommandJson(args.command, value)
         : value
             .map(
               (rule) =>
@@ -391,7 +391,7 @@ async function run(args: CliOptions, gitCwd: string, snapshotMode: boolean): Pro
     const evaluated = await evaluateConfiguredRuleEvidence(config, { modelNamespace });
     console.log(
       jsonMode
-        ? formatCommandJson(args.command, evaluated.reports, args.format)
+        ? formatCommandJson(args.command, evaluated.reports)
         : formatRuleEvidenceStylish(evaluated.reports, args.verbose),
     );
     return;
@@ -401,7 +401,7 @@ async function run(args: CliOptions, gitCwd: string, snapshotMode: boolean): Pro
     const payload = { evidenceFile, coveredRules: recorded, reviewed: args.attestReviewed };
     console.log(
       jsonMode
-        ? formatCommandJson(args.command, payload, args.format)
+        ? formatCommandJson(args.command, payload)
         : (args.attestReviewed ? "Reviewed and recorded" : "Recorded (not reviewed)") +
           " deterministic coverage for " + recorded + " rule(s) to " + evidenceFile,
     );
@@ -415,7 +415,7 @@ async function run(args: CliOptions, gitCwd: string, snapshotMode: boolean): Pro
     if (code !== 0) process.exitCode = code > 0 ? code : 1;
     console.log(
       jsonMode
-        ? formatCommandJson(args.command, { checkId, status: code === 0 ? "passed" : "failed", evidenceFile }, args.format)
+        ? formatCommandJson(args.command, { checkId, status: code === 0 ? "passed" : "failed", evidenceFile })
         : "Coverage CI check " + checkId + ": " + (code === 0 ? "passed" : "failed"),
     );
     return;
@@ -464,7 +464,7 @@ async function run(args: CliOptions, gitCwd: string, snapshotMode: boolean): Pro
     });
     console.log(
       jsonMode
-        ? formatCommandJson(args.command, inspected, args.format)
+        ? formatCommandJson(args.command, inspected)
         : formatInspectionStylish(inspected, args.verbose),
     );
     process.exitCode = inspected.diagnostics.some((item) => item.level === "error") ? 1 : 0;
@@ -569,7 +569,7 @@ async function run(args: CliOptions, gitCwd: string, snapshotMode: boolean): Pro
                   : "confirmation fixtures with no semantic evaluations",
             }
           : {}),
-      }, args.format));
+      }));
     } else {
       const sections = [formatFixtureStylish(result)];
       if (recorded) {
@@ -625,7 +625,7 @@ async function run(args: CliOptions, gitCwd: string, snapshotMode: boolean): Pro
               evidenceNotRecorded:
                 "robustness run was incomplete; resolve diagnostics and rerun",
             }),
-      }, args.format));
+      }));
     } else {
       console.log(
         formatRobustnessStylish(result) +
@@ -696,7 +696,7 @@ async function run(args: CliOptions, gitCwd: string, snapshotMode: boolean): Pro
             }
           : {}),
         ...(drift ? { drift, evidenceFile } : {}),
-      }, args.format));
+      }));
     } else {
       const sections = [formatFixtureStylish(result)];
       if (recorded) {
@@ -780,7 +780,7 @@ async function run(args: CliOptions, gitCwd: string, snapshotMode: boolean): Pro
         ...(fullScope
           ? { evidenceFile }
           : { evidenceNotRecorded: "scoped recall runs are not graduation evidence" }),
-      }, args.format));
+      }));
     } else {
       const suffix = fullScope
         ? "\nRecorded current mutation recall evidence to " + evidenceFile
@@ -809,7 +809,7 @@ async function run(args: CliOptions, gitCwd: string, snapshotMode: boolean): Pro
       },
     };
     console.log(
-      jsonMode ? formatCommandJson(args.command, empty, args.format) : args.format === "sarif" ? formatSarif(empty) : "No files matched.",
+      jsonMode ? formatCommandJson(args.command, empty) : args.format === "sarif" ? formatSarif(empty) : "No files matched.",
     );
     return;
   }
@@ -821,7 +821,7 @@ async function run(args: CliOptions, gitCwd: string, snapshotMode: boolean): Pro
     const decisions = await decisionStore?.count?.() ?? result.evaluations.length;
     console.log(
       jsonMode
-        ? formatCommandJson(args.command, { ...result, replay: { file: replayFile, decisions } }, args.format)
+        ? formatCommandJson(args.command, { ...result, replay: { file: replayFile, decisions } })
         : formatStylish(result) +
           "\nReplay corpus: " +
           decisions +
@@ -845,7 +845,7 @@ async function run(args: CliOptions, gitCwd: string, snapshotMode: boolean): Pro
     const total = await writeBaseline(baselineFile, evaluatedScopes, entries);
     console.log(
       jsonMode
-        ? formatCommandJson(args.command, { baselineFile, entriesWritten: entries.length, totalEntries: total }, args.format)
+        ? formatCommandJson(args.command, { baselineFile, entriesWritten: entries.length, totalEntries: total })
         : "Updated " + baselineFile + " with " + entries.length + " current finding(s); " + total + " total baseline entry(s).",
     );
     return;
@@ -853,7 +853,7 @@ async function run(args: CliOptions, gitCwd: string, snapshotMode: boolean): Pro
 
   console.log(
     jsonMode
-      ? formatCommandJson(args.command, result, args.format)
+      ? formatCommandJson(args.command, result)
       : args.format === "sarif"
         ? formatSarif(result)
         : formatStylish(result),
@@ -892,7 +892,7 @@ async function main(): Promise<void> {
 main().catch((error: unknown) => {
   const argv = process.argv.slice(2);
   const requested = requestedFormat(argv);
-  if (requested) console.log(formatCommandError(requestedCommand(argv), error, requested));
+  if (requested) console.log(formatCommandError(requestedCommand(argv), error));
   else console.error(error instanceof Error ? error.message : String(error));
   process.exitCode = 2;
 });
