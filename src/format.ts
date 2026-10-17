@@ -33,8 +33,8 @@ export function formatStylish(result: CheckResult): string {
     if (finding.source) lines.push("    source: " + finding.source);
   }
   for (const d of result.diagnostics) {
-    lines.push("", d.level.toUpperCase() + " [" + (d.code ?? "EVALUATION_DIAGNOSTIC") + "] " +
-      [d.path, d.ruleId].filter(Boolean).join(" ") + "  " + d.message);
+    lines.push("", d.level + " " + [d.path, d.ruleId].filter(Boolean).join(" ") +
+      ": " + d.message + " [" + (d.code ?? "EVALUATION_DIAGNOSTIC") + "]");
     if (d.code === "incomplete-evaluation")
       lines.push("  Next: fix the parser or rule scope; inspect with jevcheck inspect --verbose.");
   }
