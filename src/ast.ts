@@ -153,7 +153,7 @@ export function astCandidates(
         path,
         ruleId,
         message:
-          "AST language resolution failed for language '" +
+          "AST language resolution failed for rule '" + ruleId + "', language '" +
           (config.language ?? inferredAstLanguage(path) ?? "unknown") + "': " +
           (error instanceof Error ? error.message : String(error)),
       }],
