@@ -1,4 +1,12 @@
 import type { Diagnostic, RuleEvidenceCheck, RuleEvidenceReport } from "./types.js";
+import { OwnedRuleEvidenceError } from "./graduation.js";
+
+export class CliConfigError extends Error {
+  constructor(error: unknown) {
+    super(error instanceof Error ? error.message : String(error), { cause: error });
+    this.name = "CliConfigError";
+  }
+}
 
 export type OutputFormat = "stylish" | "json" | "sarif";
 export interface CliDiagnostic {
@@ -33,6 +41,7 @@ export function evidenceRemediation(check: RuleEvidenceCheck): Pick<CliDiagnosti
     case "mutation": return { remediation: "Address mutation recall misses.", suggestedCommand: "jevcheck recall" };
     case "robustness": return { remediation: "Resolve robustness failures.", suggestedCommand: "jevcheck test --robustness" };
     case "drift": return { remediation: "Resolve current drift.", suggestedCommand: "jevcheck test --drift" };
+    case "evidence": return { remediation: "Evaluate and review the rule evidence before ownership.", suggestedCommand: "jevcheck rules audit" };
     case "source":
     case "architecture-decision": return { remediation: "Review rule source/ADR status, provenance and fingerprints." };
     case "applicability": return { remediation: "Review projectWhen for the selected revision." };
@@ -155,15 +164,19 @@ export function formatCommandJson(command: string, value: unknown): string {
   }
   return JSON.stringify({ schemaVersion: 1, command, outcome, summary, diagnostics, data }, null, 2);
 }
+/** Mirror the format selection that argument parsing reaches before any error. */
 export function requestedFormat(argv: readonly string[]): "json" | undefined {
   const end = argv.indexOf("--");
   const args = end < 0 ? argv : argv.slice(0, end);
-  let selected: string | undefined;
-  for (let i = 0; i + 1 < args.length; i++) {
-    if (args[i] === "--format") {
-      // parseArgs honours the last --format, including a later non-JSON override.
-      selected = args[++i];
-    }
+  let selected: "json" | "stylish" | "sarif" | undefined;
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] !== "--format") continue;
+    const value = args[i + 1];
+    // A missing or invalid value aborts parsing; retain the last *valid*
+    // selection for the error response, including valid non-JSON overrides.
+    if (value !== "json" && value !== "stylish" && value !== "sarif") break;
+    selected = value;
+    i++;
   }
   return selected === "json" ? "json" : undefined;
 }
@@ -176,13 +189,31 @@ export function requestedCommand(argv: readonly string[]): string {
 }
 export function formatCommandError(command: string, error: unknown): string {
   const message = error instanceof Error ? error.message : String(error);
-  const invalid = /unknown option|requires a value|--format|only valid|does not accept|choose either|requires --|unknown rule id|must be/i.test(message);
+  if (error instanceof OwnedRuleEvidenceError) {
+    const report = auditJson([error.report])[0]!;
+    const diagnostic: CliDiagnostic = {
+      code: "OWNED_RULE_EVIDENCE_BLOCKED", level: "error",
+      message: "Rule " + error.report.ruleId + " failed owned-rule evidence gates.",
+      ruleId: error.report.ruleId,
+      remediation: "Fix the blocking evidence gates before enforcing this rule.",
+      suggestedCommand: "jevcheck rules audit --format json",
+    };
+    return JSON.stringify({
+      schemaVersion: 1, command, outcome: "error",
+      summary: { errors: 1, blocked: 1 },
+      diagnostics: [diagnostic, ...report.diagnostics],
+      error: diagnostic,
+      data: { evidenceReports: [report] },
+    }, null, 2);
+  }
+  const config = error instanceof CliConfigError;
+  const invalid = !config && /unknown option|requires a value|--format|only valid|does not accept|choose either|requires --|unknown rule id|must be/i.test(message);
   const missing = /ENOENT|config file|cannot read/i.test(message);
   const diagnostic: CliDiagnostic = {
-    code: invalid ? "INVALID_ARGUMENT" : missing ? "CONFIG_ERROR" : "COMMAND_FAILED",
+    code: config || missing ? "CONFIG_ERROR" : invalid ? "INVALID_ARGUMENT" : "COMMAND_FAILED",
     level: "error", message,
-    remediation: invalid ? "Check CLI flags using jevcheck --help." :
-      missing ? "Check the config path and required files." :
+    remediation: config || missing ? "Check the config path, syntax and rule configuration." :
+      invalid ? "Check CLI flags using jevcheck --help." :
       "Correct the command, configuration or runtime environment before retrying.",
   };
   return JSON.stringify({
