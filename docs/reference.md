@@ -22,7 +22,7 @@ For first use see [README](../README.md) and [the executable example](../example
 | `jevcheck record` | Record semantic decisions for replay |
 | `jevcheck replay` | Re-run the recorded decisions strictly offline |
 | `jevcheck list` | List configured rules without provider credentials |
-| `jevcheck inspect` | Preview exact semantic requests without a provider call |
+| `jevcheck inspect` | Summarise selected rule/file policy and candidate counts; add `--verbose` for exact requests (provider-free) |
 
 Use `--format json` for a single structured machine-readable response. **Breaking change:** previous JSON outputs were command-specific raw objects or arrays; they are now all wrapped in a consistent result object. `--format sarif` remains unchanged.
 
@@ -174,9 +174,9 @@ Start with a bounded, non-blocking rule in `jevcheck.config.json`:
 - `ast: "function_declaration"` is equivalent to `ast: { "kind": "function_declaration" }`. A string means an AST **kind**, not an AST pattern; use the object form for `pattern`, `rule`, `language` and context options.
 - `contains` is literal and case-sensitive; punctuation such as `.`, `(` and `/` need no escaping. Use `prefilter` for a **regex** instead; combining both is an error.
 - Default `status` is `shadow`, default `severity` is `error` and default `threshold` is `0.8`. Shadow findings do **not** block CI.
-- Run `jevcheck inspect --rule reliability/queue-ack src/handler.ts` to verify candidates before calling a model. Zero matches means no judgement: revisit file scope, filters and context.
+- Run `jevcheck inspect --rule reliability/queue-ack src/handler.ts --verbose` to verify the exact requests before calling a model; without `--verbose`, the human output only shows policy, selectors and candidate counts. Zero matches means no judgement: revisit file scope, filters and context.
 
-JSON config shorthands are normalised to canonical AST selectors and regex prefilters **before** fingerprinting and evidence persistence. Configuration parsing rejects unknown keys at the top level and within rules, selectors, context, criteria, fixtures, confirmation fixtures, and mutants. A typo such as `contain` produces a path-specific error like `rules[0].contain: unknown field (did you mean contains?)` instead of silently changing rule behaviour. The nested `ast.rule` object is passed through to ast-grep so valid composite matcher syntax remains available; use its own grammar and validation rules. This is a **breaking configuration-validation change in v0.7.0**: correct any previously ignored fields before upgrading. The TypeScript `createJevCheck` API continues to accept canonical AST objects and regex prefilters.
+JSON config shorthands are normalised to canonical AST selectors and regex prefilters **before** fingerprinting and evidence persistence. Configuration parsing rejects unknown keys at the top level and within rules, selectors, context, criteria, fixtures, confirmation fixtures, and mutants. A typo such as `contain` produces a path-specific error like `rules[0].contain: unknown field (did you mean contains?)` instead of silently changing rule behaviour. The nested `ast.rule` object is passed through to ast-grep so valid composite matcher syntax remains available; use its own grammar and validation rules. This is a **breaking configuration-validation behaviour change**: correct previously ignored fields when adopting this code. The current branch retains package version `0.6.0` until a publishable version is chosen. The TypeScript `createJevCheck` API continues to accept canonical AST objects and regex prefilters.
 
 ### Advanced rule configuration
 
@@ -329,7 +329,7 @@ Generated fixes are intentionally out of scope. `jevcheck` reports bounded seman
 
 HTML/HTM and CSS are **intentionally included** in the default source set because their built-in parsers support AST selection. Ruby/PHP/Vue/Svelte remain discoverable for text/chunk semantic checks but **are not AST languages in jevcheck**; do not assume Vue/Svelte single-file components are parsed as HTML/JS. `ast.language` overrides inference only when the *whole selected source* is compatible with that grammar, not as a universal fallback. All supported AST languages use `pattern`, `kind`, composite `rule`, and bounded `ast.context.ancestor` selection; the AST match is the focus, **not** proof of a violation.
 
-**When an applicable `ast` rule reaches an extension without inference**, jevcheck produces an `incomplete-evaluation` diagnostic with the file, extension and remediation (scope the rule, switch to text/chunk selection, or opt into a genuinely compatible grammar). It never silently treats this as a successful zero-match: owned/error rules fail enforcement; shadow and owned/warning rules report advisory warnings. A grammar that *is* inferred but has an incompatible selector or cannot load is also incomplete, not a zero-match. For mixed-language rules, restrict `files` to the intended grammars and use grammar-correct selectors; inspect with `jevcheck inspect --rule <id> <path>` before enforcement. A real zero-match from a valid selector is still successful.
+**When an applicable `ast` rule reaches an extension without inference**, jevcheck produces an `incomplete-evaluation` diagnostic with the file, extension and remediation (scope the rule, switch to text/chunk selection, or opt into a genuinely compatible grammar). It never silently treats this as a successful zero-match: owned/error rules fail enforcement; shadow and owned/warning rules report advisory warnings. A grammar that *is* inferred but has an incompatible selector or cannot load is also incomplete, not a zero-match. For mixed-language rules, restrict `files` to the intended grammars and use grammar-correct selectors; inspect with `jevcheck inspect --rule <id> <path> --verbose` before enforcement. A real zero-match from a valid selector is still successful.
 
 Built-in grammars come from `@ast-grep/napi` (`^0.45.3`). The pinned dynamic packages are `@ast-grep/lang-csharp` (`0.0.6`), `@ast-grep/lang-python` (`0.0.6`), `@ast-grep/lang-go` (`0.0.6`), `@ast-grep/lang-java` (`0.0.7`) and `@ast-grep/lang-rust` (`0.0.7`).
 
@@ -351,10 +351,9 @@ See the [runnable C# walkthrough](../examples/csharp-queue/README.md) and [multi
 ## Development
 
 ~~~sh
-npm install
+npm ci
 npm run typecheck
-npm test
-npm run build
+npm test       # runs pretest (npm run build) first, including on clean checkouts
 npm run pack:check
 ~~~
 
@@ -368,21 +367,18 @@ node dist/cli.js --help
 
 The npm package includes `skills/jevcheck/SKILL.md` for coding agents working with `jevcheck` rules, evidence, suppressions, replay, and graduation.
 
-## License
-
-MIT
-
 ### Inspect runtime policy (provider-free)
 
 `jevcheck inspect` previews whether **enforcement would call a semantic judge** for each selected rule and source file in the current revision. It never makes a provider request or decides whether a violation exists:
 
 ~~~sh
 npx jevcheck inspect src/handler.ts --rule reliability/queue-ack
+npx jevcheck inspect src/handler.ts --rule reliability/queue-ack --verbose
 npx jevcheck inspect src/handler.ts --format json
 npx jevcheck inspect src/handler.ts --preview-skipped
 ~~~
 
-The output has one rule/file policy entry with `execution` (`semantic`, `covered`, or `inapplicable`), a human-readable `reason`, selector description, candidate count, and selector diagnostics. JSON exposes these in `rules[]`; `inspections[]` contains bounded requests for candidates actually eligible for semantic judging. `diagnostics[]` contains selector diagnostics from eligible rules only. A rule that matches no candidates is **not** the same as a policy-skipped rule.
+The output has one rule/file policy entry with `execution` (`semantic`, `covered`, or `inapplicable`), a human-readable `reason`, selector description, candidate count, and selector diagnostics. **Plain stylish output is compact**: add `--verbose` to see exact bounded requests and semantic keys. JSON nests the full result under `data`: `data.rules[]` contains policy entries, `data.inspections[]` contains bounded requests for candidates eligible for judging, and `data.diagnostics[]` contains selector diagnostics from eligible rules only. A rule that matches no candidates is **not** the same as a policy-skipped rule.
 
 - `semantic` means the rule is eligible for a provider judgement **if** its selector finds candidates. It does not mean a violation was found. Project conditions, accepted ADRs and fingerprinted coverage are resolved before selection.
 - `covered` means reviewed coverage authorizes a skip. For shadow rules this is a reviewed declaration (**not** verified execution); for owned rules all checks must also actually pass in the same GitHub Actions job/attempt/checkout. Missing/stale evidence falls back to `semantic`; failed CI checks block owned enforcement.
@@ -390,4 +386,8 @@ The output has one rule/file policy entry with `execution` (`semantic`, `covered
 - `--preview-skipped` runs selectors even for covered/inapplicable rules, marking candidate requests `previewOnly: true` with an explicit warning in stylish output. These **hypothetical** requests are never counted as enforcement requests, and their selector diagnostics do not cause an inspect failure.
 - `--staged` and `--changed --base <ref>` use the same isolated snapshot for policy, source, and recorded evidence as `check`.
 
-The JavaScript `inspectSource` / `inspectSources` APIs return Promises as of v0.8.0. For custom evidence paths, pass `config` and `projectRoot`; or pass the `ruleEvidenceReports` already produced by `evaluateConfiguredRuleEvidence` on the same revision. Do not use a report from an unrelated snapshot.
+The JavaScript `inspectSource` / `inspectSources` APIs return Promises in the current codebase. For custom evidence paths, pass `config` and `projectRoot`; or pass the `ruleEvidenceReports` already produced by `evaluateConfiguredRuleEvidence` on the same revision. Do not use a report from an unrelated snapshot.
+
+## License
+
+MIT
