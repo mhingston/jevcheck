@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { auditJson, evidenceState, formatCommandError, formatCommandJson, requestedFormat } from "../src/cli-output.js";
+import { CliConfigError, auditJson, evidenceState, formatCommandError, formatCommandJson, requestedFormat } from "../src/cli-output.js";
+import { OwnedRuleEvidenceError } from "../src/graduation.js";
 import { formatInspectionStylish } from "../src/inspect.js";
 import type { RuleEvidenceReport } from "../src/types.js";
 
@@ -96,6 +97,34 @@ describe("CLI presentation contracts", () => {
     expect(requestedFormat(["inspect", "--format", "stylish", "--format", "json", "--oops"])).toBe("json");
     expect(requestedFormat(["inspect", "--format", "json", "--format", "stylish", "--oops"])).toBeUndefined();
     expect(requestedFormat(["inspect", "--format", "json", "--format", "sarif"])).toBeUndefined();
+  });
+
+  it("keeps the last parsed valid JSON format when a later override is malformed", () => {
+    expect(requestedFormat(["inspect", "--format", "json", "--format", "--help"])).toBe("json");
+    expect(requestedFormat(["inspect", "--format", "json", "--format", "bogus"])).toBe("json");
+    expect(requestedFormat(["inspect", "--format", "json", "--format", "stylish"])).toBeUndefined();
+    expect(requestedFormat(["inspect", "--format", "json", "--format", "sarif"])).toBeUndefined();
+  });
+
+  it("returns CONFIG_ERROR for configuration validation rather than INVALID_ARGUMENT", () => {
+    const error = new CliConfigError(new Error("sample/coverage.threshold must be between 0 and 1"));
+    const parsed = JSON.parse(formatCommandError("check", error));
+    expect(parsed.error.code).toBe("CONFIG_ERROR");
+    expect(parsed.error.remediation).toContain("rule configuration");
+  });
+
+  it("keeps rule, failed checks and remediation in fail-closed JSON errors", () => {
+    const error = new OwnedRuleEvidenceError("Rule safety/example cannot be owned", report);
+    const parsed = JSON.parse(formatCommandError("check", error));
+    expect(parsed).toMatchObject({
+      command: "check", outcome: "error",
+      error: { code: "OWNED_RULE_EVIDENCE_BLOCKED", ruleId: "safety/example" },
+      data: { evidenceReports: [{ ruleId: "safety/example", blockers: ["no invalid fixtures"] }] },
+    });
+    expect(parsed.diagnostics).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: "EVIDENCE_FIXTURES", ruleId: "safety/example",
+        suggestedCommand: "jevcheck test" }),
+    ]));
   });
 
   it("defaults inspect to policy and hides requests and keys outside verbose", () => {
