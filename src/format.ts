@@ -1,3 +1,4 @@
+import { evidenceRemediation, evidenceState } from "./cli-output.js";
 import type {
   CheckResult,
   FixtureDriftResult,
@@ -8,79 +9,42 @@ import type {
 } from "./types.js";
 
 export function formatStylish(result: CheckResult): string {
-  const lines: string[] = [];
   const findings = [...result.findings].sort(
-    (a, b) =>
-      a.path.localeCompare(b.path) ||
-      a.startLine - b.startLine ||
-      (a.startColumn ?? 0) - (b.startColumn ?? 0) ||
-      a.ruleId.localeCompare(b.ruleId),
+    (a, b) => a.path.localeCompare(b.path) || a.ruleId.localeCompare(b.ruleId) ||
+      a.startLine - b.startLine || (a.startColumn ?? 0) - (b.startColumn ?? 0),
   );
-
+  const blocking = findings.filter((f) => f.blocking).length;
+  const errors = result.diagnostics.filter((d) => d.level === "error").length;
+  const outcome = blocking || errors || result.stats.replayMisses ? "BLOCK" :
+    findings.length || result.diagnostics.length ? "WARN" : "PASS";
+  const lines = [outcome + "  Checked " + result.stats.filesChecked + " file(s)  |  " +
+    findings.length + " findings (" + blocking + " blocking)  |  " +
+    result.diagnostics.length + " diagnostics"];
+  let previous = "";
   for (const finding of findings) {
+    if (finding.path !== previous) { lines.push("", finding.path); previous = finding.path; }
+    const range = finding.startColumn !== undefined && finding.endColumn !== undefined
+      ? finding.startLine + ":" + finding.startColumn + "-" + finding.endLine + ":" + finding.endColumn
+      : finding.startLine + "-" + finding.endLine;
     const kind = finding.blocking ? "error" : finding.status === "shadow" ? "shadow" : finding.severity;
-    const range =
-      finding.startColumn !== undefined && finding.endColumn !== undefined
-        ? finding.startLine +
-          ":" +
-          finding.startColumn +
-          "-" +
-          finding.endLine +
-          ":" +
-          finding.endColumn
-        : finding.startLine + "-" + finding.endLine;
-    lines.push(
-      finding.path +
-        ":" +
-        range +
-        "  " +
-        kind.padEnd(7) +
-        "  " +
-        finding.ruleId +
-        "  p=" +
-        finding.probability.toFixed(2) +
-        " >= " +
-        finding.threshold.toFixed(2),
-    );
-    if (finding.why) lines.push("  " + finding.why);
-    if (finding.source) lines.push("  source: " + finding.source);
+    lines.push("  " + finding.path + ":" + range + "  " + kind.padEnd(7) +
+      "  " + finding.ruleId + "  p=" + finding.probability.toFixed(2));
+    if (finding.why) lines.push("    " + finding.why);
+    if (finding.source) lines.push("    source: " + finding.source);
   }
-
-  for (const diagnostic of result.diagnostics) {
-    const location = [diagnostic.path, diagnostic.ruleId].filter(Boolean).join(" ");
-    lines.push(
-      (diagnostic.level === "error" ? "error" : "warning") +
-        (location ? " " + location : "") +
-        ": " +
-        diagnostic.message +
-        (diagnostic.code ? " [" + diagnostic.code + "]" : ""),
-    );
+  for (const d of result.diagnostics) {
+    lines.push("", d.level.toUpperCase() + " [" + (d.code ?? "EVALUATION_DIAGNOSTIC") + "] " +
+      [d.path, d.ruleId].filter(Boolean).join(" ") + "  " + d.message);
+    if (d.code === "incomplete-evaluation")
+      lines.push("  Next: fix the parser or rule scope; inspect with jevcheck inspect --verbose.");
   }
-
-  if (!findings.length && !result.diagnostics.length) lines.push("No findings.");
-
-  const blocking = findings.filter((finding) => finding.blocking).length;
-  lines.push(
-    result.findings.length +
-      " finding(s), " +
-      blocking +
-      " blocking, " +
-      result.suppressedFindings.length +
-      " suppressed; " +
-      result.stats.filesChecked +
-      " file(s), " +
-      result.stats.candidatesChecked +
-      " candidate(s), " +
-      result.stats.requests +
-      " request(s), " +
-      result.stats.cacheHits +
-      " cache hit(s), " +
-      result.stats.replayHits +
-      " replay hit(s), " +
-      result.stats.replayMisses +
-      " replay miss(es)",
-  );
-
+  if (!findings.length && !result.diagnostics.length) lines.push("", "No findings.");
+  if (blocking) lines.push("", "Next: resolve owned/error findings and rerun jevcheck.");
+  if (result.stats.replayMisses) lines.push("", "Next: record missing replay decisions and rerun replay.");
+  lines.push("", result.suppressedFindings.length + " suppressed  |  " +
+    result.stats.candidatesChecked + " candidates  |  " + result.stats.requests +
+    " requests  |  " + result.stats.cacheHits + " cache hits  |  " +
+    result.stats.replayHits + " replay hits  |  " + result.stats.replayMisses + " replay misses");
   return lines.join("\n");
 }
 
@@ -392,25 +356,45 @@ export function formatRecallStylish(result: RecallRunResult): string {
 }
 
 
-export function formatRuleEvidenceStylish(reports: readonly RuleEvidenceReport[]): string {
+export function formatRuleEvidenceStylish(reports: readonly RuleEvidenceReport[], verbose = false): string {
   if (!reports.length) return "No rules configured.";
-
-  return reports.map((report) => {
-    const lines = [report.ruleId + "  " + report.currentStatus + "  execution=" + (report.execution ?? "semantic"), ""];
-    for (const check of report.checks) {
-      lines.push(
-        check.id.replaceAll("-", " ").padEnd(14) +
-          check.status.toUpperCase().padEnd(7) +
-          check.message,
-      );
+  const active = reports.filter((r) => r.execution !== "inapplicable");
+  const blocked = active.filter((r) => r.blockers.length > 0);
+  const warnings = active.filter((r) => r.warnings.length > 0);
+  const verified = reports.filter((r) => evidenceState(r) === "ci-verified").length;
+  const reviewed = reports.filter((r) => evidenceState(r) === "reviewed-only").length;
+  const inapplicable = reports.length - active.length;
+  const lines = [
+    (blocked.length ? "BLOCK" : warnings.length ? "WARN" : "PASS") + "  Rules audit: " +
+      reports.length + " rule(s)  |  " + blocked.length + " blocked  |  " +
+      warnings.length + " warnings  |  " + active.filter((r) => r.readyForOwned).length + " ready",
+    "Coverage: " + verified + " CI-verified  |  " + reviewed +
+      " reviewed-only (NOT a CI pass)  |  " + inapplicable + " inapplicable (NOT evidence-ready)",
+  ];
+  for (const report of reports) {
+    const state = evidenceState(report);
+    lines.push("", report.ruleId + "  " + report.currentStatus +
+      "  [" + state + "]  execution=" + (report.execution ?? "semantic"));
+    lines.push("  Ready for owned: " +
+      (state === "inapplicable" ? "n/a (inapplicable)" : report.readyForOwned ? "yes" : "no"));
+    if (verbose) {
+      for (const check of report.checks)
+        lines.push("  " + check.id + "  " + check.status.toUpperCase() + "  " + check.message);
+    } else if (state === "reviewed-only")
+      lines.push("  Current human review only; passing CI execution NOT verified.");
+    else if (state === "ci-verified")
+      lines.push("  Current reviewed coverage and passing CI checks.");
+    const failed = report.checks.filter((c) => c.status !== "pass");
+    for (const check of failed) {
+      lines.push("  " + (check.status === "block" ? "BLOCKER" : "WARNING") +
+        " [" + check.id + "]: " + check.message);
+      const advice = evidenceRemediation(check);
+      if (advice.suggestedCommand) lines.push("  Next: " + advice.suggestedCommand);
+      else if (advice.remediation) lines.push("  Next: " + advice.remediation);
     }
-    if (report.blockers.length) {
-      lines.push("", ...report.blockers.map((message) => "BLOCKER: " + message));
-    }
-    if (report.warnings.length) {
-      lines.push(...report.warnings.map((message) => "WARNING: " + message));
-    }
-    lines.push("", "Ready for owned: " + (report.readyForOwned ? "yes" : "no"));
-    return lines.join("\n");
-  }).join("\n\n");
+    if (!failed.length && report.blockers.length)
+      lines.push(...report.blockers.map((message) => "  BLOCKER: " + message));
+  }
+  lines.push("", "Use --verbose for all checks; --format json for full evidence.");
+  return lines.join("\n");
 }
