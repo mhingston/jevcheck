@@ -52,6 +52,18 @@ jevcheck coverage verify --check unit --format json-v2 -- npm test
 
 The example is illustrative; the `data` field contains the **complete per-command result**, including evidence checks and bounded inspection requests. An error after requesting JSON returns a single value with `outcome: "error"`, structured `error` and `diagnostics` plus exit code 2; `json-v2` also includes `data: null`. Diagnostic codes are stable identifiers, with optional `path`, `ruleId`, `remediation` and `suggestedCommand`. Child stdout is routed to stderr for `coverage verify` in both JSON modes. Put `--format` *before* `--`; flags after `--` belong to the child.
 
+### JSON command payloads and outcomes
+
+| Command | `data` in `json-v2` (top-level value in legacy `json`) | Outcome semantics |
+| --- | --- | --- |
+| `check` / `replay` | `{ findings[], suppressedFindings[], evaluations[], diagnostics[], stats }` | `block` for blocking owned findings, error diagnostics, or replay misses; `warn` for advisory findings |
+| `rules audit` | `[{ruleId,currentStatus,execution,checks[],blockers[],warnings[],readyForOwned,state,outcome,diagnostics[]},...]` | `block` for evidence blockers; this does **not** change the audit's exit code (0) |
+| `inspect` | `{ rules[], inspections[], diagnostics[] }` with request payloads retained | `block` for error diagnostics, `warn` for warnings; no provider call |
+| `coverage verify` | `{checkId,status,evidenceFile}` | `block` when the named CI check fails; subprocess exit status is propagated |
+| CLI/config/runtime error | A single `{command,outcome,summary,diagnostics[],error}` in legacy mode, or the versioned envelope with `data:null` | `error`, exit code 2 |
+
+Other supported commands (`list`, `test`, `recall`, `record`, `baseline`, `coverage record`) preserve their detailed legacy payloads under `data`; fixture failures and incomplete robustness gates also surface blocking outcomes in `json-v2`. Individual diagnostics are additive to existing normal results rather than a replacement for their detailed evidence.
+
 The audit `state` distinguishes `semantic`, `blocked`, `semantic-fallback`, `inapplicable`, `reviewed-only`, and `ci-verified`. Human-reviewed coverage does **not** prove CI execution; inapplicable rules are **not** evidence-ready. Audits can return `outcome: "block"` while exiting 0: this is a graduation-readiness signal rather than a failed command. Check/inspect/fixture failures exit 1; `coverage verify` propagates the command's positive failure code; argument/config/runtime errors exit 2. SARIF output is unchanged.
 
 
