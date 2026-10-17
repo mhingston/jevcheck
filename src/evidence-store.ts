@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { spawn } from "node:child_process";
 import { isLocalRuleSource, parseArchitectureDecision, type ArchitectureDecision } from "./architecture-decision.js";
 import { describeProjectCondition, projectConditionMatches } from "./applicability.js";
-import { mkdir, readFile, rename, rmdir, writeFile } from "node:fs/promises";
+import { access, mkdir, readFile, rename, rmdir, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import {
   DEFAULT_CALIBRATION_FILE,
@@ -963,6 +963,16 @@ export async function persistMutationEvidence(
  * fails closed until an operator confirms it is safe to remove the directory.
  * Hold this across the entire subprocess, not merely the file writes.
  */
+async function coverageLockPresent(path: string): Promise<boolean> {
+  try {
+    await access(path + ".lock");
+    return true;
+  } catch (error) {
+    // Permission errors are indeterminate and must not authorize a skip.
+    return (error as NodeJS.ErrnoException).code !== "ENOENT";
+  }
+}
+
 export async function withCoverageArtifactLock<T>(
   path: string,
   action: () => Promise<T>,
@@ -1152,6 +1162,7 @@ export async function evaluateConfiguredRuleEvidence(
   const persistedRobustness = new Map(artifact.robustness.map((item) => [item.ruleId, item]));
   const persistedCoverage = new Map(artifact.coverage.map((item) => [item.ruleId, item]));
   const ciRun = currentGithubActionsRun(cwd);
+  const coverageLocked = await coverageLockPresent(evidencePath);
   const reports: RuleEvidenceReport[] = [];
 
   for (const rule of config.rules) {
@@ -1186,6 +1197,11 @@ export async function evaluateConfiguredRuleEvidence(
           coverage = {
             status: "reviewed",
             message: "human-reviewed deterministic coverage is current; shadow semantic judge skipped (CI execution not verified)",
+          };
+        } else if (coverageLocked) {
+          coverage = {
+            status: "unverified",
+            message: "coverage verification in progress or interrupted (lock present); owned semantic fallback active",
           };
         } else {
           const verification = recorded.verification;
