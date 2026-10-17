@@ -1,6 +1,6 @@
 import type { Diagnostic, RuleEvidenceCheck, RuleEvidenceReport } from "./types.js";
 
-export type OutputFormat = "stylish" | "json" | "json-v2" | "sarif";
+export type OutputFormat = "stylish" | "json" | "sarif";
 export interface CliDiagnostic {
   code: string;
   level: "warning" | "error";
@@ -71,13 +71,13 @@ export function auditJson(reports: readonly RuleEvidenceReport[]) {
     diagnostics: evidenceDiagnostics(report),
   }));
 }
-export function formatCommandJson(command: string, value: unknown, format: OutputFormat): string {
+/** One JSON envelope for every supported command, including failures. */
+export function formatCommandJson(command: string, value: unknown): string {
   const data = command === "rules-audit" && Array.isArray(value)
     ? auditJson(value as RuleEvidenceReport[])
     : object(value) && Array.isArray(value.diagnostics)
       ? { ...value, diagnostics: (value.diagnostics as Diagnostic[]).map(decorateDiagnostic) }
       : value;
-  if (format === "json") return JSON.stringify(data, null, 2);
   let outcome: "pass" | "warn" | "block" = "pass";
   let summary: Record<string, number> = {};
   let diagnostics: CliDiagnostic[] = [];
@@ -153,9 +153,9 @@ export function formatCommandJson(command: string, value: unknown, format: Outpu
     outcome = errors ? "block" : diagnostics.length ? "warn" : "pass";
     summary = { results: Array.isArray(data) ? data.length : 1, errors };
   }
-  return JSON.stringify({ schemaVersion: 2, command, outcome, summary, diagnostics, data }, null, 2);
+  return JSON.stringify({ schemaVersion: 1, command, outcome, summary, diagnostics, data }, null, 2);
 }
-export function requestedFormat(argv: readonly string[]): "json" | "json-v2" | undefined {
+export function requestedFormat(argv: readonly string[]): "json" | undefined {
   const end = argv.indexOf("--");
   const args = end < 0 ? argv : argv.slice(0, end);
   let selected: string | undefined;
@@ -165,7 +165,7 @@ export function requestedFormat(argv: readonly string[]): "json" | "json-v2" | u
       selected = args[++i];
     }
   }
-  return selected === "json" || selected === "json-v2" ? selected : undefined;
+  return selected === "json" ? "json" : undefined;
 }
 export function requestedCommand(argv: readonly string[]): string {
   if (argv[0] === "rules" && argv[1] === "audit") return "rules-audit";
@@ -174,7 +174,7 @@ export function requestedCommand(argv: readonly string[]): string {
   return ["test","list","inspect","baseline","record","replay","recall"].includes(argv[0] ?? "")
     ? argv[0]! : "check";
 }
-export function formatCommandError(command: string, error: unknown, format: "json" | "json-v2"): string {
+export function formatCommandError(command: string, error: unknown): string {
   const message = error instanceof Error ? error.message : String(error);
   const invalid = /unknown option|requires a value|--format|only valid|does not accept|choose either|requires --|unknown rule id|must be/i.test(message);
   const missing = /ENOENT|config file|cannot read/i.test(message);
@@ -185,9 +185,8 @@ export function formatCommandError(command: string, error: unknown, format: "jso
       missing ? "Check the config path and required files." :
       "Correct the command, configuration or runtime environment before retrying.",
   };
-  return JSON.stringify(format === "json-v2"
-    ? { schemaVersion: 2, command, outcome: "error", summary: { errors: 1 },
-      diagnostics: [diagnostic], error: diagnostic, data: null }
-    : { command, outcome: "error", summary: { errors: 1 },
-      diagnostics: [diagnostic], error: diagnostic }, null, 2);
+  return JSON.stringify({
+    schemaVersion: 1, command, outcome: "error", summary: { errors: 1 },
+    diagnostics: [diagnostic], error: diagnostic, data: null,
+  }, null, 2);
 }
