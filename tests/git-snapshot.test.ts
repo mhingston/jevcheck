@@ -59,7 +59,7 @@ describe("Git evaluation snapshot consistency", () => {
     await put(cwd, "src/a.ts", "staged source\n");
     await put(cwd, "docs/decision.md", adr);
     await put(cwd, "tests/coverage.test.ts", "staged coverage\n");
-    await persistCoverageEvidence(join(cwd, ".jevcheck", "evidence.json"), [rule], cwd);
+    await persistCoverageEvidence(join(cwd, ".jevcheck", "evidence.json"), [rule], cwd, true);
     await git(cwd, "add", "-A");
 
     // All of these edits are unstaged. An inconsistent implementation would
@@ -109,7 +109,7 @@ describe("Git evaluation snapshot consistency", () => {
         projectRoot: snapshot.cwd,
       }).checkSource("src/a.ts", stagedContent);
       expect(inspected.rules[0]?.execution).toBe("covered");
-      expect(inspected.rules[0]?.reason).toContain("fingerprints are current");
+      expect(inspected.rules[0]?.reason).toContain("human-reviewed deterministic coverage is current");
       expect(inspected.inspections).toHaveLength(0);
       expect(checked.stats.requests).toBe(inspected.inspections.length);
     } finally {
