@@ -33,6 +33,7 @@ import {
   persistRobustnessEvidence,
 } from "./evidence-store.js";
 import { discoverFiles, filterFiles } from "./files.js";
+import { assertOwnedRuleEvidence } from "./graduation.js";
 import {
   formatFixtureDriftStylish,
   formatFixtureStylish,
@@ -490,6 +491,12 @@ async function run(args: CliOptions, gitCwd: string, snapshotMode: boolean): Pro
     (hasOwnedRules || hasRuntimeRulePolicy)
       ? (await evaluateConfiguredRuleEvidence(config, { modelNamespace })).reports
       : undefined;
+
+  // Fail closed before constructing a provider so missing credentials cannot mask
+  // a blocked owned-rule evidence gate.
+  if (hasOwnedRules && (args.command === "check" || args.command === "replay")) {
+    assertOwnedRuleEvidence(config.rules, ruleEvidenceReports);
+  }
 
   const baselineFile = resolve(config.baselineFile ?? DEFAULT_BASELINE_FILE);
   const baseline =
