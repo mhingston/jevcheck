@@ -101,6 +101,9 @@ describe("CLI JSON stdout contract (built binary)", () => {
     expect(result.code).toBe(2);
     expect(result.stderr).toBe("");
     const output = JSON.parse(result.stdout);
+    if (output.error?.code !== "OWNED_RULE_EVIDENCE_BLOCKED") {
+      throw new Error("Unexpected owned-check failure: " + JSON.stringify(output));
+    }
     expect(output).toMatchObject({
       command: "check", outcome: "error",
       error: { code: "OWNED_RULE_EVIDENCE_BLOCKED", ruleId: "sample/coverage" },
