@@ -13,6 +13,8 @@ export interface CliDiagnostic {
 export function evidenceState(report: RuleEvidenceReport): string {
   if (report.execution === "inapplicable") return "inapplicable";
   const coverage = report.checks.find((check) => check.id === "coverage");
+  // Owned rules fail closed on blockers; they do not fall back to judging.
+  if (report.currentStatus === "owned" && report.blockers.length) return "blocked";
   if (report.execution === "covered")
     return /passing CI commands for all coveredBy checks/i.test(coverage?.message ?? "") ? "ci-verified" : "reviewed-only";
   if (coverage && /fallback|failed|stale|unverified|missing/i.test(coverage.message)) return "semantic-fallback";
@@ -156,10 +158,14 @@ export function formatCommandJson(command: string, value: unknown, format: Outpu
 export function requestedFormat(argv: readonly string[]): "json" | "json-v2" | undefined {
   const end = argv.indexOf("--");
   const args = end < 0 ? argv : argv.slice(0, end);
-  for (let i = 0; i + 1 < args.length; i++)
-    if (args[i] === "--format" && (args[i + 1] === "json" || args[i + 1] === "json-v2"))
-      return args[i + 1] as "json" | "json-v2";
-  return undefined;
+  let selected: string | undefined;
+  for (let i = 0; i + 1 < args.length; i++) {
+    if (args[i] === "--format") {
+      // parseArgs honours the last --format, including a later non-JSON override.
+      selected = args[++i];
+    }
+  }
+  return selected === "json" || selected === "json-v2" ? selected : undefined;
 }
 export function requestedCommand(argv: readonly string[]): string {
   if (argv[0] === "rules" && argv[1] === "audit") return "rules-audit";
