@@ -94,7 +94,7 @@ Every supported command emits **exactly one JSON object** on stdout, including e
 
 The stable top-level fields are `schemaVersion` (JSON contract version), `command`, `outcome` (`pass` / `warn` / `block` / `error`), `summary`, `diagnostics`, and `data`. The `data` property retains **all** detailed command results, including evidence checks, findings, requests and statistics. Machine-actionable diagnostics have `code`, `level` and `message` plus optional `path`, `ruleId`, `remediation`, `suggestedCommand`.
 
-An argument/config/runtime error returns the same envelope with `outcome: "error"`, `data: null`, and an additional `error` field containing the primary diagnostic. JSON output is clean: subprocess stdout from `coverage verify` is redirected to stderr. Put `--format json` before `--`; anything after `--` belongs to the child process.
+An argument/config/runtime error returns the same envelope with `outcome: "error"`, `data: null`, and an additional `error` field containing the primary diagnostic. Config parsing and validation failures use `CONFIG_ERROR`, not `INVALID_ARGUMENT`. An owned-rule evidence failure also returns `outcome: "error"` but carries the blocked rule's complete evidence report under `data.evidenceReports`, plus each gate's machine-readable diagnostic and remediation; enforcement still fails closed. JSON output is clean: subprocess stdout from `coverage verify` is redirected to stderr. Put `--format json` before `--`; anything after `--` belongs to the child process.
 
 ### JSON command payloads and outcomes
 
@@ -106,7 +106,7 @@ An argument/config/runtime error returns the same envelope with `outcome: "error
 | `coverage verify` | `{checkId,status,evidenceFile}` | `block` for failed CI checks, propagating the child exit code |
 | `test` | Fixture or robustness results and evidence status | Failed fixtures, unrecorded calibration/confirmation, drift differences or incomplete robustness gates produce `block` |
 | `list`, `recall`, `record`, `baseline`, `coverage record` | Their complete existing command-specific detail | Common machine-readable command/outcome/diagnostics envelope |
-| Errors | `null` plus top-level `error` diagnostic | `error`, exit code 2 |
+| Errors | `null` plus top-level `error` diagnostic; owned-rule evidence errors include `{evidenceReports:[...]}` | `error`, exit code 2; blocked evidence never permits enforcement |
 
 Audit `state` values distinguish `semantic`, `blocked`, `semantic-fallback`, `inapplicable`, `reviewed-only`, and `ci-verified`. Human-reviewed declarations are **not** passing CI results; inapplicable rules are **not** evidence-ready. Failing check/inspect/fixture gates normally exit 1; `coverage verify` propagates the child failure code; argument/config/runtime errors exit 2. The structured `outcome` is always a separate concept from the process exit code.
 
