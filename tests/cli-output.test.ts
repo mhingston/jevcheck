@@ -56,6 +56,49 @@ describe("CLI presentation contracts", () => {
     expect(requestedFormat(["coverage", "verify", "--", "node", "--format", "json"])).toBeUndefined();
   });
 
+  it("treats owned blocked coverage as blocked rather than a semantic fallback", () => {
+    const blocked: RuleEvidenceReport = {
+      ...report, checks: [{ id: "coverage", status: "block",
+        message: "deterministic CI check failed: unit; owned enforcement blocked" }],
+      blockers: ["deterministic CI check failed"], readyForOwned: false,
+    };
+    expect(evidenceState(blocked)).toBe("blocked");
+    expect(JSON.parse(formatCommandJson("rules-audit", [blocked], "json-v2")).summary.semanticFallback)
+      .toBe(0);
+  });
+
+  it("matches fixture, drift, and robustness failure outcomes rather than relying on diagnostics", () => {
+    const failed = JSON.parse(formatCommandJson("test", {
+      tests: [{ passed: false }], diagnostics: [], stats: {},
+    }, "json-v2"));
+    expect(failed.outcome).toBe("block");
+    expect(failed.summary.failed).toBe(1);
+    expect(failed.diagnostics[0].code).toBe("FIXTURE_GATE_FAILED");
+
+    const drift = JSON.parse(formatCommandJson("test", {
+      tests: [{ passed: true }], diagnostics: [],
+      drift: { moved: [{ ruleId: "test" }], stale: [], added: [], removed: [] },
+    }, "json-v2"));
+    expect(drift.outcome).toBe("block");
+
+    const notRecorded = JSON.parse(formatCommandJson("test", {
+      tests: [{ passed: true }], diagnostics: [], confirmationNotRecorded: "no confirmation fixtures",
+    }, "json-v2"));
+    expect(notRecorded.outcome).toBe("block");
+
+    const incomplete = JSON.parse(formatCommandJson("test", {
+      cases: [], complete: false, flips: 0, diagnostics: [],
+    }, "json-v2"));
+    expect(incomplete.outcome).toBe("block");
+    expect(incomplete.diagnostics[0].code).toBe("ROBUSTNESS_INCOMPLETE");
+  });
+
+  it("matches parseArgs last-format-wins semantics for failures and help", () => {
+    expect(requestedFormat(["inspect", "--format", "json", "--format", "json-v2", "--oops"])).toBe("json-v2");
+    expect(requestedFormat(["inspect", "--format", "json-v2", "--format", "stylish", "--oops"])).toBeUndefined();
+    expect(requestedFormat(["inspect", "--format", "json", "--format", "sarif"])).toBeUndefined();
+  });
+
   it("defaults inspect to policy and hides requests and keys outside verbose", () => {
     const value = { rules: [{
       ruleId: "r", path: "a.ts", execution: "semantic" as const, reason: "eligible",
