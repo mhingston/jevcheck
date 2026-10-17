@@ -24,7 +24,36 @@ For first use see [README](../README.md) and [the executable example](../example
 | `jevcheck list` | List configured rules without provider credentials |
 | `jevcheck inspect` | Preview exact semantic requests without a provider call |
 
-Use `--format json` for machine-readable output.
+Use `--format json` for backward-compatible machine-readable output. Existing objects and raw arrays remain intact; the additional `state` and `diagnostics` fields in rule audits are additive.
+
+### Human output and agent JSON
+
+Default `stylish` output is summary-first for `check`, `rules audit`, and `inspect`. Findings are grouped by file and rule. Audits show states, blockers and next actions first, with all evidence checks available via `rules audit --verbose`. `inspect` hides the full request bodies and semantic keys by default; `inspect --verbose` shows exact bounded requests without executing them.
+
+The existing `--format json` retains each command's original top-level structure (including raw arrays for `list` and `rules audit`), and is extended with optional machine-readable evidence diagnostics. The opt-in `--format json-v2` uses a consistent envelope for agent integrations:
+
+~~~sh
+jevcheck rules audit --format json-v2
+jevcheck inspect src/handler.ts --format json-v2
+jevcheck --changed --format json-v2
+jevcheck coverage verify --check unit --format json-v2 -- npm test
+~~~
+
+~~~json
+{
+  "schemaVersion": 2,
+  "command": "rules-audit",
+  "outcome": "block",
+  "summary": {"rules": 1, "blocked": 1, "warnings": 0, "ready": 0, "inapplicable": 0, "reviewedOnly": 0, "ciVerified": 0, "semanticFallback": 0},
+  "diagnostics": [{"code": "EVIDENCE_FIXTURES", "level": "error", "message": "no invalid fixtures", "ruleId": "example", "remediation": "Add or fix valid and invalid fixtures.", "suggestedCommand": "jevcheck test"}],
+  "data": [{"ruleId": "example", "currentStatus": "shadow", "checks": [], "blockers": ["no invalid fixtures"], "warnings": [], "readyForOwned": false, "execution": "semantic", "state": "blocked", "outcome": "block", "diagnostics": []}]
+}
+~~~
+
+The example is illustrative; the `data` field contains the **complete per-command result**, including evidence checks and bounded inspection requests. An error after requesting JSON returns a single value with `outcome: "error"`, structured `error` and `diagnostics` plus exit code 2; `json-v2` also includes `data: null`. Diagnostic codes are stable identifiers, with optional `path`, `ruleId`, `remediation` and `suggestedCommand`. Child stdout is routed to stderr for `coverage verify` in both JSON modes. Put `--format` *before* `--`; flags after `--` belong to the child.
+
+The audit `state` distinguishes `semantic`, `blocked`, `semantic-fallback`, `inapplicable`, `reviewed-only`, and `ci-verified`. Human-reviewed coverage does **not** prove CI execution; inapplicable rules are **not** evidence-ready. Audits can return `outcome: "block"` while exiting 0: this is a graduation-readiness signal rather than a failed command. Check/inspect/fixture failures exit 1; `coverage verify` propagates the command's positive failure code; argument/config/runtime errors exit 2. SARIF output is unchanged.
+
 
 For code-scanning integrations:
 
