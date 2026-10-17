@@ -135,7 +135,7 @@ Use `--config <path>` when not using the root config; `--format json` for machin
 
 ### Agent-readable CLI contract
 
-`--format json` is the **only** JSON format; do not request `json-v2` or parse old top-level command-specific arrays/objects. Every supported command produces one object with `schemaVersion: 1`, `command`, `outcome`, `summary`, `diagnostics` and full `data` on stdout.
+`--format json` is the **single JSON contract**; do not parse obsolete top-level command-specific arrays/objects. Every supported command produces one object with `schemaVersion: 1`, `command`, `outcome`, `summary`, `diagnostics` and full `data` on stdout.
 
 - **Inspect:** `data.rules[]` contains rule/file policies; `data.inspections[]` contains full bounded requests (`request.state`, `request.question`), focus and semantic keys. Read these before invoking a model. `--preview-skipped` entries marked `previewOnly` are hypothetical, **not** requests that enforcement would send.
 - **Rules audit:** `data[]` contains complete reports with `readyForOwned`, `state`, `blockers`, `checks`, and remediation diagnostics. `outcome: "block"` signals evidence/readiness blockers **even though audit may exit 0**; do not treat a zero exit status as approval to promote to `owned`.
