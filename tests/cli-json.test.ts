@@ -52,6 +52,16 @@ describe("CLI JSON stdout contract (built binary)", () => {
       expect(result.diagnostics[0].code).toBeTruthy();
       expect(result.error.remediation).toBeTruthy();
     }
+    const lastJson = execute(cwd, ["inspect", "--format", "json", "--format", "json-v2", "--oops"]);
+    expect(lastJson.code).toBe(2);
+    expect(JSON.parse(lastJson.stdout)).toMatchObject({ schemaVersion: 2, outcome: "error" });
+    const lastStylish = execute(cwd, ["inspect", "--format", "json-v2", "--format", "stylish", "--oops"]);
+    expect(lastStylish.code).toBe(2);
+    expect(lastStylish.stdout).toBe("");
+    expect(lastStylish.stderr).toContain("unknown option");
+    const help = execute(cwd, ["--format", "json", "--format", "json-v2", "--help"]);
+    expect(help.code).toBe(0);
+    expect(JSON.parse(help.stdout)).toMatchObject({ schemaVersion: 2, command: "help" });
   }));
 
   it("keeps inspection complete in JSON and concise for humans", () => project((cwd) => {
