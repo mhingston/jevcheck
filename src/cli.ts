@@ -1,6 +1,5 @@
 #!/usr/bin/env node
 import { readFile } from "node:fs/promises";
-import { spawnSync } from "node:child_process";
 import { isAbsolute, resolve } from "node:path";
 import { createJevClient, JEV_PROVIDERS, type JevProvider } from "@mhingston5/jev-cli";
 import { isLocalRuleSource } from "./architecture-decision.js";
@@ -27,7 +26,7 @@ import {
   DEFAULT_SOURCE_INCLUDE,
   evaluateConfiguredRuleEvidence,
   persistCoverageEvidence,
-  persistCoverageCheckResult,
+  executeCoverageCheck,
   persistDriftEvidence,
   persistMutationEvidence,
   persistRobustnessEvidence,
@@ -399,21 +398,14 @@ async function run(args: CliOptions, gitCwd: string, snapshotMode: boolean): Pro
   }
   if (args.command === "coverage-verify") {
     const checkId = args.coverageCheck!;
-    // Fail first, before launching the check; a retry or interrupted command must
-    // never leave an earlier passing result authoritative for this same CI run.
-    await persistCoverageCheckResult(evidenceFile, config.rules, checkId, "failed");
-    const [executable, ...parameters] = args.verificationCommand!;
-    const result = spawnSync(executable, parameters, { stdio: "inherit", shell: false });
-    if (result.error) throw new Error("coverage check " + checkId + " failed to start: " + result.error.message);
-    if (result.status === 0) {
-      await persistCoverageCheckResult(evidenceFile, config.rules, checkId, "passed");
-    } else {
-      process.exitCode = result.status && result.status > 0 ? result.status : 1;
-    }
+    const code = await executeCoverageCheck(
+      evidenceFile, config.rules, checkId, args.verificationCommand!, process.cwd(), args.format === "json",
+    );
+    if (code !== 0) process.exitCode = code > 0 ? code : 1;
     console.log(
       args.format === "json"
-        ? formatJson({ checkId, status: result.status === 0 ? "passed" : "failed", evidenceFile })
-        : "Coverage CI check " + checkId + ": " + (result.status === 0 ? "passed" : "failed"),
+        ? formatJson({ checkId, status: code === 0 ? "passed" : "failed", evidenceFile })
+        : "Coverage CI check " + checkId + ": " + (code === 0 ? "passed" : "failed"),
     );
     return;
   }
