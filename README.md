@@ -8,6 +8,7 @@ Traditional linters are great at enforcing what can be proved from syntax and ty
 - Inspect exactly what would be sent to a model **without an API key**.
 - Test rules against labelled examples, track drift and recall, and promote them to blocking (`owned`) checks only when the evidence is sound.
 - Run the same rule over source files, staged changes, branch diffs, or CI.
+- Gate rules on declared Node, .NET, or Go dependencies using [manifest-aware `projectWhen.hasDependency`](docs/concepts.md#declared-dependency-predicates) (no package-manager execution).
 
 `jevcheck` uses [`@mhingston5/jev-cli`](https://github.com/mhingston/jev-cli) for provider selection. Node.js 20+ is required.
 

@@ -26,7 +26,15 @@ export interface RuleCriteria {
   false?: string;
 }
 
+export interface DependencyCondition {
+  ecosystem: "node" | "dotnet" | "go";
+  name: string;
+  /** root examines root manifests; workspace includes nested projects. */
+  scope?: "root" | "workspace";
+}
+
 export type ProjectCondition =
+  | { hasDependency: DependencyCondition }
   | { packageJsonHasDep: string }
   | { fileExists: string }
   | { globMatches: string }

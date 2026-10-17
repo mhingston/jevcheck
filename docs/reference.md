@@ -1,6 +1,6 @@
 # CLI, configuration and developer reference
 
-For first use see [README](../README.md) and [the executable example](../examples/queue-ack/README.md).
+For first use see [README](../README.md) and [the executable example](../examples/queue-ack/README.md). For `projectWhen.hasDependency` schema, supported .NET/Go/Node manifests, and root/workspace behavior, see [declared dependency predicates](concepts.md#declared-dependency-predicates).
 ## Common commands
 
 | Command | Use it for |
