@@ -7,12 +7,12 @@ From this repository's root:
 ```sh
 npm ci
 npm run build
-node dist/cli.js inspect examples/multilanguage-ast/sources/example.py --config examples/multilanguage-ast/jevcheck.config.json --rule example/python
-node dist/cli.js inspect examples/multilanguage-ast/sources/example.go --config examples/multilanguage-ast/jevcheck.config.json --rule example/go
-node dist/cli.js inspect examples/multilanguage-ast/sources/example.java --config examples/multilanguage-ast/jevcheck.config.json --rule example/java
-node dist/cli.js inspect examples/multilanguage-ast/sources/example.rs --config examples/multilanguage-ast/jevcheck.config.json --rule example/rust
+node dist/cli.js inspect examples/multilanguage-ast/sources/example.py --config examples/multilanguage-ast/jevcheck.config.json --rule example/python --verbose
+node dist/cli.js inspect examples/multilanguage-ast/sources/example.go --config examples/multilanguage-ast/jevcheck.config.json --rule example/go --verbose
+node dist/cli.js inspect examples/multilanguage-ast/sources/example.java --config examples/multilanguage-ast/jevcheck.config.json --rule example/java --verbose
+node dist/cli.js inspect examples/multilanguage-ast/sources/example.rs --config examples/multilanguage-ast/jevcheck.config.json --rule example/rust --verbose
 ```
 
-All commands are provider-free. Each should emit exactly one inspection with the corresponding language's call node kind and context that contains the Unicode variable `café` and assignment. The accompanying integration tests check patterns, kinds, composite rules, ancestor context, Unicode/CRLF positions, request bounds, invalid selectors, and inspection.
+All commands are provider-free. `--verbose` shows each bounded inspection and its request with the corresponding language's call node kind and context containing the Unicode variable `café` and assignment. Without `--verbose`, the human formatter only reports policy/candidate counts; `--format json` contains exact requests in `data.inspections[]`. The accompanying integration tests check patterns, kinds, composite rules, ancestor context, Unicode/CRLF positions, request bounds, invalid selectors, and inspection.
 
 These parsers are native dependencies. Package installation and the five-pack registration are validated in CI on Linux, macOS, and Windows; packages are not guaranteed on every CPU/OS. See [native installation and approved postinstall scripts](../../docs/reference.md#native-parser-installation). For semantic adoption, first establish a real review invariant and labelled fixtures, and run in shadow mode.
