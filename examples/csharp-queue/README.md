@@ -11,7 +11,8 @@ npm ci
 npm run build
 node dist/cli.js inspect examples/csharp-queue/src/MessageHandler.cs \
   --config examples/csharp-queue/jevcheck.config.json \
-  --rule reliability/no-success-after-publish-failure
+  --rule reliability/no-success-after-publish-failure \
+  --verbose
 ```
 
 The output should show a C# `method_declaration` focus spanning the publish call, exception handler, and `202` return. This command **never contacts a provider** and does not itself assert a violation. For other `.cs` files, use the same rule and change the file path.
