@@ -1,7 +1,8 @@
 import { createHash } from "node:crypto";
+import { spawn } from "node:child_process";
 import { isLocalRuleSource, parseArchitectureDecision, type ArchitectureDecision } from "./architecture-decision.js";
 import { describeProjectCondition, projectConditionMatches } from "./applicability.js";
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, rmdir, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import {
   DEFAULT_CALIBRATION_FILE,
@@ -465,7 +466,8 @@ function validateArtifact(value: unknown): RuleEvidenceArtifact {
   );
 
   const coverage = (file.coverage ?? []).map(
-    (value, index): PersistedCoverageEvidence => {
+    (value, index): PersistedCoverageEvidence | undefined => {
+      try {
       const field = "evidence.coverage[" + index + "]";
       if (!value || typeof value !== "object" || Array.isArray(value)) {
         throw new Error(field + " must be an object");
@@ -547,8 +549,13 @@ function validateArtifact(value: unknown): RuleEvidenceArtifact {
         };
       }
       return { ruleId, identity, links, ...(item.reviewed === true ? { reviewed: true as const } : {}), ...(verification ? { verification } : {}) };
+      } catch {
+        // Invalid or tampered coverage is not authoritative. Preserve other rules
+        // and use semantic fallback rather than aborting the whole audit.
+        return undefined;
+      }
     },
-  );
+  ).filter((item): item is PersistedCoverageEvidence => item !== undefined);
 
   const driftRuleIds = new Set<string>();
   for (const item of drift) {
@@ -952,34 +959,59 @@ export async function persistMutationEvidence(
   await writeRuleEvidenceArtifact(path, artifact);
 }
 
+/** A non-waiting interprocess mutex. A crashed invocation leaves a lock and
+ * fails closed until an operator confirms it is safe to remove the directory.
+ * Hold this across the entire subprocess, not merely the file writes.
+ */
+export async function withCoverageArtifactLock<T>(
+  path: string,
+  action: () => Promise<T>,
+): Promise<T> {
+  await mkdir(dirname(path), { recursive: true });
+  const lock = path + ".lock";
+  try {
+    await mkdir(lock);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "EEXIST") {
+      throw new Error("coverage verification already in progress (or interrupted): " +
+        lock + "; verify the previous process has stopped before removing the lock");
+    }
+    throw error;
+  }
+  try {
+    return await action();
+  } finally {
+    await rmdir(lock);
+  }
+}
+
 export async function persistCoverageEvidence(
   path: string,
   rules: readonly JevCheckRule[],
   cwd = process.cwd(),
   attestReviewed = false,
 ): Promise<number> {
-  const measured: PersistedCoverageEvidence[] = [];
-  for (const rule of rules) {
-    const current = await currentCoverageEvidence(rule, cwd);
-    if (current) measured.push({ ...current, ...(attestReviewed ? { reviewed: true as const } : {}) });
-  }
-  const artifact = await readRuleEvidenceArtifact(path);
-  // Re-recording invalidates all previous CI run evidence, including on unchanged files.
-  artifact.coverage = measured.sort((a, b) => a.ruleId.localeCompare(b.ruleId));
-  await writeRuleEvidenceArtifact(path, artifact);
-  return artifact.coverage.length;
+  return withCoverageArtifactLock(path, async () => {
+    const measured: PersistedCoverageEvidence[] = [];
+    for (const rule of rules) {
+      const current = await currentCoverageEvidence(rule, cwd);
+      if (current) measured.push({ ...current, ...(attestReviewed ? { reviewed: true as const } : {}) });
+    }
+    const artifact = await readRuleEvidenceArtifact(path);
+    // Re-recording invalidates all earlier CI checks, even on unchanged files.
+    artifact.coverage = measured.sort((a, b) => a.ruleId.localeCompare(b.ruleId));
+    await writeRuleEvidenceArtifact(path, artifact);
+    return artifact.coverage.length;
+  });
 }
 
-/** Save one actual command outcome from this CI run. Call with "failed" BEFORE
- * running a check, then overwrite with "passed" only after an exit code of zero.
- * A failed or interrupted retry must never reuse the earlier successful result.
- */
-export async function persistCoverageCheckResult(
+/** This primitive is called only while holding the shared coverage artifact lock. */
+async function writeCoverageCheckResult(
   path: string,
   rules: readonly JevCheckRule[],
   checkId: string,
   status: "passed" | "failed",
-  cwd = process.cwd(),
+  cwd: string,
 ): Promise<number> {
   const run = currentGithubActionsRun(cwd);
   if (!run) {
@@ -1008,6 +1040,49 @@ export async function persistCoverageCheckResult(
   }
   await writeRuleEvidenceArtifact(path, artifact);
   return matched.length;
+}
+
+export async function persistCoverageCheckResult(
+  path: string,
+  rules: readonly JevCheckRule[],
+  checkId: string,
+  status: "passed" | "failed",
+  cwd = process.cwd(),
+): Promise<number> {
+  return withCoverageArtifactLock(path, () =>
+    writeCoverageCheckResult(path, rules, checkId, status, cwd));
+}
+
+/** Serialize the entire verification execution, not just its writes.
+ * Otherwise a late pass from a concurrent job can restore a failed retry.
+ * The command runs without a shell and output is streamed (not buffered).
+ */
+export async function executeCoverageCheck(
+  path: string,
+  rules: readonly JevCheckRule[],
+  checkId: string,
+  argv: readonly string[],
+  cwd = process.cwd(),
+  jsonOutput = false,
+): Promise<number> {
+  if (!argv.length) throw new Error("coverage verify needs a command");
+  return withCoverageArtifactLock(path, async () => {
+    // Mark failed before spawning so crashes/signals cannot reuse a prior pass.
+    await writeCoverageCheckResult(path, rules, checkId, "failed", cwd);
+    const [executable, ...parameters] = argv;
+    const code = await new Promise<number>((resolve, reject) => {
+      const child = spawn(executable, parameters, {
+        cwd, shell: false, stdio: ["inherit", "pipe", "inherit"],
+      });
+      child.stdout?.pipe(jsonOutput ? process.stderr : process.stdout);
+      child.once("error", reject);
+      child.once("close", (status) => resolve(status ?? 1));
+    });
+    if (code === 0) {
+      await writeCoverageCheckResult(path, rules, checkId, "passed", cwd);
+    }
+    return code;
+  });
 }
 
 export async function evaluateConfiguredRuleEvidence(
