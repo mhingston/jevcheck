@@ -399,6 +399,22 @@ describe("reviewed coverage and CI execution evidence", () => {
     expect((await evaluate()).execution).toBe("semantic");
     expect((await readRuleEvidenceArtifact(evidenceFile)).coverage[0]?.verification).toBeUndefined();
   });
+
+  it("never skips an owned rule while a verifier holds (or has stranded) the lock", async () => {
+    const { cwd, rule, evidenceFile, evaluate } = await fixture();
+    githubRun(cwd);
+    await persistCoverageEvidence(evidenceFile, [rule], cwd, true);
+    await persistCoverageCheckResult(evidenceFile, [rule], "tests", "passed", cwd);
+    await persistCoverageCheckResult(evidenceFile, [rule], "lint", "passed", cwd);
+    expect((await evaluate()).execution).toBe("covered");
+    await withCoverageArtifactLock(evidenceFile, async () => {
+      const report = await evaluate();
+      expect(report.execution).toBe("semantic");
+      expect(report.checks.find((check) => check.id === "coverage")?.message)
+        .toContain("lock present");
+    });
+    expect((await evaluate()).execution).toBe("covered");
+  });
   it("prevents overlapping verification writes and clears the lock after failure", async () => {
     const { cwd, rule, evidenceFile, evaluate } = await fixture();
     githubRun(cwd);
