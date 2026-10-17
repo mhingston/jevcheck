@@ -23,6 +23,7 @@ import {
   ruleAppliesToFile,
 } from "./engine.js";
 import { currentCoverageEvidence, type CoverageLinkFingerprint } from "./coverage.js";
+import { currentGithubActionsRun, sameGithubActionsRun, type CoverageRunVerification } from "./coverage-verification.js";
 import { discoverFiles } from "./files.js";
 import { applyMutation, stableMutationOrder } from "./mutate.js";
 import type {
@@ -74,6 +75,10 @@ export interface PersistedCoverageEvidence {
   ruleId: string;
   identity: string;
   links: CoverageLinkFingerprint[];
+  /** Explicit human assertion that the linked checks enforce this invariant. */
+  reviewed?: true;
+  /** Current CI-run execution evidence, not a cryptographically verified attestation. */
+  verification?: CoverageRunVerification;
 }
 
 export interface RuleEvidenceArtifact {
@@ -488,7 +493,60 @@ function validateArtifact(value: unknown): RuleEvidenceArtifact {
         };
       });
       links.sort((a, b) => a.id.localeCompare(b.id) || a.path.localeCompare(b.path));
-      return { ruleId, identity, links };
+      if (item.reviewed !== undefined && item.reviewed !== true) {
+        throw new Error(field + ".reviewed must be true when present");
+      }
+      let verification: CoverageRunVerification | undefined;
+      if (item.verification !== undefined) {
+        const raw = item.verification;
+        if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+          throw new Error(field + ".verification must be an object");
+        }
+        const verify = raw as Record<string, unknown>;
+        const provenance = verify.provenance;
+        if (!provenance || typeof provenance !== "object" || Array.isArray(provenance)) {
+          throw new Error(field + ".verification.provenance must be an object");
+        }
+        const context = provenance as Record<string, unknown>;
+        if (context.provider !== "github-actions" ||
+            typeof context.sha !== "string" || !/^[0-9a-f]{40}$/.test(context.sha) ||
+            typeof context.runId !== "string" || !/^[1-9]\d*$/.test(context.runId) ||
+            typeof context.attempt !== "string" || !/^[1-9]\d*$/.test(context.attempt) ||
+            typeof context.job !== "string" || !/^[a-zA-Z0-9_-]+$/.test(context.job)) {
+          throw new Error(field + ".verification.provenance is invalid");
+        }
+        if (!Array.isArray(verify.checks)) {
+          throw new Error(field + ".verification.checks must be an array");
+        }
+        const seenChecks = new Set<string>();
+        const checks = verify.checks.map((rawCheck, checkIndex) => {
+          const checkField = field + ".verification.checks[" + checkIndex + "]";
+          if (!rawCheck || typeof rawCheck !== "object" || Array.isArray(rawCheck)) {
+            throw new Error(checkField + " must be an object");
+          }
+          const check = rawCheck as Record<string, unknown>;
+          const id = nonEmptyString(check.id, checkField + ".id");
+          if (seenChecks.has(id) || !ids.has(id)) {
+            throw new Error(checkField + ".id must be unique and declared in links");
+          }
+          seenChecks.add(id);
+          if (check.status !== "passed" && check.status !== "failed") {
+            throw new Error(checkField + ".status must be passed or failed");
+          }
+          return { id, status: check.status };
+        });
+        verification = {
+          provenance: {
+            provider: "github-actions",
+            sha: context.sha as string,
+            runId: context.runId as string,
+            attempt: context.attempt as string,
+            job: context.job as string,
+          },
+          checks: checks.sort((a, b) => a.id.localeCompare(b.id)),
+        };
+      }
+      return { ruleId, identity, links, ...(item.reviewed === true ? { reviewed: true as const } : {}), ...(verification ? { verification } : {}) };
     },
   );
 
@@ -898,16 +956,58 @@ export async function persistCoverageEvidence(
   path: string,
   rules: readonly JevCheckRule[],
   cwd = process.cwd(),
+  attestReviewed = false,
 ): Promise<number> {
   const measured: PersistedCoverageEvidence[] = [];
   for (const rule of rules) {
     const current = await currentCoverageEvidence(rule, cwd);
-    if (current) measured.push(current);
+    if (current) measured.push({ ...current, ...(attestReviewed ? { reviewed: true as const } : {}) });
   }
   const artifact = await readRuleEvidenceArtifact(path);
+  // Re-recording invalidates all previous CI run evidence, including on unchanged files.
   artifact.coverage = measured.sort((a, b) => a.ruleId.localeCompare(b.ruleId));
   await writeRuleEvidenceArtifact(path, artifact);
   return artifact.coverage.length;
+}
+
+/** Save one actual command outcome from this CI run. Call with "failed" BEFORE
+ * running a check, then overwrite with "passed" only after an exit code of zero.
+ * A failed or interrupted retry must never reuse the earlier successful result.
+ */
+export async function persistCoverageCheckResult(
+  path: string,
+  rules: readonly JevCheckRule[],
+  checkId: string,
+  status: "passed" | "failed",
+  cwd = process.cwd(),
+): Promise<number> {
+  const run = currentGithubActionsRun(cwd);
+  if (!run) {
+    throw new Error("coverage verify requires GitHub Actions metadata matching the checked-out git HEAD");
+  }
+  const matched = rules.filter((rule) => rule.coveredBy?.some((link) => link.id === checkId));
+  if (!matched.length) throw new Error("unknown coveredBy check id: " + checkId);
+  const artifact = await readRuleEvidenceArtifact(path);
+  for (const rule of matched) {
+    const recorded = artifact.coverage.find((item) => item.ruleId === rule.id);
+    const current = await currentCoverageEvidence(rule, cwd);
+    if (!recorded || !recorded.reviewed || !current || recorded.identity !== current.identity) {
+      throw new Error("rule " + rule.id + " needs current, explicitly reviewed coverage before verification");
+    }
+  }
+  for (const rule of matched) {
+    const recorded = artifact.coverage.find((item) => item.ruleId === rule.id)!;
+    const checks = recorded.verification && sameGithubActionsRun(recorded.verification.provenance, run)
+      ? recorded.verification.checks.filter((check) => check.id !== checkId)
+      : [];
+    checks.push({ id: checkId, status });
+    recorded.verification = {
+      provenance: run,
+      checks: checks.sort((a, b) => a.id.localeCompare(b.id)),
+    };
+  }
+  await writeRuleEvidenceArtifact(path, artifact);
+  return matched.length;
 }
 
 export async function evaluateConfiguredRuleEvidence(
@@ -976,6 +1076,7 @@ export async function evaluateConfiguredRuleEvidence(
   const persistedMutation = new Map(artifact.mutation.map((item) => [item.ruleId, item]));
   const persistedRobustness = new Map(artifact.robustness.map((item) => [item.ruleId, item]));
   const persistedCoverage = new Map(artifact.coverage.map((item) => [item.ruleId, item]));
+  const ciRun = currentGithubActionsRun(cwd);
   const reports: RuleEvidenceReport[] = [];
 
   for (const rule of config.rules) {
@@ -990,32 +1091,57 @@ export async function evaluateConfiguredRuleEvidence(
       };
     }
 
-    let coverage: { status: "covered" | "stale"; message: string } | undefined;
+    let coverage: { status: "covered" | "reviewed" | "recorded" | "unverified" | "failed" | "stale"; message: string } | undefined;
     if (rule.coveredBy?.length) {
       const recorded = persistedCoverage.get(rule.id);
       try {
         const current = await currentCoverageEvidence(rule, cwd);
-        if (recorded && current && recorded.identity === current.identity) {
-          coverage = {
-            status: "covered",
-            message:
-              "covered by " +
-              current.links.map((link) => link.id + " (" + link.path + ")").join(", ") +
-              "; fingerprints are current, semantic judge skipped",
-          };
-        } else {
+        if (!recorded || !current || recorded.identity !== current.identity) {
           coverage = {
             status: "stale",
-            message: recorded
-              ? "deterministic coverage is stale; semantic fallback active; rerun jevcheck coverage record after reviewing the coverage change"
-              : "deterministic coverage is not recorded; semantic fallback active; run jevcheck coverage record after reviewing the declared coverage",
+            message: (recorded ? "stale" : "missing") +
+              " coverage fingerprints; semantic fallback active; review and run coverage record --attest-reviewed",
           };
+        } else if (!recorded.reviewed) {
+          coverage = {
+            status: "recorded",
+            message: "fingerprints recorded, but deterministic coverage has not been explicitly reviewed; semantic fallback active",
+          };
+        } else if ((rule.status ?? "shadow") === "shadow") {
+          coverage = {
+            status: "reviewed",
+            message: "human-reviewed deterministic coverage is current; shadow semantic judge skipped (CI execution not verified)",
+          };
+        } else {
+          const verification = recorded.verification;
+          const sameRun = ciRun && verification &&
+            sameGithubActionsRun(ciRun, verification.provenance);
+          const statuses = new Map(sameRun ? verification.checks.map((check) => [check.id, check.status]) : []);
+          const failed = current.links.filter((link) => statuses.get(link.id) === "failed");
+          const missing = current.links.filter((link) => statuses.get(link.id) !== "passed");
+          coverage = failed.length
+            ? {
+                status: "failed",
+                message: "deterministic CI check failed: " +
+                  failed.map((link) => link.id).join(", ") + "; owned enforcement blocked",
+              }
+            : missing.length
+              ? {
+                  status: "unverified",
+                  message: "reviewed coverage, but passing CI execution evidence is missing or not from this GitHub Actions run for: " +
+                    missing.map((link) => link.id).join(", ") + "; semantic fallback active",
+                }
+              : {
+                  status: "covered",
+                  message: "reviewed coverage with passing CI commands for all coveredBy checks on " +
+                    ciRun!.sha.slice(0, 12) + " (GitHub Actions run " + ciRun!.runId +
+                    "/" + ciRun!.attempt + "); semantic judge skipped",
+                };
         }
       } catch (error) {
         coverage = {
           status: "stale",
-          message:
-            "deterministic coverage cannot be verified; semantic fallback active: " +
+          message: "deterministic coverage files cannot be read; semantic fallback active: " +
             (error instanceof Error ? error.message : String(error)),
         };
       }

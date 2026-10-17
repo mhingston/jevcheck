@@ -79,7 +79,7 @@ export interface RuleEvidenceInputs {
     message: string;
   };
   coverage?: {
-    status: "covered" | "stale";
+    status: "covered" | "reviewed" | "recorded" | "unverified" | "failed" | "stale";
     message: string;
   };
   architectureDecision?: {
@@ -322,10 +322,14 @@ export function evaluateRuleEvidence(
   if (evidence.coverage) {
     checks.push({
       id: "coverage",
-      status: evidence.coverage.status === "covered" ? "pass" : "warn",
+      status: evidence.coverage.status === "covered" || evidence.coverage.status === "reviewed"
+        ? "pass"
+        : evidence.coverage.status === "failed" && (rule.status ?? "shadow") === "owned"
+          ? "block"
+          : "warn",
       message: evidence.coverage.message,
     });
-    if (evidence.coverage.status === "covered") {
+    if (evidence.coverage.status === "covered" || evidence.coverage.status === "reviewed") {
       return finishEvidenceReport(rule, checks, "covered");
     }
   }
