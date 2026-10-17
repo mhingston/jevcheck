@@ -9,14 +9,15 @@ The rule checks a behavioural invariant, not an AST shape. `ast.kind=function_de
 From the **repository root**, with Node.js 20+:
 
 ~~~sh
-npm install --ignore-scripts
+npm ci
 npm run build
 node dist/cli.js inspect examples/queue-ack/src/handler.ts \
   --config examples/queue-ack/jevcheck.config.json \
-  --rule reliability/no-success-after-publish-failure
+  --rule reliability/no-success-after-publish-failure \
+  --verbose
 ~~~
 
-You should see one inspected candidate at the `acceptJob` function, its file/line focus, the configured question and criteria, and the exact model-visible code. This is a deterministic preview. It **does not** classify the code or assert that Jev will find a violation.
+With `--verbose`, you should see one inspected candidate at the `acceptJob` function, its file/line focus, the configured question and criteria, and the exact model-visible code. Without `--verbose`, human output shows policy and candidate counts only; `--format json` puts full request details in `data.inspections[]`. This is a deterministic preview. It **does not** classify the code or assert that Jev will find a violation.
 
 Look for these facts in the preview:
 
