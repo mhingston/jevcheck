@@ -113,3 +113,9 @@ C#, Python, Go, Java, and Rust support language-specific AST selection using `as
 The bundled [agent skill](skills/jevcheck/SKILL.md) guides automated rule authoring without changing the deterministic/model boundary.
 
 MIT licensed.
+
+## CLI output for humans and agents
+
+Default `stylish` output begins with a summary. `check` groups findings by file/rule, `rules audit` shows readiness and actionable blockers, and `inspect` summarises runtime policy without printing requests. Use `inspect --verbose` for exact requests/keys or `rules audit --verbose` for every evidence check. Reviewed coverage and CI-verified coverage are displayed as distinct states.
+
+Existing `--format json` remains supported and retains legacy top-level shapes; `--format json-v2` provides a consistent `schemaVersion`, `command`, `outcome`, `summary`, `diagnostics`, `data` envelope, with structured errors and exit codes. For example, run `jevcheck rules audit --format json-v2` before asking an agent to act on evidence. See the [CLI output contract](docs/reference.md#human-output-and-agent-json).
