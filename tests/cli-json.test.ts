@@ -1,0 +1,111 @@
+import { spawnSync } from "node:child_process";
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
+import { describe, expect, it } from "vitest";
+
+const cli = resolve("dist/cli.js");
+function execute(cwd: string, args: string[], env: NodeJS.ProcessEnv = {}) {
+  const run = spawnSync(process.execPath, [cli, ...args], {
+    cwd, encoding: "utf8", env: { ...process.env, ...env },
+  });
+  if (run.error) throw run.error;
+  return { code: run.status, stdout: run.stdout, stderr: run.stderr };
+}
+function git(cwd: string, args: string[]): string {
+  const result = spawnSync("git", args, { cwd, encoding: "utf8" });
+  if (result.status !== 0) throw new Error("git " + args.join(" ") + ": " + result.stderr);
+  return result.stdout.trim();
+}
+function project(test: (cwd: string) => void) {
+  const cwd = mkdtempSync(join(tmpdir(), "jevcheck-cli-json-"));
+  try {
+    mkdirSync(join(cwd, "src"), { recursive: true });
+    mkdirSync(join(cwd, "tests"), { recursive: true });
+    writeFileSync(join(cwd, "src", "demo.ts"), "const ok = true;\n");
+    writeFileSync(join(cwd, "tests", "coverage.test.ts"), "it('works', () => {});\n");
+    writeFileSync(join(cwd, "jevcheck.config.json"), JSON.stringify({
+      rules: [{
+        id: "sample/coverage", status: "owned", question: "Is the code invalid?",
+        wholeFile: true, files: ["src/**/*.ts"],
+        coveredBy: [{ id: "unit", path: "tests/coverage.test.ts" }],
+      }],
+      include: ["src/**/*.ts"],
+    }));
+    test(cwd);
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+}
+
+describe("CLI JSON stdout contract (built binary)", () => {
+  it("returns one JSON error on bad args and config, keeping stderr separate", () => project((cwd) => {
+    for (const args of [
+      ["--format", "json", "--unknown"],
+      ["inspect", "--config", "missing.json", "--format", "json-v2"],
+    ]) {
+      const run = execute(cwd, args);
+      expect(run.code).toBe(2);
+      expect(run.stderr).toBe("");
+      const result = JSON.parse(run.stdout);
+      expect(result.outcome).toBe("error");
+      expect(result.diagnostics[0].code).toBeTruthy();
+      expect(result.error.remediation).toBeTruthy();
+    }
+  }));
+
+  it("keeps inspection complete in JSON and concise for humans", () => project((cwd) => {
+    const human = execute(cwd, ["inspect"]);
+    expect(human.code).toBe(0);
+    expect(human.stdout).toContain("Inspect:");
+    expect(human.stdout).not.toContain("semantic key:");
+    expect(human.stdout).not.toContain("exact request");
+    const verbose = execute(cwd, ["inspect", "--verbose"]);
+    expect(verbose.stdout).toContain("semantic key:");
+    const agent = execute(cwd, ["inspect", "--format", "json-v2"]);
+    expect(agent.code).toBe(0);
+    const payload = JSON.parse(agent.stdout);
+    expect(payload).toMatchObject({ schemaVersion: 2, command: "inspect", outcome: "pass" });
+    expect(payload.data.rules.length).toBeGreaterThan(0);
+    expect(payload.data.inspections.length).toBeGreaterThan(0);
+    expect(payload.data.inspections[0].request).toBeTruthy();
+  }));
+
+  it("keeps audit arrays compatible and no-match inspect a valid JSON result", () => project((cwd) => {
+    const legacy = execute(cwd, ["rules", "audit", "--format", "json"]);
+    expect(legacy.code).toBe(0);
+    const audits = JSON.parse(legacy.stdout);
+    expect(Array.isArray(audits)).toBe(true);
+    expect(audits[0].state).toBeTruthy();
+    expect(audits[0].checks).toBeTruthy();
+    const empty = execute(cwd, ["inspect", "nothing/**/*.ts", "--format", "json-v2"]);
+    expect(empty.code).toBe(0);
+    expect(JSON.parse(empty.stdout)).toMatchObject({
+      command: "inspect", summary: { rules: 0, candidates: 0 },
+    });
+  }));
+
+  it("redirects noisy failed coverage child stdout to stderr and returns one JSON result", () => project((cwd) => {
+    git(cwd, ["init"]);
+    git(cwd, ["add", "."]);
+    git(cwd, ["-c", "user.name=CI Test", "-c", "user.email=ci@example.test", "commit", "-m", "snapshot"]);
+    const sha = git(cwd, ["rev-parse", "HEAD"]);
+    const env = {
+      GITHUB_ACTIONS: "true", GITHUB_SHA: sha,
+      GITHUB_RUN_ID: "123", GITHUB_RUN_ATTEMPT: "1", GITHUB_JOB: "cli_json_test",
+    };
+    const recorded = execute(cwd, ["coverage", "record", "--attest-reviewed", "--format", "json"], env);
+    expect(recorded.code).toBe(0);
+    expect(JSON.parse(recorded.stdout).reviewed).toBe(true);
+    const verified = execute(cwd, ["coverage", "verify", "--check", "unit", "--format", "json-v2",
+      "--", process.execPath, "-e", "console.log('NOISY_STDOUT'); console.error('NOISY_STDERR'); process.exit(7);"], env);
+    expect(verified.code).toBe(7);
+    expect(verified.stdout).not.toContain("NOISY_STDOUT");
+    expect(verified.stderr).toContain("NOISY_STDOUT");
+    const parsed = JSON.parse(verified.stdout);
+    expect(parsed).toMatchObject({
+      schemaVersion: 2, command: "coverage-verify", outcome: "block",
+      data: { checkId: "unit", status: "failed" },
+    });
+  }));
+});
