@@ -88,7 +88,7 @@ describe("semantic request inspection", () => {
     const config: JevCheckConfig = {
       rules: [selected], evidenceFile: ".jevcheck/evidence.json",
     };
-    await persistCoverageEvidence(join(cwd, config.evidenceFile!), [selected], cwd);
+    await persistCoverageEvidence(join(cwd, config.evidenceFile!), [selected], cwd, true);
 
     const inspectAndCheck = async () => {
       const reports = (await evaluateConfiguredRuleEvidence(config, {
@@ -105,7 +105,7 @@ describe("semantic request inspection", () => {
 
     const covered = await inspectAndCheck();
     expect(covered.rules[0]?.execution).toBe("covered");
-    expect(covered.rules[0]?.reason).toContain("fingerprints are current");
+    expect(covered.rules[0]?.reason).toContain("human-reviewed deterministic coverage is current");
     expect(covered.inspections).toHaveLength(0);
 
     await writeFile(coveredPath, "it('changed', () => {});");
