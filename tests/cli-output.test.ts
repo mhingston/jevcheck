@@ -10,20 +10,21 @@ const report: RuleEvidenceReport = {
 };
 
 describe("CLI presentation contracts", () => {
-  it("retains v1 audit array, evidence checks and actionable diagnostics", () => {
-    const json = JSON.parse(formatCommandJson("rules-audit", [report], "json"));
-    expect(Array.isArray(json)).toBe(true);
-    expect(json[0].checks).toEqual(report.checks);
-    expect(json[0].diagnostics).toMatchObject([{
+  it("wraps audit evidence and actionable diagnostics in the sole JSON envelope", () => {
+    const json = JSON.parse(formatCommandJson("rules-audit", [report]));
+    expect(json).toMatchObject({ schemaVersion: 1, command: "rules-audit",
+      outcome: "block", summary: { rules: 1, blocked: 1 } });
+    expect(json.data[0].checks).toEqual(report.checks);
+    expect(json.data[0].diagnostics).toMatchObject([{
       code: "EVIDENCE_FIXTURES", level: "error", ruleId: "safety/example",
       suggestedCommand: "jevcheck test",
     }]);
   });
 
-  it("provides opt-in v2 command identity, result, summary and full detailed data", () => {
-    const parsed = JSON.parse(formatCommandJson("rules-audit", [report], "json-v2"));
+  it("exposes command identity, outcome and full detailed data", () => {
+    const parsed = JSON.parse(formatCommandJson("rules-audit", [report]));
     expect(parsed).toMatchObject({
-      schemaVersion: 2, command: "rules-audit", outcome: "block",
+      schemaVersion: 1, command: "rules-audit", outcome: "block",
       summary: { rules: 1, blocked: 1 }, data: [{ ruleId: "safety/example" }],
     });
     expect(parsed.diagnostics[0].code).toBe("EVIDENCE_FIXTURES");
@@ -46,13 +47,11 @@ describe("CLI presentation contracts", () => {
     expect(auditJson([reviewed])[0].state).toBe("reviewed-only");
   });
 
-  it("uses structured errors for invalid arguments in both modes", () => {
-    for (const format of ["json", "json-v2"] as const) {
-      const parsed = JSON.parse(formatCommandError("check", Error("unknown option: --oops"), format));
-      expect(parsed.outcome).toBe("error");
-      expect(parsed.diagnostics).toMatchObject([{ code: "INVALID_ARGUMENT" }]);
-      expect(parsed.error.remediation).toBeTruthy();
-    }
+  it("uses the same JSON envelope for invalid arguments", () => {
+    const parsed = JSON.parse(formatCommandError("check", Error("unknown option: --oops")));
+    expect(parsed).toMatchObject({ schemaVersion: 1, command: "check", outcome: "error", data: null });
+    expect(parsed.diagnostics).toMatchObject([{ code: "INVALID_ARGUMENT" }]);
+    expect(parsed.error.remediation).toBeTruthy();
     expect(requestedFormat(["coverage", "verify", "--", "node", "--format", "json"])).toBeUndefined();
   });
 
@@ -63,14 +62,14 @@ describe("CLI presentation contracts", () => {
       blockers: ["deterministic CI check failed"], readyForOwned: false,
     };
     expect(evidenceState(blocked)).toBe("blocked");
-    expect(JSON.parse(formatCommandJson("rules-audit", [blocked], "json-v2")).summary.semanticFallback)
+    expect(JSON.parse(formatCommandJson("rules-audit", [blocked])).summary.semanticFallback)
       .toBe(0);
   });
 
   it("matches fixture, drift, and robustness failure outcomes rather than relying on diagnostics", () => {
     const failed = JSON.parse(formatCommandJson("test", {
       tests: [{ passed: false }], diagnostics: [], stats: {},
-    }, "json-v2"));
+    }));
     expect(failed.outcome).toBe("block");
     expect(failed.summary.failed).toBe(1);
     expect(failed.diagnostics[0].code).toBe("FIXTURE_GATE_FAILED");
@@ -78,24 +77,24 @@ describe("CLI presentation contracts", () => {
     const drift = JSON.parse(formatCommandJson("test", {
       tests: [{ passed: true }], diagnostics: [],
       drift: { moved: [{ ruleId: "test" }], stale: [], added: [], removed: [] },
-    }, "json-v2"));
+    }));
     expect(drift.outcome).toBe("block");
 
     const notRecorded = JSON.parse(formatCommandJson("test", {
       tests: [{ passed: true }], diagnostics: [], confirmationNotRecorded: "no confirmation fixtures",
-    }, "json-v2"));
+    }));
     expect(notRecorded.outcome).toBe("block");
 
     const incomplete = JSON.parse(formatCommandJson("test", {
       cases: [], complete: false, flips: 0, diagnostics: [],
-    }, "json-v2"));
+    }));
     expect(incomplete.outcome).toBe("block");
     expect(incomplete.diagnostics[0].code).toBe("ROBUSTNESS_INCOMPLETE");
   });
 
   it("matches parseArgs last-format-wins semantics for failures and help", () => {
-    expect(requestedFormat(["inspect", "--format", "json", "--format", "json-v2", "--oops"])).toBe("json-v2");
-    expect(requestedFormat(["inspect", "--format", "json-v2", "--format", "stylish", "--oops"])).toBeUndefined();
+    expect(requestedFormat(["inspect", "--format", "stylish", "--format", "json", "--oops"])).toBe("json");
+    expect(requestedFormat(["inspect", "--format", "json", "--format", "stylish", "--oops"])).toBeUndefined();
     expect(requestedFormat(["inspect", "--format", "json", "--format", "sarif"])).toBeUndefined();
   });
 
@@ -114,7 +113,7 @@ describe("CLI presentation contracts", () => {
     expect(compact).not.toContain("private-request");
     expect(compact).not.toContain("private-key");
     expect(formatInspectionStylish(value as any, true)).toContain("private-request");
-    expect(JSON.parse(formatCommandJson("inspect", value, "json")).inspections[0].request.state.code)
+    expect(JSON.parse(formatCommandJson("inspect", value)).data.inspections[0].request.state.code)
       .toBe("private-request");
   });
 });
