@@ -386,8 +386,8 @@ export function formatRuleEvidenceStylish(reports: readonly RuleEvidenceReport[]
       lines.push("  Current reviewed coverage and passing CI checks.");
     const failed = report.checks.filter((c) => c.status !== "pass");
     for (const check of failed) {
-      lines.push("  " + (check.status === "block" ? "BLOCKER" : "WARNING") +
-        " [" + check.id + "]: " + check.message);
+      lines.push("  " + (check.status === "block" ? "BLOCKER: " : "WARNING: ") +
+        check.message + " [" + check.id + "]");
       const advice = evidenceRemediation(check);
       if (advice.suggestedCommand) lines.push("  Next: " + advice.suggestedCommand);
       else if (advice.remediation) lines.push("  Next: " + advice.remediation);
