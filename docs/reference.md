@@ -367,7 +367,7 @@ node dist/cli.js --help
 
 The npm package includes `skills/jevcheck/SKILL.md` for coding agents working with `jevcheck` rules, evidence, suppressions, replay, and graduation.
 
-### Inspect runtime policy (provider-free)
+## Inspect runtime policy (provider-free)
 
 `jevcheck inspect` previews whether **enforcement would call a semantic judge** for each selected rule and source file in the current revision. It never makes a provider request or decides whether a violation exists:
 
