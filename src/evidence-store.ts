@@ -1,7 +1,8 @@
 import { createHash } from "node:crypto";
+import { spawn } from "node:child_process";
 import { isLocalRuleSource, parseArchitectureDecision, type ArchitectureDecision } from "./architecture-decision.js";
 import { describeProjectCondition, projectConditionMatches } from "./applicability.js";
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { access, mkdir, readFile, rename, rmdir, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import {
   DEFAULT_CALIBRATION_FILE,
@@ -23,6 +24,7 @@ import {
   ruleAppliesToFile,
 } from "./engine.js";
 import { currentCoverageEvidence, type CoverageLinkFingerprint } from "./coverage.js";
+import { currentGithubActionsRun, sameGithubActionsRun, type CoverageRunVerification } from "./coverage-verification.js";
 import { discoverFiles } from "./files.js";
 import { applyMutation, stableMutationOrder } from "./mutate.js";
 import type {
@@ -74,6 +76,10 @@ export interface PersistedCoverageEvidence {
   ruleId: string;
   identity: string;
   links: CoverageLinkFingerprint[];
+  /** Explicit human assertion that the linked checks enforce this invariant. */
+  reviewed?: true;
+  /** Current CI-run execution evidence, not a cryptographically verified attestation. */
+  verification?: CoverageRunVerification;
 }
 
 export interface RuleEvidenceArtifact {
@@ -460,7 +466,8 @@ function validateArtifact(value: unknown): RuleEvidenceArtifact {
   );
 
   const coverage = (file.coverage ?? []).map(
-    (value, index): PersistedCoverageEvidence => {
+    (value, index): PersistedCoverageEvidence | undefined => {
+      try {
       const field = "evidence.coverage[" + index + "]";
       if (!value || typeof value !== "object" || Array.isArray(value)) {
         throw new Error(field + " must be an object");
@@ -488,9 +495,67 @@ function validateArtifact(value: unknown): RuleEvidenceArtifact {
         };
       });
       links.sort((a, b) => a.id.localeCompare(b.id) || a.path.localeCompare(b.path));
-      return { ruleId, identity, links };
+      if (item.reviewed !== undefined && item.reviewed !== true) {
+        throw new Error(field + ".reviewed must be true when present");
+      }
+      let verification: CoverageRunVerification | undefined;
+      if (item.verification !== undefined) {
+        const raw = item.verification;
+        if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+          throw new Error(field + ".verification must be an object");
+        }
+        const verify = raw as Record<string, unknown>;
+        const provenance = verify.provenance;
+        if (!provenance || typeof provenance !== "object" || Array.isArray(provenance)) {
+          throw new Error(field + ".verification.provenance must be an object");
+        }
+        const context = provenance as Record<string, unknown>;
+        if (context.provider !== "github-actions" ||
+            typeof context.sha !== "string" || !/^[0-9a-f]{40}$/.test(context.sha) ||
+            typeof context.runId !== "string" || !/^[1-9]\d*$/.test(context.runId) ||
+            typeof context.attempt !== "string" || !/^[1-9]\d*$/.test(context.attempt) ||
+            typeof context.job !== "string" || !/^[a-zA-Z0-9_-]+$/.test(context.job)) {
+          throw new Error(field + ".verification.provenance is invalid");
+        }
+        if (!Array.isArray(verify.checks)) {
+          throw new Error(field + ".verification.checks must be an array");
+        }
+        const seenChecks = new Set<string>();
+        const checks = verify.checks.map((rawCheck, checkIndex) => {
+          const checkField = field + ".verification.checks[" + checkIndex + "]";
+          if (!rawCheck || typeof rawCheck !== "object" || Array.isArray(rawCheck)) {
+            throw new Error(checkField + " must be an object");
+          }
+          const check = rawCheck as Record<string, unknown>;
+          const id = nonEmptyString(check.id, checkField + ".id");
+          if (seenChecks.has(id) || !ids.has(id)) {
+            throw new Error(checkField + ".id must be unique and declared in links");
+          }
+          seenChecks.add(id);
+          if (check.status !== "passed" && check.status !== "failed") {
+            throw new Error(checkField + ".status must be passed or failed");
+          }
+          return { id, status: check.status as "passed" | "failed" };
+        });
+        verification = {
+          provenance: {
+            provider: "github-actions",
+            sha: context.sha as string,
+            runId: context.runId as string,
+            attempt: context.attempt as string,
+            job: context.job as string,
+          },
+          checks: checks.sort((a, b) => a.id.localeCompare(b.id)),
+        };
+      }
+      return { ruleId, identity, links, ...(item.reviewed === true ? { reviewed: true as const } : {}), ...(verification ? { verification } : {}) };
+      } catch {
+        // Invalid or tampered coverage is not authoritative. Preserve other rules
+        // and use semantic fallback rather than aborting the whole audit.
+        return undefined;
+      }
     },
-  );
+  ).filter((item): item is PersistedCoverageEvidence => item !== undefined);
 
   const driftRuleIds = new Set<string>();
   for (const item of drift) {
@@ -894,20 +959,140 @@ export async function persistMutationEvidence(
   await writeRuleEvidenceArtifact(path, artifact);
 }
 
+/** A non-waiting interprocess mutex. A crashed invocation leaves a lock and
+ * fails closed until an operator confirms it is safe to remove the directory.
+ * Hold this across the entire subprocess, not merely the file writes.
+ */
+async function coverageLockPresent(path: string): Promise<boolean> {
+  try {
+    await access(path + ".lock");
+    return true;
+  } catch (error) {
+    // Permission errors are indeterminate and must not authorize a skip.
+    return (error as NodeJS.ErrnoException).code !== "ENOENT";
+  }
+}
+
+export async function withCoverageArtifactLock<T>(
+  path: string,
+  action: () => Promise<T>,
+): Promise<T> {
+  await mkdir(dirname(path), { recursive: true });
+  const lock = path + ".lock";
+  try {
+    await mkdir(lock);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "EEXIST") {
+      throw new Error("coverage verification already in progress (or interrupted): " +
+        lock + "; verify the previous process has stopped before removing the lock");
+    }
+    throw error;
+  }
+  try {
+    return await action();
+  } finally {
+    await rmdir(lock);
+  }
+}
+
 export async function persistCoverageEvidence(
   path: string,
   rules: readonly JevCheckRule[],
   cwd = process.cwd(),
+  attestReviewed = false,
 ): Promise<number> {
-  const measured: PersistedCoverageEvidence[] = [];
-  for (const rule of rules) {
-    const current = await currentCoverageEvidence(rule, cwd);
-    if (current) measured.push(current);
+  return withCoverageArtifactLock(path, async () => {
+    const measured: PersistedCoverageEvidence[] = [];
+    for (const rule of rules) {
+      const current = await currentCoverageEvidence(rule, cwd);
+      if (current) measured.push({ ...current, ...(attestReviewed ? { reviewed: true as const } : {}) });
+    }
+    const artifact = await readRuleEvidenceArtifact(path);
+    // Re-recording invalidates all earlier CI checks, even on unchanged files.
+    artifact.coverage = measured.sort((a, b) => a.ruleId.localeCompare(b.ruleId));
+    await writeRuleEvidenceArtifact(path, artifact);
+    return artifact.coverage.length;
+  });
+}
+
+/** This primitive is called only while holding the shared coverage artifact lock. */
+async function writeCoverageCheckResult(
+  path: string,
+  rules: readonly JevCheckRule[],
+  checkId: string,
+  status: "passed" | "failed",
+  cwd: string,
+): Promise<number> {
+  const run = currentGithubActionsRun(cwd);
+  if (!run) {
+    throw new Error("coverage verify requires GitHub Actions metadata matching the checked-out git HEAD");
   }
+  const matched = rules.filter((rule) => rule.coveredBy?.some((link) => link.id === checkId));
+  if (!matched.length) throw new Error("unknown coveredBy check id: " + checkId);
   const artifact = await readRuleEvidenceArtifact(path);
-  artifact.coverage = measured.sort((a, b) => a.ruleId.localeCompare(b.ruleId));
+  for (const rule of matched) {
+    const recorded = artifact.coverage.find((item) => item.ruleId === rule.id);
+    const current = await currentCoverageEvidence(rule, cwd);
+    if (!recorded || !recorded.reviewed || !current || recorded.identity !== current.identity) {
+      throw new Error("rule " + rule.id + " needs current, explicitly reviewed coverage before verification");
+    }
+  }
+  for (const rule of matched) {
+    const recorded = artifact.coverage.find((item) => item.ruleId === rule.id)!;
+    const checks = recorded.verification && sameGithubActionsRun(recorded.verification.provenance, run)
+      ? recorded.verification.checks.filter((check) => check.id !== checkId)
+      : [];
+    checks.push({ id: checkId, status });
+    recorded.verification = {
+      provenance: run,
+      checks: checks.sort((a, b) => a.id.localeCompare(b.id)),
+    };
+  }
   await writeRuleEvidenceArtifact(path, artifact);
-  return artifact.coverage.length;
+  return matched.length;
+}
+
+export async function persistCoverageCheckResult(
+  path: string,
+  rules: readonly JevCheckRule[],
+  checkId: string,
+  status: "passed" | "failed",
+  cwd = process.cwd(),
+): Promise<number> {
+  return withCoverageArtifactLock(path, () =>
+    writeCoverageCheckResult(path, rules, checkId, status, cwd));
+}
+
+/** Serialize the entire verification execution, not just its writes.
+ * Otherwise a late pass from a concurrent job can restore a failed retry.
+ * The command runs without a shell and output is streamed (not buffered).
+ */
+export async function executeCoverageCheck(
+  path: string,
+  rules: readonly JevCheckRule[],
+  checkId: string,
+  argv: readonly string[],
+  cwd = process.cwd(),
+  jsonOutput = false,
+): Promise<number> {
+  if (!argv.length) throw new Error("coverage verify needs a command");
+  return withCoverageArtifactLock(path, async () => {
+    // Mark failed before spawning so crashes/signals cannot reuse a prior pass.
+    await writeCoverageCheckResult(path, rules, checkId, "failed", cwd);
+    const [executable, ...parameters] = argv;
+    const code = await new Promise<number>((resolve, reject) => {
+      const child = spawn(executable, parameters, {
+        cwd, shell: false, stdio: ["inherit", "pipe", "inherit"],
+      });
+      child.stdout?.pipe(jsonOutput ? process.stderr : process.stdout);
+      child.once("error", reject);
+      child.once("close", (status) => resolve(status ?? 1));
+    });
+    if (code === 0) {
+      await writeCoverageCheckResult(path, rules, checkId, "passed", cwd);
+    }
+    return code;
+  });
 }
 
 export async function evaluateConfiguredRuleEvidence(
@@ -976,6 +1161,8 @@ export async function evaluateConfiguredRuleEvidence(
   const persistedMutation = new Map(artifact.mutation.map((item) => [item.ruleId, item]));
   const persistedRobustness = new Map(artifact.robustness.map((item) => [item.ruleId, item]));
   const persistedCoverage = new Map(artifact.coverage.map((item) => [item.ruleId, item]));
+  const ciRun = currentGithubActionsRun(cwd);
+  const coverageLocked = await coverageLockPresent(evidencePath);
   const reports: RuleEvidenceReport[] = [];
 
   for (const rule of config.rules) {
@@ -990,32 +1177,64 @@ export async function evaluateConfiguredRuleEvidence(
       };
     }
 
-    let coverage: { status: "covered" | "stale"; message: string } | undefined;
+    let coverage: { status: "covered" | "reviewed" | "recorded" | "unverified" | "failed" | "stale"; message: string } | undefined;
     if (rule.coveredBy?.length) {
       const recorded = persistedCoverage.get(rule.id);
       try {
         const current = await currentCoverageEvidence(rule, cwd);
-        if (recorded && current && recorded.identity === current.identity) {
-          coverage = {
-            status: "covered",
-            message:
-              "covered by " +
-              current.links.map((link) => link.id + " (" + link.path + ")").join(", ") +
-              "; fingerprints are current, semantic judge skipped",
-          };
-        } else {
+        if (!recorded || !current || recorded.identity !== current.identity) {
           coverage = {
             status: "stale",
-            message: recorded
-              ? "deterministic coverage is stale; semantic fallback active; rerun jevcheck coverage record after reviewing the coverage change"
-              : "deterministic coverage is not recorded; semantic fallback active; run jevcheck coverage record after reviewing the declared coverage",
+            message: (recorded ? "stale" : "missing") +
+              " coverage fingerprints; semantic fallback active; review and run coverage record --attest-reviewed",
           };
+        } else if (!recorded.reviewed) {
+          coverage = {
+            status: "recorded",
+            message: "fingerprints recorded, but deterministic coverage has not been explicitly reviewed; semantic fallback active",
+          };
+        } else if ((rule.status ?? "shadow") === "shadow") {
+          coverage = {
+            status: "reviewed",
+            message: "human-reviewed deterministic coverage is current; shadow semantic judge skipped (CI execution not verified)",
+          };
+        } else if (coverageLocked) {
+          coverage = {
+            status: "unverified",
+            message: "coverage verification in progress or interrupted (lock present); owned semantic fallback active",
+          };
+        } else {
+          const verification = recorded.verification;
+          const sameRun = ciRun && verification &&
+            sameGithubActionsRun(ciRun, verification.provenance);
+          const statuses = new Map<string, "passed" | "failed">(sameRun
+            ? verification.checks.map((check): [string, "passed" | "failed"] => [check.id, check.status])
+            : []);
+          const failed = current.links.filter((link) => statuses.get(link.id) === "failed");
+          const missing = current.links.filter((link) => statuses.get(link.id) !== "passed");
+          coverage = failed.length
+            ? {
+                status: "failed",
+                message: "deterministic CI check failed: " +
+                  failed.map((link) => link.id).join(", ") + "; owned enforcement blocked",
+              }
+            : missing.length
+              ? {
+                  status: "unverified",
+                  message: "reviewed coverage, but passing CI execution evidence is missing or not from this GitHub Actions run for: " +
+                    missing.map((link) => link.id).join(", ") + "; semantic fallback active",
+                }
+              : {
+                  status: "covered",
+                  message: "reviewed coverage with passing CI commands for all coveredBy checks on " +
+                    ciRun!.sha.slice(0, 12) + " (GitHub Actions run " + ciRun!.runId +
+                    "/" + ciRun!.attempt + "); semantic judge skipped",
+                };
         }
       } catch (error) {
         coverage = {
           status: "stale",
-          message:
-            "deterministic coverage cannot be verified; semantic fallback active: " +
+          message: "deterministic coverage files cannot be read; semantic fallback active: " +
             (error instanceof Error ? error.message : String(error)),
         };
       }
