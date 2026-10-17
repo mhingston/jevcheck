@@ -102,6 +102,33 @@ export function formatCommandJson(command: string, value: unknown, format: Outpu
     summary = { findings: findings.length, blocking, errors, replayMisses,
       files: Number(stats.filesChecked ?? 0) };
     outcome = blocking || errors || replayMisses ? "block" : findings.length || diagnostics.length ? "warn" : "pass";
+  } else if (command === "test" && object(data) && Array.isArray(data.tests)) {
+    const tests = data.tests as Array<{ passed: boolean }>;
+    diagnostics = Array.isArray(data.diagnostics) ? data.diagnostics as CliDiagnostic[] : [];
+    const failed = tests.filter((t) => !t.passed).length;
+    const errors = diagnostics.filter((d) => d.level === "error").length;
+    const incomplete = Boolean(data.confirmationNotRecorded || data.calibrationNotRecorded || data.evidenceNotRecorded);
+    const drift = object(data.drift) ? data.drift : undefined;
+    const driftChanged = drift ? ["moved", "stale", "added", "removed"].some((key) =>
+      Array.isArray(drift[key]) && (drift[key] as unknown[]).length > 0) : false;
+    outcome = failed || errors || incomplete || driftChanged ? "block" :
+      diagnostics.length || tests.some((t) => (t as { thinMargin?: boolean }).thinMargin) ? "warn" : "pass";
+    summary = { fixtures: tests.length, failed, errors, incomplete: incomplete ? 1 : 0,
+      driftChanged: driftChanged ? 1 : 0 };
+    if (failed) diagnostics.push({ code: "FIXTURE_GATE_FAILED", level: "error",
+      message: failed + " fixture(s) did not meet expectations.",
+      remediation: "Review failed fixture evidence and repeat the fixture test.",
+      suggestedCommand: "jevcheck test" });
+  } else if (command === "test" && object(data) && Array.isArray(data.cases)) {
+    diagnostics = Array.isArray(data.diagnostics) ? data.diagnostics as CliDiagnostic[] : [];
+    const complete = data.complete === true;
+    const flips = Number(data.flips ?? 0);
+    outcome = !complete || diagnostics.some((d) => d.level === "error") ? "block" : flips ? "warn" : "pass";
+    summary = { cases: data.cases.length, flips, incomplete: complete ? 0 : 1 };
+    if (!complete) diagnostics.push({ code: "ROBUSTNESS_INCOMPLETE", level: "error",
+      message: "Robustness evidence is incomplete.",
+      remediation: "Resolve missing evaluations and rerun robustness fixtures.",
+      suggestedCommand: "jevcheck test --robustness" });
   } else if (command === "coverage-verify" && object(data)) {
     outcome = data.status === "passed" ? "pass" : "block";
     summary = { checks: 1, failed: data.status === "passed" ? 0 : 1 };
