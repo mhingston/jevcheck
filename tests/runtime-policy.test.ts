@@ -11,6 +11,8 @@ import {
   evaluateConfiguredRuleEvidence,
   persistCoverageEvidence,
   persistCoverageCheckResult,
+  executeCoverageCheck,
+  withCoverageArtifactLock,
   readRuleEvidenceArtifact,
 } from "../src/evidence-store.js";
 import type { JevCheckRule } from "../src/types.js";
@@ -397,4 +399,54 @@ describe("reviewed coverage and CI execution evidence", () => {
     expect((await evaluate()).execution).toBe("semantic");
     expect((await readRuleEvidenceArtifact(evidenceFile)).coverage[0]?.verification).toBeUndefined();
   });
+  it("prevents overlapping verification writes and clears the lock after failure", async () => {
+    const { cwd, rule, evidenceFile, evaluate } = await fixture();
+    githubRun(cwd);
+    await persistCoverageEvidence(evidenceFile, [rule], cwd, true);
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const holding = withCoverageArtifactLock(evidenceFile, async () => {
+      await gate;
+      return 7;
+    });
+    await expect(executeCoverageCheck(
+      evidenceFile, [rule], "tests", [process.execPath, "-e", "process.exit(0)"], cwd,
+    )).rejects.toThrow("coverage verification already in progress");
+    release();
+    expect(await holding).toBe(7);
+    expect(await executeCoverageCheck(
+      evidenceFile, [rule], "tests",
+      [process.execPath, "-e", "process.stdout.write('output'); process.exit(1)"], cwd, true,
+    )).toBe(1);
+    expect((await evaluate()).checks.find((check) => check.id === "coverage")?.status).toBe("block");
+    expect(await executeCoverageCheck(
+      evidenceFile, [rule], "tests", [process.execPath, "-e", "process.exit(0)"], cwd, true,
+    )).toBe(0);
+    expect((await evaluate()).execution).toBe("semantic"); // other check missing
+  });
+
+  it("rejects malformed verification for one rule while keeping other rules usable", async () => {
+    const { cwd, rule, evidenceFile } = await fixture();
+    const other = { ...rule, id: "guard/another" };
+    githubRun(cwd);
+    await persistCoverageEvidence(evidenceFile, [rule, other], cwd, true);
+    await persistCoverageCheckResult(evidenceFile, [rule, other], "tests", "passed", cwd);
+    await persistCoverageCheckResult(evidenceFile, [rule, other], "lint", "passed", cwd);
+    const artifact = await readRuleEvidenceArtifact(evidenceFile);
+    const broken = artifact.coverage.find((item) => item.ruleId === rule.id)! as unknown as Record<string, unknown>;
+    broken.verification = { provenance: { sha: "wrong" }, checks: [] };
+    await writeFile(evidenceFile, JSON.stringify(artifact));
+    const evaluated = await evaluateConfiguredRuleEvidence({
+      evidenceFile,
+      graduation: {
+        requireValidFixture: false, requireInvalidFixture: false,
+        requireCurrentCalibration: false, requireCleanDrift: false,
+        requireMutants: false, requireSource: false,
+      },
+      rules: [rule, other],
+    }, { cwd, modelNamespace: "typesafe:default" });
+    expect(evaluated.reports.map((report) => report.execution)).toEqual(["semantic", "covered"]);
+    expect((await readRuleEvidenceArtifact(evidenceFile)).coverage).toHaveLength(1);
+  });
+
 });
