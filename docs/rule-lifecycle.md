@@ -13,10 +13,10 @@ You do not need all of this to experiment with a shadow rule. The evidence workf
 
 ### 1. Inspect the evidence envelope
 
-Use `jevcheck inspect` while shaping a rule to verify the exact focus, bounded context, question, criteria, semantic fingerprint, and model-visible source before spending a provider call.
+Use `jevcheck inspect --verbose` while shaping a rule to verify the exact focus, bounded context, question, criteria, semantic fingerprint, and model-visible source before spending a provider call. **Plain `inspect` is a compact policy/candidate summary**; `--format json` returns complete requests under `data.inspections[]`.
 
 ~~~sh
-npx jevcheck inspect --rule reliability/unbounded-retry src/client.ts
+npx jevcheck inspect --rule reliability/unbounded-retry src/client.ts --verbose
 npx jevcheck inspect --changed --base origin/main --format json
 ~~~
 
@@ -147,7 +147,7 @@ Do not tune against confirmation failures and then call the same cases untouched
 npx jevcheck rules audit
 ~~~
 
-The audit reports whether each rule has the evidence required to act as an owned rule and explains any blockers. It also shows advisory threshold-separation diagnostics from current labelled calibration and persisted robustness results. If confirmation fixtures are configured, missing, stale, or failing confirmation evidence blocks graduation. If valid and invalid development fixture probabilities overlap, the audit says explicitly that no single threshold can separate the labelled fixtures rather than encouraging threshold tuning.
+The audit reports whether each rule has the evidence required to act as an owned rule and explains any blockers. For agents, `jevcheck rules audit --format json` returns reports under `data[]`; `outcome: "block"` flags evidence blockers even when the audit process exits 0. Do not promote a rule based on that exit code alone. A blocked owned check/replay exits 2 with an `OWNED_RULE_EVIDENCE_BLOCKED` diagnostic and gate details in `data.evidenceReports[]`. It also shows advisory threshold-separation diagnostics from current labelled calibration and persisted robustness results. If confirmation fixtures are configured, missing, stale, or failing confirmation evidence blocks graduation. If valid and invalid development fixture probabilities overlap, the audit says explicitly that no single threshold can separate the labelled fixtures rather than encouraging threshold tuning.
 
 ### 9. Promote to owned
 

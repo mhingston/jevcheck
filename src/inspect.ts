@@ -167,35 +167,45 @@ export async function inspectSource(
   return inspectSources([input], rules, options);
 }
 
-export function formatInspectionStylish(result: InspectResult): string {
-  const sections: string[] = [];
-
+export function formatInspectionStylish(result: InspectResult, verbose = false): string {
+  const semantic = result.rules.filter((r) => r.execution === "semantic").length;
+  const covered = result.rules.filter((r) => r.execution === "covered").length;
+  const inapplicable = result.rules.filter((r) => r.execution === "inapplicable").length;
+  const errors = result.diagnostics.filter((d) => d.level === "error").length;
+  const lines = [
+    (errors ? "BLOCK" : result.diagnostics.length ? "WARN" : "PASS") +
+      "  Inspect: " + result.rules.length + " rule/file policies  |  " +
+      semantic + " semantic  |  " + covered + " covered  |  " +
+      inapplicable + " inapplicable  |  " + result.inspections.length + " candidates",
+  ];
   for (const rule of result.rules) {
-    sections.push([
-      rule.ruleId + "  " + rule.path + "  [" + rule.execution + "]",
-      "  reason: " + rule.reason,
-      "  selector: " + rule.selector,
-      "  candidates: " + (rule.selectorRan ? rule.candidateCount : "not evaluated (policy skipped)"),
-      ...rule.selectorDiagnostics.map((diagnostic) =>
-        "  selector " + diagnostic.level + ": " + diagnostic.message),
-    ].join("\n"));
+    lines.push("", rule.ruleId + "  " + rule.path + "  [" + rule.execution + "]");
+    lines.push("  " + rule.reason);
+    lines.push("  selector: " + rule.selector + "  |  candidates: " +
+      (rule.selectorRan ? rule.candidateCount : "not evaluated (policy skipped)"));
+    for (const d of rule.selectorDiagnostics)
+      lines.push("  " + d.level.toUpperCase() + "  " + d.message);
   }
-
-  for (const item of result.inspections) {
-    const focus = item.focusRange
-      ? item.path + ":" + item.focusRange.start.line + ":" + item.focusRange.start.column +
-        "-" + item.focusRange.end.line + ":" + item.focusRange.end.column
-      : item.path + ":" + item.focusLineRange[0] + "-" + item.focusLineRange[1];
-    sections.push([
-      item.ruleId + "  " + focus + (item.previewOnly ? "  [preview only: " + item.execution + "]" : "  [semantic]"),
-      "  selector: " + item.selector,
-      "  context: " + item.range[0] + "-" + item.range[1],
-      ...(item.focusKind ? ["  focus kind: " + item.focusKind] : []),
-      "  semantic key: " + item.semanticKey,
-      "  estimated request chars: " + item.estimatedRequestChars,
-      item.previewOnly ? "  hypothetical request (NOT sent by check):" : "  exact request (if judged):",
-      JSON.stringify({ state: item.request.state, question: item.request.question }, null, 2),
-    ].join("\n"));
+  if (verbose) {
+    for (const item of result.inspections) {
+      const focus = item.focusRange
+        ? item.path + ":" + item.focusRange.start.line + ":" + item.focusRange.start.column +
+          "-" + item.focusRange.end.line + ":" + item.focusRange.end.column
+        : item.path + ":" + item.focusLineRange[0] + "-" + item.focusLineRange[1];
+      lines.push("", item.ruleId + "  " + focus +
+        (item.previewOnly ? "  [preview only: " + item.execution + "; NOT sent by check]" : "  [semantic]"));
+      lines.push("  selector: " + item.selector);
+      lines.push("  context: " + item.range[0] + "-" + item.range[1]);
+      if (item.focusKind) lines.push("  focus kind: " + item.focusKind);
+      lines.push("  semantic key: " + item.semanticKey);
+      lines.push("  estimated request chars: " + item.estimatedRequestChars);
+      lines.push(item.previewOnly ? "  hypothetical request (NOT sent by check):" : "  exact request (if judged):");
+      lines.push(JSON.stringify({ state: item.request.state, question: item.request.question }, null, 2));
+    }
+  } else if (result.inspections.some((item) => item.previewOnly)) {
+    lines.push("", "Hypothetical preview candidates are NOT sent by check.");
   }
-  return sections.length ? sections.join("\n\n") : "No rules or source files selected.";
+  if (!result.rules.length) lines.push("", "No rules or source files selected.");
+  lines.push("", "Use --verbose to see complete requests and semantic keys; --format json for complete structured data.");
+  return lines.join("\n");
 }

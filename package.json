@@ -1,6 +1,6 @@
 {
   "name": "@mhingston5/jevcheck",
-  "version": "0.7.0",
+  "version": "0.6.0",
   "description": "Provider-agnostic semantic linting for bounded code-review questions using Jev",
   "license": "MIT",
   "author": "Mark Hingston",
@@ -46,6 +46,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
+    "pretest": "npm run build",
     "test": "vitest run tests",
     "test:watch": "vitest tests",
     "pack:check": "npm pack --dry-run",

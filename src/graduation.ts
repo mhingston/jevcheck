@@ -3,6 +3,14 @@ import type {
   RuleEvidenceReport,
 } from "./types.js";
 
+/** Keeps failed ownership gates machine-readable without weakening fail-closed enforcement. */
+export class OwnedRuleEvidenceError extends Error {
+  constructor(message: string, public readonly report: RuleEvidenceReport) {
+    super(message);
+    this.name = "OwnedRuleEvidenceError";
+  }
+}
+
 export function assertOwnedRuleEvidence(
   rules: readonly JevCheckRule[],
   reports: readonly RuleEvidenceReport[] | undefined,
@@ -14,10 +22,14 @@ export function assertOwnedRuleEvidence(
 
     const report = byRule.get(rule.id);
     if (!report) {
-      throw new Error(
-        "Rule " +
-          rule.id +
-          " cannot be owned:\n- no rule evidence report supplied",
+      const message = "no rule evidence report supplied";
+      throw new OwnedRuleEvidenceError(
+        "Rule " + rule.id + " cannot be owned:\n- " + message,
+        {
+          ruleId: rule.id, currentStatus: "owned", execution: "semantic",
+          checks: [{ id: "evidence", status: "block", message }],
+          blockers: [message], warnings: [], readyForOwned: false,
+        },
       );
     }
 
@@ -25,11 +37,10 @@ export function assertOwnedRuleEvidence(
       const blockers = report.blockers.length
         ? report.blockers
         : ["rule evidence is not ready for owned status"];
-      throw new Error(
-        "Rule " +
-          rule.id +
-          " cannot be owned:\n" +
+      throw new OwnedRuleEvidenceError(
+        "Rule " + rule.id + " cannot be owned:\n" +
           blockers.map((message) => "- " + message).join("\n"),
+        report,
       );
     }
   }

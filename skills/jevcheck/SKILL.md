@@ -23,19 +23,20 @@ If a candidate requires following code across files or opaque helpers, a model c
 
 ## 2. First use: inspect before spending a provider call
 
-For an existing jevcheck repository, start with `jevcheck.config.json` and available source paths; run `npx jevcheck list` and `npx jevcheck inspect` before contacting a provider.
+For an existing jevcheck repository, start with `jevcheck.config.json` and available source paths; run `npx jevcheck list` and `npx jevcheck inspect` before contacting a provider. **Default inspect is compact** (policy, eligibility and candidate counts); add `--verbose` to inspect the exact model-visible request and semantic key, or use `--format json` for structured request data.
 
 For a fully reproducible introduction, use the [queue acknowledgement example](https://github.com/mhingston/jevcheck/tree/main/examples/queue-ack) from the **jevcheck source checkout** (not from the installed npm package):
 
 ~~~sh
-npm install --ignore-scripts
+npm ci
 npm run build
 node dist/cli.js inspect examples/queue-ack/src/handler.ts \
   --config examples/queue-ack/jevcheck.config.json \
-  --rule reliability/no-success-after-publish-failure
+  --rule reliability/no-success-after-publish-failure \
+  --verbose
 ~~~
 
-The example includes an invariant, broken handler, safe/unsafe fixtures and a scoped `shadow` rule. It is production-inspired but illustrative, **not** proof of a model's accuracy. Inspection builds the exact bounded semantic request without a provider or credentials; it **does not** classify a violation.
+The example includes an invariant, broken handler, safe/unsafe fixtures and a scoped `shadow` rule. It is production-inspired but illustrative, **not** proof of a model's accuracy. `inspect --verbose` displays the bounded request without a provider or credentials; **plain `inspect` does not print request bodies**. Inspection does **not** classify a violation. Use `npm ci` with lifecycle scripts enabled: supported native-language AST parsers can require their postinstall steps.
 
 For a project-local installation use `npm install --save-dev @mhingston5/jevcheck` and run `npx jevcheck ...` with your own `jevcheck.config.json`.
 
@@ -46,7 +47,7 @@ For a project-local installation use `npm install --save-dev @mhingston5/jevchec
 3. **Identify applicability deterministically:** start with top-level `include`, add per-rule `files` / `exclude` only when needed, and optionally use `projectWhen` at repo scope. Prefer `ast` plus literal `contains` to find a small focus; use regex `prefilter` and `unless` when necessary. Verify enough context is available and no unrelated code is judged.
 4. **Check exact coverage:** do not duplicate an equivalent deterministic rule or test with another model decision. Use `coveredBy` only for *reviewed* exact enforcement.
 5. **Set `status: "shadow"`:** never start a new or unvalidated rule as blocking. Add `why` and `source` provenance when possible.
-6. **Inspect the request:** run `jevcheck inspect --rule <id> <path>`. Inspect the focus, surrounding context, question, semantic identity and model-visible source. Resolve "no candidates" or oversized/skipped focuses before model calls.
+6. **Inspect the request:** run `jevcheck inspect --rule <id> <path> --verbose` (or `--format json`). Inspect the focus, surrounding context, question, semantic identity and model-visible source. The non-verbose human output only gives policy/candidate summaries. Resolve "no candidates" or oversized/skipped focuses before model calls.
 7. **Label both outcomes:** add genuinely valid and invalid development fixtures; later reserve untouched confirmation fixtures. Measure rather than assuming a sensible-looking question is reliable.
 
 Use a bounded question, not an instruction such as "review this code for security issues". `threshold`, severity, suppression, applicability, status and exit codes are code policy, not decisions left to the model.
@@ -54,7 +55,7 @@ Use a bounded question, not an instruction such as "review this code for securit
 ### Candidate selection and scope
 
 - JSON syntax: `"ast": "function_declaration"` is shorthand for `"ast": { "kind": "function_declaration" }` (node kind, not AST pattern), and `"contains": "queue.publish("` is a case-sensitive **literal** filter. `contains` and regex `prefilter` cannot be combined. The parser normalises them before execution and fingerprints; the TypeScript API uses canonical rule objects.
-- Since v0.7.0, unknown keys in jevcheck configuration are rejected rather than ignored, including nested selectors, criteria, fixtures and mutants. Fix the reported config path/typo; do not bypass validation. Composite `ast.rule` follows ast-grep's grammar and is intentionally passed through unchanged.
+- The current configuration parser rejects unknown keys rather than ignoring them, including nested selectors, criteria, fixtures and mutants. Fix the reported config path/typo; do not bypass validation. Composite `ast.rule` follows ast-grep's grammar and is intentionally passed through unchanged.
 - Supported `ast` object selectors: exactly one of `pattern`, `kind` or `rule` (ast-grep rule object). Automatic AST language mapping covers JavaScript, TypeScript, TSX, HTML, CSS, C# (`.cs`), Python (`.py`), Go (`.go`), Java (`.java`) and Rust (`.rs`); `ast.language` can override with `javascript`, `typescript`, `tsx`, `html`, `css`, `csharp`, `python`, `go`, `java` or `rust`. The last five use native `@ast-grep/lang-*` parsers; enable approved install scripts and validate with provider-free `inspect`.
 - Default discovery includes `.html`, `.htm` and `.css` alongside JS/TS/C#/Python/Go/Java/Rust, and also `.rb`, `.php`, `.vue`, `.svelte` **for text/chunk semantic checks only**. Discovery does not imply AST support: there is no built-in Ruby/PHP/Vue/Svelte grammar or inference. Other UTF-8 extensions require explicit `include` (or explicit paths). See the [source/AST matrix](https://github.com/mhingston/jevcheck/blob/main/docs/reference.md#ast-language-support-and-native-parsers).
 - If an applicable AST rule encounters an unmapped extension, jevcheck emits `incomplete-evaluation`, not a successful zero-match. Owned error rules fail closed; shadow and owned warning rules show diagnostics. Prefer scoping `files`/`exclude` to supported grammar(s), or removing `ast` for text/chunk checking. Override `ast.language` only when the full source syntax is compatible (never assume Vue/Svelte components are plain HTML/JS).
@@ -97,7 +98,7 @@ Use the following in order as needed; a simple exploratory `shadow` rule does no
 
 | Step | Command | Meaning |
 | --- | --- | --- |
-| Candidate preview | `jevcheck inspect --rule <id> <path>` | Provider-free exact request |
+| Candidate preview | `jevcheck inspect --rule <id> <path> --verbose` | Provider-free exact bounded request (`inspect` alone is summary-only) |
 | Development fixtures | `jevcheck test` | Current labelled valid/invalid examples |
 | Calibration | `jevcheck test --record` | Persist probabilities for current model/semantic request |
 | Drift | `jevcheck test --drift` | Re-ask without cache; detect movements or stale identities |
@@ -123,12 +124,26 @@ jevcheck --changed --base origin/main  # branch diff
 jevcheck --changed --base origin/main --format sarif > jevcheck.sarif
 jevcheck list                  # provider-free configured rules
 jevcheck rules audit           # provider-free status/coverage/evidence
+jevcheck rules audit --format json  # machine-readable graduation state and blockers
+jevcheck inspect src/file.ts --format json  # complete candidate requests for agents
 jevcheck record                # record provider semantic decisions
 jevcheck replay                # strict offline replay, never provider fallback
 jevcheck baseline              # existing accepted findings, not new regressions
 ~~~
 
 Use `--config <path>` when not using the root config; `--format json` for machine-readable results. `--provider` and `--model` are passed through to jev-cli. TypeSafe is the default provider (`TYPESAFE_API_KEY`); OpenRouter is supported using `OPENROUTER_API_KEY` and `JEV_PROVIDER=openrouter`. Credentials belong in environment variables, not in rule files.
+
+### Agent-readable CLI contract
+
+`--format json` is the **single JSON contract**; do not parse obsolete top-level command-specific arrays/objects. Every supported command produces one object with `schemaVersion: 1`, `command`, `outcome`, `summary`, `diagnostics` and full `data` on stdout.
+
+- **Inspect:** `data.rules[]` contains rule/file policies; `data.inspections[]` contains full bounded requests (`request.state`, `request.question`), focus and semantic keys. Read these before invoking a model. `--preview-skipped` entries marked `previewOnly` are hypothetical, **not** requests that enforcement would send.
+- **Rules audit:** `data[]` contains complete reports with `readyForOwned`, `state`, `blockers`, `checks`, and remediation diagnostics. `outcome: "block"` signals evidence/readiness blockers **even though audit may exit 0**; do not treat a zero exit status as approval to promote to `owned`.
+- **Check/replay:** use `outcome` and `data.findings[]`/`data.diagnostics[]`; preserve blocking vs advisory distinctions. Exit status 1 indicates blocking findings or failed/incomplete evaluation; status 2 indicates a CLI/config/runtime failure.
+- **Errors:** `outcome: "error"` includes structured `error` and `diagnostics[]`. Configuration validation uses `CONFIG_ERROR`. A failed owned-rule gate uses `OWNED_RULE_EVIDENCE_BLOCKED`, includes gate-specific `EVIDENCE_*` diagnostics and retains the report in `data.evidenceReports[]`; **fix the blockers**, never bypass the gate or substitute a semantic judgement. The process exits 2.
+- **Machine output hygiene:** read the JSON on stdout. With `coverage verify --format json -- <command>`, child-process output goes to stderr, and its nonzero exit code is propagated. Do not assume a JSON envelope's `outcome` is identical to process exit status.
+
+For human review use `inspect --verbose` / `rules audit --verbose`. SARIF is a separate format for code scanning and is not wrapped in JSON's command envelope. See [the output contract](https://github.com/mhingston/jevcheck/blob/main/docs/reference.md#human-output-and-json-for-agents).
 
 Replay reuses matching recorded decisions and is useful for deterministic policy changes, **not** correctness evidence. Baselines and inline `// jevcheck-ignore <rule> -- <reason>` suppress intentional existing findings; require reasons, do not use them to hide failures.
 
