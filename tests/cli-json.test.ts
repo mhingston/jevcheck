@@ -94,6 +94,9 @@ describe("CLI JSON stdout contract (built binary)", () => {
   }));
 
   it("returns detailed evidence blockers on owned-rule enforcement failures", () => project((cwd) => {
+    git(cwd, ["init"]);
+    git(cwd, ["add", "."]);
+    git(cwd, ["-c", "user.name=CI Test", "-c", "user.email=ci@example.test", "commit", "-m", "snapshot"]);
     const result = execute(cwd, ["--format", "json"]);
     expect(result.code).toBe(2);
     expect(result.stderr).toBe("");
