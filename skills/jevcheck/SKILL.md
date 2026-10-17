@@ -89,7 +89,7 @@ This provider-free audit reports lifecycle, configured file scope and `projectWh
 
 ### Deterministic coverage (`coveredBy`)
 
-Only declare a test/linter as `coveredBy` after confirming it actually enforces the **same invariant exactly**. Then run `jevcheck coverage record` to fingerprint the reviewed sources. Current fingerprints skip Jev; changed, missing or unrecorded sources surface in `rules audit` and fall back to semantic evaluation. **No test or linter is executed by `coverage record`; matching fingerprints are not proof of logical equivalence.** Never record unreviewed coverage to silence model calls.
+Only declare a test/linter as `coveredBy` after confirming it enforces the **same invariant exactly**. Plain `jevcheck coverage record` fingerprints only and **cannot skip**; after review use `jevcheck coverage record --attest-reviewed`. Shadow rules may skip advisory judgement on reviewed fingerprints (but not verified execution). Owned rules may skip only when every link passes through `jevcheck coverage verify --check <id> -- <executable> [args...]` in the same GitHub Actions job/attempt and HEAD, followed by enforcement in that job. Failed checks block ownership; missing, unreviewed, stale or different-run evidence takes semantic fallback. Passing a command does not prove logical coverage. See [trust model](https://github.com/mhingston/jevcheck/blob/main/docs/concepts.md#deterministic-coverage-with-coveredby).
 
 ## 4. Evaluate before an owned/blocking rule
 

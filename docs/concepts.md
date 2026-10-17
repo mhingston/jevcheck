@@ -274,19 +274,55 @@ Use `coveredBy` when an existing test or linter already enforces the same invari
 }
 ~~~
 
-After reviewing that those files really provide deterministic coverage, record their current fingerprints:
+A fingerprint is a **declaration**, not a passing test. Review that each referenced file enforces
+the *same* invariant across the declared rule scope, then explicitly attest to that review:
 
 ~~~sh
-npx jevcheck coverage record
+npx jevcheck coverage record --attest-reviewed
 ~~~
 
-The fingerprints are stored in the existing `.jevcheck/evidence.json` artifact. During normal enforcement:
+This records source hashes and a human-review assertion in `.jevcheck/evidence.json`.
+Without `--attest-reviewed`, `coverage record` stores **unreviewed** fingerprints for inspection
+only; it cannot trigger a semantic skip. Old records without review metadata are unreviewed.
+Changing rule meaning/scope or a linked file makes the declaration stale. Re-recording
+clears all previous CI execution evidence.
 
-- if every declared coverage source still matches its recorded fingerprint, the rule reports as `covered` and Jev is skipped;
-- if coverage is missing, unreadable, changed, or has not been recorded, jevcheck surfaces the stale coverage and falls back to semantic evaluation;
-- an owned rule therefore still fails closed if its deterministic coverage goes stale and its semantic fallback evidence is not healthy.
+For **shadow** rules, a current reviewed declaration can skip the *advisory* semantic judge;
+audit explicitly says the execution was **not verified**. For **owned** rules, review alone
+is insufficient: jevcheck also requires a passing execution for **every** declared `coveredBy`
+ID from the same GitHub Actions job, run attempt and checked-out commit.
 
-`coveredBy` is a provenance/freshness contract, not a test runner. Jevcheck does not execute the referenced linter or test. Recording coverage means you have reviewed that those deterministic checks enforce the invariant; do not use `coverage record` merely to silence semantic checks after an unrelated change.
+Use the CLI wrapper after checkout and dependency setup in the GitHub Actions job:
+
+~~~sh
+npx jevcheck coverage verify --check eslint-security-rule -- npm run lint:security
+npx jevcheck coverage verify --check security-regression-tests -- npm test -- --runInBand
+npx jevcheck rules audit
+npx jevcheck
+~~~
+
+Replace these example commands with project-specific commands. `coverage verify` records
+**failed** before launching the subprocess and records **passed** only when the command
+exits zero and coverage files remain current. Failed commands return a nonzero exit code.
+Missing or failed checks, another run/job/attempt, absent CI metadata, or Git SHA not matching
+the checked-out HEAD cannot authorize an owned skip. Failed checks block owned readiness;
+missing/stale evidence takes the semantic fallback under normal owned evidence gates.
+
+**Trust assumptions and limits:**
+
+- Maintainers must confirm each `coveredBy` check enforces the same invariant. A fingerprint
+  or a passing arbitrary command cannot prove the rule and deterministic check are equivalent.
+- Workflow definitions, runners and repository permissions are trusted. Jevcheck executes
+  the command and captures its exit code, binding provenance to `GITHUB_SHA`, actual Git
+  `HEAD`, `GITHUB_RUN_ID`, `GITHUB_RUN_ATTEMPT`, and `GITHUB_JOB`. It does **not**
+  authenticate a check using the GitHub API, sign an attestation, or prove full test coverage.
+- Verification and subsequent **working-tree** enforcement must run in the **same job**.
+  Do not commit transient CI verification or consume it through `--staged` /
+  `--changed --base`: those use isolated snapshots. Other jobs/local checkouts require
+  their own execution evidence or take semantic fallback.
+- Protect trusted verification steps against untrusted pull-request code modifying their commands.
+
+Advisory-only users may keep `status: "shadow"` and omit CI integration.
 
 ## Choosing candidates
 

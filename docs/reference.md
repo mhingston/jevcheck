@@ -16,7 +16,8 @@ For first use see [README](../README.md) and [the executable example](../example
 | `jevcheck test --robustness` | Probe fixture stability under label-preserving adversarial context |
 | `jevcheck recall` | Measure mutation recall against real code |
 | `jevcheck rules audit` | Inspect rule evidence, applicability, and coverage without calling a provider |
-| `jevcheck coverage record` | Record reviewed deterministic coverage fingerprints |
+| `jevcheck coverage record [--attest-reviewed]` | Fingerprint sources; optionally assert human review |
+| `jevcheck coverage verify --check <id> -- <command> [args...]` | Run a named check in GitHub Actions and save its exit status for this job/revision |
 | `jevcheck baseline` | Create or refresh accepted-backlog entries |
 | `jevcheck record` | Record semantic decisions for replay |
 | `jevcheck replay` | Re-run the recorded decisions strictly offline |
@@ -300,7 +301,7 @@ npx jevcheck inspect src/handler.ts --preview-skipped
 The output has one rule/file policy entry with `execution` (`semantic`, `covered`, or `inapplicable`), a human-readable `reason`, selector description, candidate count, and selector diagnostics. JSON exposes these in `rules[]`; `inspections[]` contains bounded requests for candidates actually eligible for semantic judging. `diagnostics[]` contains selector diagnostics from eligible rules only. A rule that matches no candidates is **not** the same as a policy-skipped rule.
 
 - `semantic` means the rule is eligible for a provider judgement **if** its selector finds candidates. It does not mean a violation was found. Project conditions, accepted ADRs and fingerprinted coverage are resolved before selection.
-- `covered` means recorded deterministic coverage is current, so no model request would be made; stale or missing coverage falls back to `semantic`.
+- `covered` means reviewed coverage authorizes a skip. For shadow rules this is a reviewed declaration (**not** verified execution); for owned rules all checks must also actually pass in the same GitHub Actions job/attempt/checkout. Missing/stale evidence falls back to `semantic`; failed CI checks block owned enforcement.
 - `inapplicable` means a file is out of the rule's files/exclude scope, a project condition is false, or an opt-in ADR is retired or invalid.
 - `--preview-skipped` runs selectors even for covered/inapplicable rules, marking candidate requests `previewOnly: true` with an explicit warning in stylish output. These **hypothetical** requests are never counted as enforcement requests, and their selector diagnostics do not cause an inspect failure.
 - `--staged` and `--changed --base <ref>` use the same isolated snapshot for policy, source, and recorded evidence as `check`.

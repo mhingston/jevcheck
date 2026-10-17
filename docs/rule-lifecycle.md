@@ -242,7 +242,7 @@ The default `.gitignore` policy keeps transient cache state out while allowing d
 | `.jevcheck/replay.json` | Reusable semantic decisions | When replay is part of your workflow |
 | `.jevcheck/calibration.json` | Recorded development-fixture probabilities | For evidence-gated rules |
 | `.jevcheck/confirmation.json` | Untouched confirmation-fixture results | When confirmation fixtures are configured |
-| `.jevcheck/evidence.json` | Drift, mutation, robustness, and deterministic coverage evidence | For evidence-gated or `coveredBy` rules |
+| `.jevcheck/evidence.json` | Drift, mutation, robustness, reviewed coverage declarations and ephemeral CI verification | Commit reviewed declarations, never transient per-run results |
 | `.jevcheck/cache.json` | Local answer cache | No |
 
 These evidence files contain hashes and evaluation metadata rather than a second copy of your source code or prompts.
@@ -280,7 +280,10 @@ npx jevcheck test --drift
 npx jevcheck recall
 npx jevcheck test --robustness
 # when coveredBy is configured and its deterministic enforcement was reviewed:
-npx jevcheck coverage record
+npx jevcheck coverage record --attest-reviewed
+# owned coverage skips also require passing checks in the same GitHub Actions job:
+# npx jevcheck coverage verify --check <id> -- <real executable> [args...]
+# then audit and enforce in that job, otherwise owned rules use semantic fallback
 npx jevcheck rules audit
 
 # after the audit is ready:
