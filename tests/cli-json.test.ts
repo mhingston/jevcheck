@@ -39,29 +39,39 @@ function project(test: (cwd: string) => void) {
 }
 
 describe("CLI JSON stdout contract (built binary)", () => {
-  it("returns one JSON error on bad args and config, keeping stderr separate", () => project((cwd) => {
-    for (const args of [
-      ["--format", "json", "--unknown"],
-      ["inspect", "--config", "missing.json", "--format", "json"],
-    ]) {
-      const run = execute(cwd, args);
-      expect(run.code).toBe(2);
-      expect(run.stderr).toBe("");
-      const result = JSON.parse(run.stdout);
-      expect(result.outcome).toBe("error");
-      expect(result.diagnostics[0].code).toBeTruthy();
-      expect(result.error.remediation).toBeTruthy();
-    }
+  it.each([
+    ["--format", "json", "--unknown"],
+    ["inspect", "--config", "missing.json", "--format", "json"],
+  ])("returns one JSON error with separate stderr for %j", (...args) => project((cwd) => {
+    const run = execute(cwd, args);
+    expect(run.code).toBe(2);
+    expect(run.stderr).toBe("");
+    const result = JSON.parse(run.stdout);
+    expect(result.outcome).toBe("error");
+    expect(result.diagnostics[0].code).toBeTruthy();
+    expect(result.error.remediation).toBeTruthy();
+  }));
+
+  it("uses JSON errors when the last format is JSON", () => project((cwd) => {
     const lastJson = execute(cwd, ["inspect", "--format", "stylish", "--format", "json", "--oops"]);
     expect(lastJson.code).toBe(2);
     expect(JSON.parse(lastJson.stdout)).toMatchObject({ schemaVersion: 1, outcome: "error" });
+  }));
+
+  it("uses stderr when the last format is stylish", () => project((cwd) => {
     const lastStylish = execute(cwd, ["inspect", "--format", "json", "--format", "stylish", "--oops"]);
     expect(lastStylish.code).toBe(2);
     expect(lastStylish.stdout).toBe("");
     expect(lastStylish.stderr).toContain("unknown option");
+  }));
+
+  it("returns JSON help when the last format is JSON", () => project((cwd) => {
     const help = execute(cwd, ["--format", "stylish", "--format", "json", "--help"]);
     expect(help.code).toBe(0);
     expect(JSON.parse(help.stdout)).toMatchObject({ schemaVersion: 1, command: "help" });
+  }));
+
+  it("keeps JSON errors when a format override is missing", () => project((cwd) => {
     const missingOverride = execute(cwd, ["inspect", "--format", "json", "--format", "--help"]);
     expect(missingOverride.code).toBe(2);
     expect(missingOverride.stderr).toBe("");
@@ -69,12 +79,17 @@ describe("CLI JSON stdout contract (built binary)", () => {
       command: "inspect", outcome: "error",
       error: { code: "INVALID_ARGUMENT" },
     });
+  }));
+
+  it("keeps JSON errors when a format override is invalid", () => project((cwd) => {
     const invalidOverride = execute(cwd, ["inspect", "--format", "json", "--format", "bogus"]);
     expect(invalidOverride.code).toBe(2);
     expect(JSON.parse(invalidOverride.stdout)).toMatchObject({
       command: "inspect", error: { code: "INVALID_ARGUMENT" },
     });
+  }));
 
+  it("rejects the obsolete JSON format", () => project((cwd) => {
     const obsolete = execute(cwd, ["inspect", "--format", "json-v2"]);
     expect(obsolete.code).toBe(2);
     expect(obsolete.stderr).toContain("--format must be stylish, json, or sarif");
