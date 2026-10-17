@@ -102,7 +102,7 @@ describe("ast candidates", () => {
     );
 
     expect(result.candidates).toHaveLength(0);
-    expect(result.diagnostics[0]?.message).toContain("no built-in language mapping");
+    expect(result.diagnostics[0]?.message).toContain("No built-in AST language mapping for extension '.vue'");
   });
 
   it("validates selector configuration", () => {

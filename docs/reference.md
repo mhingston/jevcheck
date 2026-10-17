@@ -225,16 +225,28 @@ Generated fixes are intentionally out of scope. `jevcheck` reports bounded seman
 
 ## AST language support and native parsers
 
-| `ast.language` | File extension(s) | Parser | Version |
-| --- | --- | --- | --- |
-| `javascript`, `typescript`, `tsx`, `html`, `css` | `.js`, `.mjs`, `.cjs`, `.ts`, `.mts`, `.cts`, `.tsx`, `.jsx`, `.html`, `.htm`, `.css` | Built into `@ast-grep/napi` | `^0.45.3` |
-| `csharp` | `.cs` | `@ast-grep/lang-csharp` | `0.0.6` |
-| `python` | `.py` | `@ast-grep/lang-python` | `0.0.6` |
-| `go` | `.go` | `@ast-grep/lang-go` | `0.0.6` |
-| `java` | `.java` | `@ast-grep/lang-java` | `0.0.7` |
-| `rust` | `.rs` | `@ast-grep/lang-rust` | `0.0.7` |
+**Text/chunk selection and AST selection are different capabilities.** Any explicitly included UTF-8 source file can use text/chunk semantic candidates (with bounded context and optional prefilter), regardless of language. The default `include` pattern discovers only the extensions below; custom `include`, positional paths, and per-rule `files`/`exclude` can narrow or extend what is considered. Discovery does **not** imply an AST grammar, an AST match, or a model judgement.
 
-Extensions infer the parser automatically, or override with `ast.language`. All supported languages use the same `pattern`, `kind`, composite `rule`, and bounded `ast.context.ancestor` selection. AST matches identify the focus, **not** a violation; nearby context is evidence only. `jevcheck inspect` previews exact requests without a provider.
+| Extensions | Text/chunk semantic | Default discovery | AST inferred from extension | AST grammar |
+| --- | --- | --- | --- | --- |
+| `.js`, `.mjs`, `.cjs` | Yes | Yes | `javascript` | Built-in |
+| `.ts`, `.mts`, `.cts` | Yes | Yes | `typescript` | Built-in |
+| `.jsx`, `.tsx` | Yes | Yes | `tsx` | Built-in |
+| `.html`, `.htm` | Yes | Yes | `html` | Built-in |
+| `.css` | Yes | Yes | `css` | Built-in |
+| `.cs` | Yes | Yes | `csharp` | `@ast-grep/lang-csharp` |
+| `.py` | Yes | Yes | `python` | `@ast-grep/lang-python` |
+| `.go` | Yes | Yes | `go` | `@ast-grep/lang-go` |
+| `.java` | Yes | Yes | `java` | `@ast-grep/lang-java` |
+| `.rs` | Yes | Yes | `rust` | `@ast-grep/lang-rust` |
+| `.rb`, `.php`, `.vue`, `.svelte` | Yes | Yes | None | None (text/chunk only) |
+| Other UTF-8 extensions (e.g. `.md`, `.json`) | Yes, when explicitly included | No | None | None by default |
+
+HTML/HTM and CSS are **intentionally included** in the default source set because their built-in parsers support AST selection. Ruby/PHP/Vue/Svelte remain discoverable for text/chunk semantic checks but **are not AST languages in jevcheck**; do not assume Vue/Svelte single-file components are parsed as HTML/JS. `ast.language` overrides inference only when the *whole selected source* is compatible with that grammar, not as a universal fallback. All supported AST languages use `pattern`, `kind`, composite `rule`, and bounded `ast.context.ancestor` selection; the AST match is the focus, **not** proof of a violation.
+
+**When an applicable `ast` rule reaches an extension without inference**, jevcheck produces an `incomplete-evaluation` diagnostic with the file, extension and remediation (scope the rule, switch to text/chunk selection, or opt into a genuinely compatible grammar). It never silently treats this as a successful zero-match: owned/error rules fail enforcement; shadow and owned/warning rules report advisory warnings. A grammar that *is* inferred but has an incompatible selector or cannot load is also incomplete, not a zero-match. For mixed-language rules, restrict `files` to the intended grammars and use grammar-correct selectors; inspect with `jevcheck inspect --rule <id> <path>` before enforcement. A real zero-match from a valid selector is still successful.
+
+Built-in grammars come from `@ast-grep/napi` (`^0.45.3`). The pinned dynamic packages are `@ast-grep/lang-csharp` (`0.0.6`), `@ast-grep/lang-python` (`0.0.6`), `@ast-grep/lang-go` (`0.0.6`), `@ast-grep/lang-java` (`0.0.7`) and `@ast-grep/lang-rust` (`0.0.7`).
 
 ### Native parser installation
 
