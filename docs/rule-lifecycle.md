@@ -6,7 +6,7 @@ Start with [the runnable example](../examples/queue-ack/README.md); use this gui
 A useful default workflow is:
 
 ~~~text
-author -> inspect -> shadow -> development fixtures -> calibrate -> drift/recall/robustness -> confirm -> audit -> owned
+author -> inspect -> shadow -> development fixtures -> threshold selection -> record calibration -> drift/recall/robustness -> confirm -> audit -> owned
 ~~~
 
 You do not need all of this to experiment with a shadow rule. The evidence workflow matters when you want a semantic lint rule to become blocking in CI or review.
@@ -53,9 +53,31 @@ npx jevcheck test
 
 Fixtures answer a basic question: can the rule distinguish examples you believe are valid and invalid?
 
+### Choose a decision threshold from development evidence
+
+`jevcheck` defaults to a threshold of `0.8`, but the correct operating point depends on the rule. A false positive can block a valid change; a false negative allows an actual violation to pass. Define the consequences and minimum acceptable **precision and recall** before tuning (for example, an explicit target for a particular CI-blocking rule, not a blanket 80% requirement).
+
+Collect development scores in machine-readable form:
+
+~~~sh
+npx jevcheck test --format json > fixture-results.json
+~~~
+
+`data.tests[]` contains `ruleId`, `expected`, `maxProbability`, `threshold`, and `passed`. `invalid` is the positive class; a fixture is flagged when its **maximum judged-candidate probability** is at or above the candidate threshold. The JSON output is available even when the current threshold causes fixture failures. The score is fixture-level ("any candidate violates"), not independent per-candidate evidence. Inspect any selection misses separately: a selector that never reaches the problematic code cannot be repaired by threshold tuning. Treat saved outputs as potentially sensitive evaluation artifacts.
+
+Use the saved development scores to evaluate candidate thresholds **offline**, without new model calls. This is an analysis workflow for a coding agent or script, **not** an existing `jevcheck` subcommand. For each threshold, report TP/FP/FN/TN counts, precision, recall and an objective justified by the costs (F1 only when both errors deserve similar weight). Treat undefined metrics and low sample counts as insufficient evidence, not as perfect performance. Prefer labelled cases from real code, including hard negatives and near-boundary violations; synthetic valid/invalid fixtures alone do not establish production performance.
+
+With enough independent examples of both classes, use stratified cross-validation: choose the threshold on each training fold subject to the declared minimums, then assess precision/recall on the held-out fold. Keep near-duplicates and examples derived from the same bug or file together to avoid leakage. Use identical splits when comparing providers/models. Report fold-level feasibility and validation failures; if no threshold satisfies the training minimums, **report no feasible threshold** rather than relaxing constraints or quietly falling back to unconstrained F1. With too few independent examples for meaningful folds, record that limitation and keep the rule in `shadow` while gathering more evidence.
+
+Compare candidates against the configured `0.8` threshold, choose a final threshold using development evidence only and **freeze it** before `test --confirm` on untouched cases. Do not tune after looking at confirmation failures and still call that set held out. An audit saying `Ready for owned` confirms the tool's *existing evidence gates*, not an independently established population precision/recall guarantee. If reliability requirements remain unmet, narrow/split the rule, improve deterministic candidate selection, or keep it non-blocking.
+
+`test --record` below saves passing fixture probabilities for drift monitoring; despite its calibration filename, it does **not** statistically calibrate probabilities. If consumers need scores to mean literal event probabilities, separately evaluate reliability/Brier scores and a held-out calibration method such as Platt scaling. Only retain it when it improves held-out results. When comparing providers/models, assess **threshold-tuned** quality before weighing price and latency.
+
+Further reading: [Hamel Husain and Antaripa Saha, *How To Use Decision Models for Evals*](https://hamel.dev/blog/posts/decision-model-evals/).
+
 ### 4. Record calibration
 
-When the fixtures pass:
+Once a development-selected threshold is set and the fixtures pass:
 
 ~~~sh
 npx jevcheck test --record
