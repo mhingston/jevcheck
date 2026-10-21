@@ -100,12 +100,24 @@ Use the following in order as needed; a simple exploratory `shadow` rule does no
 | --- | --- | --- |
 | Candidate preview | `jevcheck inspect --rule <id> <path> --verbose` | Provider-free exact bounded request (`inspect` alone is summary-only) |
 | Development fixtures | `jevcheck test` | Current labelled valid/invalid examples |
-| Calibration | `jevcheck test --record` | Persist probabilities for current model/semantic request |
+| Fixture score recording | `jevcheck test --record` | Persist passing development-fixture scores for drift checks; does not calibrate statistical probabilities |
 | Drift | `jevcheck test --drift` | Re-ask without cache; detect movements or stale identities |
 | Mutation recall | `jevcheck recall` | Full-scope in-memory mutations in real code |
 | Robustness | `jevcheck test --robustness` | Injection, false-authority and irrelevant-context probes (advisory) |
 | Confirmation | `jevcheck test --confirm` | Untouched valid/invalid set after freezing the rule/threshold |
 | Gate review | `jevcheck rules audit` | Provider-free blockers, warnings, applicability and provenance |
+
+### Select and validate the decision threshold
+
+For a rule proposed for `owned` enforcement, choose a threshold from labelled evidence rather than assuming the default (`0.8`) is optimal. A false positive can block a valid change; a false negative can miss a real violation. Decide in advance which error is more costly and state minimum acceptable precision and recall for **this rule** (not a universal 80%/80% requirement).
+
+- **Collect scores:** run `jevcheck test --format json` on labelled development fixtures. Its `data.tests[]` includes `expected` (`invalid` is the positive/violation class), `maxProbability` and `threshold`. An `invalid` fixture predicts a violation when `maxProbability >= threshold`; the score is the maximum across judged candidates in that fixture. The command can report scores even when fixtures fail. `test --record` writes `.jevcheck/calibration.json` only after all fixtures pass, so it is not the initial threshold-tuning command.
+- **Evaluate offline:** reuse saved scores and labels to compare thresholds without repeating provider calls. Calculate precision (correct violation flags / all violation flags), recall (detected violations / all known violations), F1 or another explicitly chosen utility, and TP/FP/FN/TN counts. Undefined metrics (e.g. zero predicted positives) and tiny samples are not evidence of success. Prefer real, representative code over contrived examples; fixture-level metrics do not measure selector coverage on unseen files.
+- **Avoid optimistic selection:** with enough independent examples in both classes, use stratified cross-validation: choose a threshold **on each training fold** subject to the predefined minimums and evaluate it on held-out folds. Group near-duplicate or shared-origin fixtures into the same fold to prevent leakage; use the same folds across provider/model comparisons. If data is too small for credible folds, report the limitation and keep the rule in `shadow` while collecting more representative cases.
+- **Report feasibility, not just the best score:** disclose the selected threshold(s), precision, recall, F1, confusion counts, sample sizes, unmet requirements and fold failures. Do not relax minimums or silently substitute an unconstrained F1 optimum when no threshold qualifies. Compare against the configured `0.8` baseline. Choose a final threshold using development data only, then freeze it before `test --confirm` on untouched fixtures.
+- **Keep the boundaries clear:** this offline comparison is **not** a built-in `jevcheck` threshold-optimisation command or a graduation gate. `test --record` tracks fixture scores for drift; it does **not** statistically calibrate the provider's probabilities. `rules audit` can say the configured evidence gates pass without establishing population-level precision/recall. If scores are consumed as literal risk probabilities, assess calibration separately (e.g. reliability plots/Brier score, with held-out evaluation) and only apply calibration if it improves results.
+
+After choosing a threshold, update the rule, re-run development fixtures, record calibration and drift/recall evidence, then run untouched confirmation and the audit. Model/provider/question/threshold changes require requalification. If no threshold meets the agreed reliability requirements, leave the rule in `shadow`, narrow it, or reject it.
 
 - Calibration, drift and confirmation are **different** from replay. If model, semantic request, threshold, fixtures or relevant source change, prior evidence can become **stale**. Do not quietly reuse it.
 - A `THIN` pass near the threshold is weak evidence. If valid/invalid probabilities overlap, no single threshold fixes the rule; reconsider its boundary/context.
@@ -156,6 +168,7 @@ Replay reuses matching recorded decisions and is useful for deterministic policy
 - [Runnable example](https://github.com/mhingston/jevcheck/tree/main/examples/queue-ack)
 - [Authoring, applicability, ADR and coverage](https://github.com/mhingston/jevcheck/blob/main/docs/concepts.md)
 - [Calibration, confirmation and graduation](https://github.com/mhingston/jevcheck/blob/main/docs/rule-lifecycle.md)
+- [How to Use Decision Models for Evals — Hamel Husain and Antaripa Saha](https://hamel.dev/blog/posts/decision-model-evals/) (threshold tuning, precision/recall constraints, held-out comparison and score calibration)
 - [CLI, provider and config reference](https://github.com/mhingston/jevcheck/blob/main/docs/reference.md)
 
 These GitHub links work for consumers of the npm-shipped skill; `docs/` and `examples/` are source-repository assets, not assumed to be in the installed package.
