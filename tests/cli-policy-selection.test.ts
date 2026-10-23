@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -169,6 +169,51 @@ describe("CLI config-change policy scope", () => {
       put(cwd, "jevcheck.config.json", config());
       const payload = inspect(cwd, "--changed");
       expect(payload.data.selection).toMatchObject({ mode: "full-policy-change", selectedFiles: 1 });
+      expect(payload.data.rules[0].path).toBe("src/untouched.ts");
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
+    }
+  });
+
+  it.skipIf(process.platform === "win32")("detects changes to an internal symlinked active config target", () => {
+    const cwd = mkdtempSync(join(tmpdir(), "jevcheck-config-symlink-"));
+    try {
+      git(cwd, "init", "-q");
+      put(cwd, "policy.json", config(["src/**/*.ts"], {
+        rules: [{ id: "rule/old", question: "Old policy", wholeFile: true }],
+      }));
+      symlinkSync("policy.json", join(cwd, "jevcheck.config.json"));
+      put(cwd, "src/untouched.ts", "const stable = 1;\\n");
+      git(cwd, "add", "-A");
+      git(cwd, "-c", "user.name=Test", "-c", "user.email=test@example.com",
+        "commit", "-qm", "symlink base");
+      const base = git(cwd, "rev-parse", "HEAD");
+
+      // Only the target changes; the active config symlink blob does not.
+      put(cwd, "policy.json", config());
+      let payload = inspect(cwd, "--changed");
+      expect(payload.data.selection).toMatchObject({
+        mode: "full-policy-change", selectedFiles: 1,
+      });
+      expect(payload.data.rules[0].ruleId).toBe("rule/new");
+
+      git(cwd, "add", "policy.json");
+      // The unstaged target now disagrees with the index.
+      put(cwd, "policy.json", config(["src/nothing.ts"]));
+      payload = inspect(cwd, "--staged");
+      expect(payload.data.selection).toMatchObject({
+        mode: "full-policy-change", selectedFiles: 1,
+      });
+      expect(payload.data.rules[0].ruleId).toBe("rule/new");
+
+      git(cwd, "-c", "user.name=Test", "-c", "user.email=test@example.com",
+        "commit", "-qm", "symlink target change");
+      payload = inspect(cwd, "--changed", "--base", base);
+      expect(payload.data.selection).toMatchObject({
+        mode: "full-policy-change", selectedFiles: 1,
+      });
+      expect(payload.data.rules[0].ruleId).toBe("rule/new");
+      // HEAD selection cannot borrow the incompatible unstaged include scope.
       expect(payload.data.rules[0].path).toBe("src/untouched.ts");
     } finally {
       rmSync(cwd, { recursive: true, force: true });
