@@ -181,6 +181,7 @@ export function requestedFormat(argv: readonly string[]): "json" | undefined {
   return selected === "json" ? "json" : undefined;
 }
 export function requestedCommand(argv: readonly string[]): string {
+  if (argv[0] === "specforge" && argv[1] === "project") return "specforge-project";
   if (argv[0] === "rules" && argv[1] === "audit") return "rules-audit";
   if (argv[0] === "coverage" && (argv[1] === "record" || argv[1] === "verify"))
     return "coverage-" + argv[1];

@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { readFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import { CliConfigError, formatCommandError, formatCommandJson, requestedCommand, requestedFormat, type OutputFormat } from "./cli-output.js";
 import { isAbsolute, resolve } from "node:path";
 import { createJevClient, JEV_PROVIDERS, type JevProvider } from "@mhingston5/jev-cli";
@@ -47,9 +47,10 @@ import { changedFiles, checkoutGitSnapshot, stagedFiles } from "./git.js";
 import { formatInspectionStylish, inspectSources } from "./inspect.js";
 import { DEFAULT_REPLAY_FILE, DiskSemanticDecisionStore } from "./replay.js";
 import { assertSnapshotPaths } from "./snapshot-paths.js";
+import { projectSpecForge } from "./specforge.js";
 import type { SourceInput } from "./types.js";
 
-type Command = "check" | "test" | "list" | "inspect" | "baseline" | "record" | "replay" | "recall" | "rules-audit" | "coverage-record" | "coverage-verify";
+type Command = "check" | "test" | "list" | "inspect" | "baseline" | "record" | "replay" | "recall" | "rules-audit" | "coverage-record" | "coverage-verify" | "specforge-project";
 
 interface CliOptions {
   command: Command;
@@ -73,6 +74,10 @@ interface CliOptions {
   attestReviewed: boolean;
   coverageCheck?: string;
   verificationCommand?: string[];
+  graph?: string;
+  mapping?: string;
+  output?: string;
+  projectionCheck: boolean;
   patterns: string[];
 }
 
@@ -92,6 +97,7 @@ function usage(): string {
     "  jevcheck rules audit [options]",
     "  jevcheck coverage record [--attest-reviewed] [options]",
     "  jevcheck coverage verify --check <id> -- <command> [args...]",
+    "  jevcheck specforge project --graph <graph.json> --mapping <mapping.json> --output <jevcheck.json> [--check]",
     "",
     "Options:",
     "  --config <path>       Config file (default: jevcheck.config.json)",
@@ -112,6 +118,10 @@ function usage(): string {
     "  --preview-skipped      With inspect, show hypothetical candidates for skipped rules",
     "  --attest-reviewed      With coverage record, explicitly assert reviewed deterministic coverage",
     "  --check <id>          With coverage verify, the coveredBy check ID",
+    "  --graph <path>        With specforge project, a checked full Graph Protocol export",
+    "  --mapping <path>      With specforge project, a reviewed invariant mapping",
+    "  --output <path>       With specforge project, generated jevcheck config",
+    "  --check              With specforge project, verify generated config without writing",
     "  -h, --help            Show help",
     "",
     "record captures semantic decisions to replayFile (default: .jevcheck/replay.json).",
@@ -124,6 +134,7 @@ function usage(): string {
     "coverage verify executes a named deterministic check in GitHub Actions and records its real exit status.",
     "Owned semantic skips require reviewed fingerprints and passing checks in the same CI run/checkout.",
     "inspect is provider-free and defaults to compact policy; --verbose shows full requests.",
+    "specforge project is provider-free; generated rules remain shadow.",
     "json returns one structured result/error envelope for coding agents.",
     "",
     "Owned error findings and incomplete owned/error evaluations fail check/replay. Shadow findings are advisory.",
@@ -139,7 +150,12 @@ function requireValue(argv: string[], index: number, flag: string): string {
 function parseArgs(argv: string[]): CliOptions {
   const args = [...argv];
   let command: Command = "check";
-  if (args[0] === "rules" && args[1] === "audit") {
+  if (args[0] === "specforge" && args[1] === "project") {
+    command = "specforge-project";
+    args.splice(0, 2);
+  } else if (args[0] === "specforge") {
+    throw new Error("expected specforge project");
+  } else if (args[0] === "rules" && args[1] === "audit") {
     command = "rules-audit";
     args.splice(0, 2);
   } else if (args[0] === "coverage" && args[1] === "record") {
@@ -176,11 +192,16 @@ function parseArgs(argv: string[]): CliOptions {
     previewSkipped: false,
     verbose: false,
     attestReviewed: false,
+    projectionCheck: false,
     patterns: [],
   };
 
   for (let i = 0; i < args.length; i += 1) {
     const arg = args[i];
+    if (options.command === "specforge-project" &&
+        !["--graph", "--mapping", "--output", "--check", "--format", "-h", "--help"].includes(arg ?? "")) {
+      throw new Error("specforge project does not accept " + arg);
+    }
     switch (arg) {
       case "--config":
         options.config = requireValue(args, i, arg);
@@ -247,9 +268,24 @@ function parseArgs(argv: string[]): CliOptions {
         options.attestReviewed = true;
         break;
       case "--check":
-        options.coverageCheck = requireValue(args, i, arg);
+        if (options.command === "specforge-project") {
+          if (options.projectionCheck) throw new Error("--check specified twice");
+          options.projectionCheck = true;
+        } else {
+          options.coverageCheck = requireValue(args, i, arg);
+          i += 1;
+        }
+        break;
+      case "--graph":
+      case "--mapping":
+      case "--output": {
+        if (options.command !== "specforge-project") throw new Error(arg + " is only valid with specforge project");
+        const key = arg.slice(2) as "graph" | "mapping" | "output";
+        if (options[key] !== undefined) throw new Error(arg + " specified twice");
+        options[key] = requireValue(args, i, arg);
         i += 1;
         break;
+      }
       case "--":
         if (options.command !== "coverage-verify") throw new Error("-- is only valid with coverage verify");
         options.verificationCommand = args.slice(i + 1);
@@ -277,6 +313,9 @@ function parseArgs(argv: string[]): CliOptions {
     }
   }
 
+  if (options.command === "specforge-project" && (!options.graph || !options.mapping || !options.output)) {
+    throw new Error("specforge project requires --graph <graph.json> --mapping <mapping.json> --output <jevcheck.json>");
+  }
   if (options.changed && options.staged) throw new Error("choose either --changed or --staged");
   if (options.base && !options.changed) throw new Error("--base requires --changed");
   if (options.format === "sarif" && options.command !== "check" && options.command !== "replay") {
@@ -335,8 +374,35 @@ function parseArgs(argv: string[]): CliOptions {
   return options;
 }
 
+/** Keep SpecForge projection as a bounded, independently inspectable CLI path. */
+async function runSpecForgeProject(args: CliOptions): Promise<void> {
+  const jsonMode = args.format === "json";
+  // This command needs no jevcheck config, compiler, provider or model.
+  const graph = JSON.parse(await readFile(args.graph!, "utf8")) as unknown;
+  const mapping = JSON.parse(await readFile(args.mapping!, "utf8")) as unknown;
+  const projection = projectSpecForge(graph, mapping);
+  const expected = JSON.stringify(projection, null, 2) + "\n";
+  const target = args.output!;
+  if (args.projectionCheck) {
+    if (await readFile(target, "utf8") !== expected) {
+      throw new Error("projected config is stale: regenerate " + target);
+    }
+  } else {
+    await writeFile(target, expected, "utf8");
+  }
+  console.log(jsonMode
+    ? formatCommandJson(args.command, { output: target, checked: args.projectionCheck, rules: projection.rules.length, status: "shadow" })
+    : args.projectionCheck
+      ? "SpecForge projection matches " + target
+      : "Wrote " + target + " (shadow rules only)");
+}
+
 async function run(args: CliOptions, gitCwd: string, snapshotMode: boolean): Promise<void> {
   const jsonMode = args.format === "json";
+  if (args.command === "specforge-project") {
+    await runSpecForgeProject(args);
+    return;
+  }
   const config = await loadConfig(args.config).catch((error: unknown) => { throw new CliConfigError(error); });
   if (snapshotMode) assertSnapshotPaths(config);
 

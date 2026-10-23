@@ -1,0 +1,28 @@
+{
+  "include": [
+    "src/cli.ts"
+  ],
+  "rules": [
+    {
+      "invariant": "projection_must_not_ack_failed_validation",
+      "expectedGuarantee": "The CLI MUST NOT report successful projection when validation or output writing fails without successful recovery.",
+      "source": "spec/projection.spec#projection_must_not_ack_failed_validation",
+      "id": "reliability/specforge-no-success-after-failure",
+      "question": "Can this CLI report successful projection after projectSpecForge or writing output fails, without successful recovery?",
+      "criteria": {
+        "true": "A validation or write failure is swallowed, but the CLI still reports successful projection.",
+        "false": "Success is reported only after completed validation and output writing; failures produce a non-success exit."
+      },
+      "ast": "function_declaration",
+      "contains": "projectSpecForge(",
+      "fixtures": {
+        "valid": [
+          "examples/specforge/fixtures/valid/**/*.ts"
+        ],
+        "invalid": [
+          "examples/specforge/fixtures/invalid/**/*.ts"
+        ]
+      }
+    }
+  ]
+}

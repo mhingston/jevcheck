@@ -20,3 +20,4 @@ export * from "./inspect.js";
 export * from "./replay.js";
 export * from "./mutate.js";
 export * from "./semantic.js";
+export * from "./specforge.js";

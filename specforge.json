@@ -1,0 +1,9 @@
+{
+  "name": "jevcheck-specforge-projection",
+  "version": "0.1.0",
+  "spec_root": "spec",
+  "extensions": [
+    "@specforge/software",
+    "@specforge/testing"
+  ]
+}

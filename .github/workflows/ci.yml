@@ -31,3 +31,21 @@ jobs:
       - run: node dist/cli.js inspect examples/multilanguage-ast/sources/example.java --config examples/multilanguage-ast/jevcheck.config.json --rule example/java --format json
       - run: node dist/cli.js inspect examples/multilanguage-ast/sources/example.rs --config examples/multilanguage-ast/jevcheck.config.json --rule example/rust --format json
       - run: npm run pack:check
+  specforge-projection:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - uses: dtolnay/rust-toolchain@stable
+      - run: npm ci && npm run build
+      # Pin the compiler to a reviewed commit; no unpinned install script.
+      - run: |
+          git clone https://github.com/leaderiop/SpecForge.git "$RUNNER_TEMP/specforge-src"
+          git -C "$RUNNER_TEMP/specforge-src" checkout --detach 45f9d4ebcd1a01672131033401d5ce680c18c142
+          cargo install --path "$RUNNER_TEMP/specforge-src/crates/surfaces/cli" --locked
+      - run: specforge check --strict
+      - run: specforge export --format graph > "$RUNNER_TEMP/specforge-graph.json"
+      - run: node dist/cli.js specforge project --graph "$RUNNER_TEMP/specforge-graph.json" --mapping spec/jevcheck-map.json --output examples/specforge/jevcheck.config.json --check
+      - run: node dist/cli.js inspect src/cli.ts --config examples/specforge/jevcheck.config.json --rule reliability/specforge-no-success-after-failure --format json
