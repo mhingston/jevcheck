@@ -569,6 +569,13 @@ async function run(args: CliOptions, gitCwd: string, snapshotMode: boolean): Pro
       : args.command === "replay"
         ? new DiskSemanticDecisionStore(replayFile, true)
         : undefined;
+  // Select source scope before creating a provider client. An empty scope
+  // must remain a genuine empty scan even when no provider key is configured.
+  const sourceSelection = args.command === "test"
+    ? undefined
+    : await selectSources(
+        args, config, gitCwd, args.command === "check" || args.command === "replay",
+      );
   const needsSemanticClient =
     !ruleEvidenceReports ||
     config.rules.some((rule) => {
@@ -576,7 +583,7 @@ async function run(args: CliOptions, gitCwd: string, snapshotMode: boolean): Pro
       return (report?.execution ?? "semantic") === "semantic";
     });
   const client =
-    args.command === "replay" || !needsSemanticClient
+    args.command === "replay" || !needsSemanticClient || sourceSelection?.paths.length === 0
       ? undefined
       : createJevClient({ provider: args.provider, model: args.model });
   const cacheFile = resolve(config.cacheFile ?? ".jevcheck/cache.json");
@@ -804,11 +811,7 @@ async function run(args: CliOptions, gitCwd: string, snapshotMode: boolean): Pro
     return;
   }
 
-  // Baseline, record and recall are stateful/measurement commands; preserve
-  // their explicit diff scope instead of unexpectedly widening writes or spend.
-  const { paths, selection } = await selectSources(
-    args, config, gitCwd, args.command === "check" || args.command === "replay",
-  );
+  const { paths, selection } = sourceSelection!;
   const includes = config.include ?? DEFAULT_SOURCE_INCLUDE;
 
   if (args.command === "recall") {
