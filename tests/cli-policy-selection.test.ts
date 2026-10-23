@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -141,6 +141,23 @@ describe("CLI config-change policy scope", () => {
       const payload = inspect(cwd, "--changed");
       expectFull(payload);
     }));
+  it("detects a config staged before the repository's first commit", () => {
+    const cwd = mkdtempSync(join(tmpdir(), "jevcheck-config-unborn-"));
+    try {
+      git(cwd, "init", "-q");
+      put(cwd, "src/untouched.ts", "const stable = 1;\\n");
+      put(cwd, "jevcheck.config.json", config());
+      git(cwd, "add", "-A");
+      const payload = inspect(cwd, "--staged");
+      expect(payload.data.selection).toMatchObject({
+        mode: "full-policy-change", selectedFiles: 1,
+      });
+      expect(payload.data.rules[0].path).toBe("src/untouched.ts");
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
+    }
+  });
+
   it("detects a newly-added untracked active config", () => {
     const cwd = mkdtempSync(join(tmpdir(), "jevcheck-config-add-"));
     try {
