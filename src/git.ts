@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process";
 import { access, chmod, mkdir, mkdtemp, readlink, readdir, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { dirname, isAbsolute, join, normalize, relative, resolve, sep } from "node:path";
 import { promisify } from "node:util";
 import type { SourceInput } from "./types.js";
 
@@ -63,6 +63,31 @@ export async function changedFiles(base: string | undefined, cwd = process.cwd()
   const tracked = await gitPaths(["diff", "--relative", "--no-renames", "--name-only", "--diff-filter=ACMT", "HEAD"], cwd);
   const untracked = await gitPaths(["ls-files", "--others", "--exclude-standard"], cwd);
   return existing(Array.from(new Set([...tracked, ...untracked])).sort(), cwd);
+}
+
+/**
+ * Did the active config change relative to the revision supplying diff inputs?
+ * Include deletions even though deleted paths cannot be linted as sources.
+ * Restrict Git's pathspec to the literal config path (not a glob).
+ */
+export async function activeConfigChanged(
+  configPath: string,
+  mode: "working-tree" | "index" | "head",
+  cwd = process.cwd(),
+  base?: string,
+): Promise<boolean> {
+  const path = normalize(configPath).replaceAll("\\", "/");
+  const diff = ["diff", "--relative", "--no-renames", "--name-only", "--diff-filter=ACDMT"];
+  if (mode === "index") diff.push("--cached", "HEAD");
+  else if (mode === "head") {
+    if (!base) throw new Error("HEAD comparison requires --base");
+    diff.push(base + "...HEAD");
+  } else diff.push("HEAD");
+  const literal = ":(literal)" + path;
+  if ((await gitPaths([...diff, "--", literal], cwd)).includes(path)) return true;
+  // Git diff does not report newly-created, untracked working-tree configs.
+  return mode === "working-tree" &&
+    (await gitPaths(["ls-files", "--others", "--exclude-standard", "--", literal], cwd)).includes(path);
 }
 
 export interface GitEvaluationSnapshot {
