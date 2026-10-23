@@ -804,7 +804,11 @@ async function run(args: CliOptions, gitCwd: string, snapshotMode: boolean): Pro
     return;
   }
 
-  const { paths, selection } = await selectSources(args, config, gitCwd);
+  // Baseline, record and recall are stateful/measurement commands; preserve
+  // their explicit diff scope instead of unexpectedly widening writes or spend.
+  const { paths, selection } = await selectSources(
+    args, config, gitCwd, args.command === "check" || args.command === "replay",
+  );
   const includes = config.include ?? DEFAULT_SOURCE_INCLUDE;
 
   if (args.command === "recall") {
