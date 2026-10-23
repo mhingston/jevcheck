@@ -29,12 +29,13 @@ export async function selectSources(
   },
   config: JevCheckConfig,
   gitCwd: string,
+  expandOnPolicyChange = true,
 ): Promise<SelectedSources> {
   const include = config.include ?? DEFAULT_SOURCE_INCLUDE;
   const exclude = config.exclude ?? [];
   if (args.changed || args.staged) {
     const mode = args.staged ? "index" : args.base ? "head" : "working-tree";
-    const policyChanged = await activeConfigChanged(args.config, mode, gitCwd, args.base);
+    const policyChanged = expandOnPolicyChange && await activeConfigChanged(args.config, mode, gitCwd, args.base);
     if (policyChanged) {
       const paths = await discoverFiles(include, exclude);
       return {
