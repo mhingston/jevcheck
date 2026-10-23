@@ -135,6 +135,8 @@ describe("CLI JSON stdout contract (built binary)", () => {
     const human = execute(cwd, ["inspect"]);
     expect(human.code).toBe(0);
     expect(human.stdout).toContain("Inspect:");
+    expect(human.stdout).toContain("Preflight: at most");
+    expect(human.stdout).toContain("request chars (not tokens/cost)");
     expect(human.stdout).not.toContain("semantic key:");
     expect(human.stdout).not.toContain("exact request");
     const verbose = execute(cwd, ["inspect", "--verbose"]);
@@ -146,6 +148,13 @@ describe("CLI JSON stdout contract (built binary)", () => {
     expect(payload.data.rules.length).toBeGreaterThan(0);
     expect(payload.data.inspections.length).toBeGreaterThan(0);
     expect(payload.data.inspections[0].request).toBeTruthy();
+    expect(payload.data.preflight.files).toBe(payload.data.selection.selectedFiles);
+    expect(payload.data.preflight.eligibleCandidates).toBe(payload.data.inspections.filter(
+      (i: { previewOnly: boolean }) => !i.previewOnly).length);
+    expect(payload.data.preflight.estimatedRequestChars).toBe(payload.data.inspections
+      .filter((i: { previewOnly: boolean }) => !i.previewOnly)
+      .reduce((total: number, i: { estimatedRequestChars: number }) =>
+        total + i.estimatedRequestChars, 0));
   }));
 
   it("returns a consistent JSON envelope for audit and no-match inspection", () => project((cwd) => {
@@ -160,6 +169,11 @@ describe("CLI JSON stdout contract (built binary)", () => {
     expect(empty.code).toBe(0);
     expect(JSON.parse(empty.stdout)).toMatchObject({
       command: "inspect", summary: { rules: 0, candidates: 0 },
+      data: { preflight: {
+        files: 0, policyPairs: { semantic: 0, covered: 0, inapplicable: 0 },
+        eligibleCandidates: 0, estimatedRequestChars: 0, previewOnlyCandidates: 0,
+        cleanZeroCandidateSemanticPairs: 0, semanticPairsWithDiagnostics: 0,
+      } },
     });
   }));
 

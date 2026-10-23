@@ -60,11 +60,34 @@ export interface SemanticInspection {
   request: ReturnType<typeof semanticRequestForCandidate>;
 }
 
+/** A provider-free bound on eligible semantic work, not an estimate of billed calls or tokens. */
+export interface InspectPreflight {
+  /** Selected source inputs, including files with no matching rules. */
+  files: number;
+  /** Every evaluated rule/file runtime policy, including policy-skipped pairs. */
+  policyPairs: Record<RuleExecution, number>;
+  /** Maximum uncached judge calls before cache/deduplication and runtime failures. */
+  eligibleCandidates: number;
+  /** Sum of serialized {state, question} lengths for eligible requests; NOT tokens. */
+  estimatedRequestChars: number;
+  /** Hypothetical skipped-rule candidates, never counted as eligible calls or bytes. */
+  previewOnlyCandidates: number;
+  /** Completed semantic selectors with no candidates and no diagnostics. */
+  cleanZeroCandidateSemanticPairs: number;
+  /** Semantic selectors reporting warnings/errors; zero candidates may be incomplete. */
+  semanticPairsWithDiagnostics: number;
+  /** Selector diagnostics from eligible rule/file pairs only. */
+  eligibleSelectorDiagnostics: { errors: number; warnings: number };
+  /** Selector diagnostics from skipped rule/file pairs, if previewed. */
+  previewSelectorDiagnostics: { errors: number; warnings: number };
+}
+
 export interface InspectResult {
   rules: RuleInspection[];
   inspections: SemanticInspection[];
   /** Diagnostics from selectors that enforcement would actually execute. */
   diagnostics: Diagnostic[];
+  preflight: InspectPreflight;
 }
 
 function selectorDescription(rule: JevCheckRule): string {
@@ -84,7 +107,20 @@ export async function inspectSources(
   rules: readonly JevCheckRule[],
   options: InspectOptions = {},
 ): Promise<InspectResult> {
-  const result: InspectResult = { rules: [], inspections: [], diagnostics: [] };
+  const result: InspectResult = {
+    rules: [], inspections: [], diagnostics: [],
+    preflight: {
+      files: inputs.length,
+      policyPairs: { semantic: 0, covered: 0, inapplicable: 0 },
+      eligibleCandidates: 0,
+      estimatedRequestChars: 0,
+      previewOnlyCandidates: 0,
+      cleanZeroCandidateSemanticPairs: 0,
+      semanticPairsWithDiagnostics: 0,
+      eligibleSelectorDiagnostics: { errors: 0, warnings: 0 },
+      previewSelectorDiagnostics: { errors: 0, warnings: 0 },
+    },
+  };
   // The CLI passes its policy reports explicitly. For library callers, resolve
   // ADR/coverage policy from disk rather than silently treating it as semantic.
   const hasEvidencePolicy = rules.some((rule) =>
@@ -116,6 +152,17 @@ export async function inspectSources(
       const built = selectorRan
         ? buildCandidates(input.path, input.source, rule, candidateOptions)
         : { candidates: [], diagnostics: [] as Diagnostic[] };
+      result.preflight.policyPairs[policy.execution]++;
+      const selectorDiagnostics = policy.execution === "semantic"
+        ? result.preflight.eligibleSelectorDiagnostics
+        : result.preflight.previewSelectorDiagnostics;
+      for (const diagnostic of built.diagnostics) selectorDiagnostics[
+        diagnostic.level === "error" ? "errors" : "warnings"
+      ]++;
+      if (policy.execution === "semantic") {
+        if (built.diagnostics.length) result.preflight.semanticPairsWithDiagnostics++;
+        else if (built.candidates.length === 0) result.preflight.cleanZeroCandidateSemanticPairs++;
+      }
       result.rules.push({
         ruleId: rule.id,
         path: input.path,
@@ -131,6 +178,12 @@ export async function inspectSources(
       for (const candidate of built.candidates) {
         const request = semanticRequestForCandidate(rule, input.path, candidate);
         const serialized = JSON.stringify({ state: request.state, question: request.question });
+        if (policy.execution === "semantic") {
+          result.preflight.eligibleCandidates++;
+          result.preflight.estimatedRequestChars += serialized.length;
+        } else {
+          result.preflight.previewOnlyCandidates++;
+        }
         result.inspections.push({
           ruleId: rule.id,
           path: input.path,
@@ -168,15 +221,26 @@ export async function inspectSource(
 }
 
 export function formatInspectionStylish(result: InspectResult, verbose = false): string {
-  const semantic = result.rules.filter((r) => r.execution === "semantic").length;
-  const covered = result.rules.filter((r) => r.execution === "covered").length;
-  const inapplicable = result.rules.filter((r) => r.execution === "inapplicable").length;
+  const { preflight } = result;
+  const { semantic, covered, inapplicable } = preflight.policyPairs;
   const errors = result.diagnostics.filter((d) => d.level === "error").length;
   const lines = [
     (errors ? "BLOCK" : result.diagnostics.length ? "WARN" : "PASS") +
-      "  Inspect: " + result.rules.length + " rule/file policies  |  " +
-      semantic + " semantic  |  " + covered + " covered  |  " +
-      inapplicable + " inapplicable  |  " + result.inspections.length + " candidates",
+      "  Inspect: " + preflight.files + " selected files  |  " +
+      result.rules.length + " rule/file policies  |  " +
+      semantic + " semantic  |  " + covered + " covered  |  " + inapplicable + " inapplicable",
+    "  Preflight: at most " + preflight.eligibleCandidates +
+      " uncached judge calls (eligible candidates)  |  " +
+      preflight.estimatedRequestChars + " request chars (not tokens/cost)  |  " +
+      preflight.previewOnlyCandidates + " preview only (excluded)",
+    "  Selectors: " + preflight.cleanZeroCandidateSemanticPairs + " clean zero-match semantic pairs  |  " +
+      preflight.semanticPairsWithDiagnostics + " semantic pairs with diagnostics (" +
+      preflight.eligibleSelectorDiagnostics.errors + " errors, " +
+      preflight.eligibleSelectorDiagnostics.warnings + " warnings)" +
+      (preflight.previewSelectorDiagnostics.errors + preflight.previewSelectorDiagnostics.warnings
+        ? "  |  preview-only diagnostics: " + preflight.previewSelectorDiagnostics.errors +
+          " errors, " + preflight.previewSelectorDiagnostics.warnings + " warnings (excluded)"
+        : ""),
   ];
   for (const rule of result.rules) {
     lines.push("", rule.ruleId + "  " + rule.path + "  [" + rule.execution + "]");

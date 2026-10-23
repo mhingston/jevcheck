@@ -47,6 +47,13 @@ describe("semantic request inspection", () => {
     expect(inspection.request.state.code).toBe("console.log(secret);");
     expect(inspection.semanticKey).toBe(inspection.request.identity.key);
     expect(inspection.estimatedRequestChars).toBeGreaterThan(0);
+    expect(result.preflight).toMatchObject({
+      files: 1,
+      policyPairs: { semantic: 1, covered: 0, inapplicable: 0 },
+      eligibleCandidates: 1, previewOnlyCandidates: 0,
+      cleanZeroCandidateSemanticPairs: 0, semanticPairsWithDiagnostics: 0,
+    });
+    expect(result.preflight.estimatedRequestChars).toBe(inspection.estimatedRequestChars);
   });
 
   it("reports file exclusion even when no semantic candidates are constructed", async () => {
@@ -61,6 +68,58 @@ describe("semantic request inspection", () => {
     expect(preview.inspections).toHaveLength(1);
     expect(preview.inspections[0]?.previewOnly).toBe(true);
     expect(formatInspectionStylish(preview)).toContain("NOT sent by check");
+    expect(preview.preflight).toMatchObject({
+      policyPairs: { semantic: 0, covered: 0, inapplicable: 1 },
+      eligibleCandidates: 0, estimatedRequestChars: 0, previewOnlyCandidates: 1,
+    });
+  });
+
+  it("reconciles mixed semantic matches, clean zero matches and hypothetical skipped candidates", async () => {
+    const quiet = { path: "src/quiet.ts", source: "const quiet = true;\n" };
+    const noMatch: JevCheckRule = { ...rule, id: "security/no-match", prefilter: "never_present" };
+    const outOfScope: JevCheckRule = { ...rule, id: "security/other-scope", files: ["lib/**/*.ts"] };
+    const result = await inspectSources([input, quiet], [rule, noMatch, outOfScope], {
+      chunkChars: 1000, overlapLines: 0, contextLines: 0, previewSkipped: true,
+    });
+    expect(result.preflight).toMatchObject({
+      files: 2,
+      policyPairs: { semantic: 4, covered: 0, inapplicable: 2 },
+      eligibleCandidates: 1, previewOnlyCandidates: 1,
+      cleanZeroCandidateSemanticPairs: 3, semanticPairsWithDiagnostics: 0,
+      eligibleSelectorDiagnostics: { errors: 0, warnings: 0 },
+      previewSelectorDiagnostics: { errors: 0, warnings: 0 },
+    });
+    expect(result.preflight.eligibleCandidates).toBe(result.inspections.filter((i) => !i.previewOnly).length);
+    expect(result.preflight.previewOnlyCandidates).toBe(result.inspections.filter((i) => i.previewOnly).length);
+    expect(result.preflight.estimatedRequestChars).toBe(result.inspections
+      .filter((i) => !i.previewOnly).reduce((sum, i) => sum + i.estimatedRequestChars, 0));
+    const human = formatInspectionStylish(result);
+    expect(human).toContain("at most 1 uncached judge calls");
+    expect(human).toContain("1 preview only (excluded)");
+    expect(human).not.toContain("exact request");
+    expect(formatInspectionStylish(result, true)).toContain("hypothetical request");
+  });
+
+  it("separates incomplete selections and preview diagnostics from clean zero matches", async () => {
+    const oversized = { path: "src/oversized.ts", source: "const value = " + "x".repeat(200) + ";" };
+    const wholeFile: JevCheckRule = {
+      id: "security/oversized", question: "Is this unsafe?", wholeFile: true,
+    };
+    const skipped: JevCheckRule = { ...wholeFile, id: "security/skipped", files: ["lib/**/*.ts"] };
+    const result = await inspectSource(oversized, [wholeFile, skipped], {
+      chunkChars: 64, previewSkipped: true,
+    });
+    expect(result.preflight).toMatchObject({
+      files: 1,
+      policyPairs: { semantic: 1, covered: 0, inapplicable: 1 },
+      eligibleCandidates: 0, estimatedRequestChars: 0, previewOnlyCandidates: 0,
+      cleanZeroCandidateSemanticPairs: 0, semanticPairsWithDiagnostics: 1,
+      eligibleSelectorDiagnostics: { errors: 0, warnings: 1 },
+      previewSelectorDiagnostics: { errors: 0, warnings: 1 },
+    });
+    expect(result.diagnostics).toHaveLength(1);
+    expect(result.rules.map((r) => r.selectorDiagnostics.length)).toEqual([1, 1]);
+    expect(formatInspectionStylish(result)).toContain("preview-only diagnostics: 0 errors, 1 warnings");
   });
 
   it("matches enforcement for projectWhen and previews skipped candidates without judging", async () => {
@@ -107,12 +166,20 @@ describe("semantic request inspection", () => {
     expect(covered.rules[0]?.execution).toBe("covered");
     expect(covered.rules[0]?.reason).toContain("human-reviewed deterministic coverage is current");
     expect(covered.inspections).toHaveLength(0);
+    expect(covered.preflight).toMatchObject({
+      policyPairs: { semantic: 0, covered: 1, inapplicable: 0 },
+      eligibleCandidates: 0, estimatedRequestChars: 0,
+    });
 
     await writeFile(coveredPath, "it('changed', () => {});");
     const stale = await inspectAndCheck();
     expect(stale.rules[0]?.execution).toBe("semantic");
     expect(stale.rules[0]?.reason).toContain("stale");
     expect(stale.inspections).toHaveLength(1);
+    expect(stale.preflight).toMatchObject({
+      policyPairs: { semantic: 1, covered: 0, inapplicable: 0 },
+      eligibleCandidates: 1, estimatedRequestChars: stale.inspections[0]!.estimatedRequestChars,
+    });
 
     // Direct library inspection resolves persisted coverage too.
     const direct = await inspectSource(input, [selected], { config, projectRoot: cwd });
