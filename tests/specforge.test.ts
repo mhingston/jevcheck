@@ -97,8 +97,8 @@ describe("SpecForge → jevcheck projection", () => {
     "file:///spec/projection.spec#projection_must_not_ack_failed_validation",
     "C:spec/projection.spec#projection_must_not_ack_failed_validation",
     "C:/spec/projection.spec#projection_must_not_ack_failed_validation",
-    "\\server\share\projection.spec#projection_must_not_ack_failed_validation",
-    "spec\projection.spec#projection_must_not_ack_failed_validation",
+    "\\\\server\\share\\projection.spec#projection_must_not_ack_failed_validation",
+    "spec\\projection.spec#projection_must_not_ack_failed_validation",
     "./spec/projection.spec#projection_must_not_ack_failed_validation",
     "spec//projection.spec#projection_must_not_ack_failed_validation",
   ])("rejects unsafe provenance %s", (unsafeSource) => {
