@@ -1,6 +1,6 @@
 ---
 name: jevcheck
-description: Use jevcheck when turning an observed, recurring code-review concern into a bounded, repeatable semantic lint rule, or when maintaining its rules, deterministic applicability, ADR provenance, fixtures, evidence gates, and lint/PR/CI workflows. Do not use for general-purpose code review or questions exact tooling can prove.
+description: Use jevcheck when turning a recurring code-review concern or reviewed SpecForge invariant into a bounded semantic lint rule, or when maintaining rule scope, provenance, fixtures, evidence gates, and lint/PR/CI workflows. Do not use for general-purpose code review or questions exact tooling can prove.
 ---
 
 # jevcheck — governed semantic linting
@@ -51,6 +51,29 @@ For a project-local installation use `npm install --save-dev @mhingston5/jevchec
 7. **Label both outcomes:** add genuinely valid and invalid development fixtures; later reserve untouched confirmation fixtures. Measure rather than assuming a sensible-looking question is reliable.
 
 Use a bounded question, not an instruction such as "review this code for security issues". `threshold`, severity, suppression, applicability, status and exit codes are code policy, not decisions left to the model.
+
+### Optional: SpecForge graph → reviewed advisory rules
+
+Choose this workflow only when a repository already has a SpecForge spec and a human has reviewed how a **specific invariant** maps to a bounded code judgement. Prefer deterministic tests/linters for anything mechanically provable; never convert an entire specification into semantic rules automatically.
+
+1. **Check the source:** run `specforge check --strict` and `specforge export --format graph > graph.json` to obtain a **full, unscoped** Graph Protocol export. The projector does not execute SpecForge or independently attest to the check. Scoped (`schema_ref`) and budgeted (`token_budget`) exports are rejected.
+2. **Review the mapping:** `spec/jevcheck-map.json` contains `rules[]` with an exact invariant ID, verbatim `expectedGuarantee`, canonical repository-relative `.spec#invariant` source, a narrowly scoped `question`, explicit `criteria.true`/`criteria.false`, deterministic selection (`ast` / literal `contains` etc.) and labelled fixtures. Each invariant must be linked by a behavior in the full graph. This is human-authored policy, **not** a generated model prompt to trust blindly.
+3. **Generate or verify with the main CLI** (there is no separate `jevcheck-specforge` executable):
+
+~~~sh
+specforge check --strict
+specforge export --format graph > graph.json
+jevcheck specforge project --graph graph.json --mapping spec/jevcheck-map.json \
+  --output examples/specforge/jevcheck.config.json
+jevcheck specforge project --graph graph.json --mapping spec/jevcheck-map.json \
+  --output examples/specforge/jevcheck.config.json --check  # CI: no writes
+jevcheck inspect src/cli.ts --config examples/specforge/jevcheck.config.json \
+  --rule reliability/specforge-no-success-after-failure --verbose
+~~~
+
+These paths and the rule ID are **this repository’s dogfood example**; substitute real paths and IDs elsewhere. The projector is provider-free, refuses guarantee drift, unlinked invariants, malformed mappings and unsafe provenance, and always emits `shadow`. A mapping cannot set `status`, `why` or `coveredBy`. Do not bypass those controls or treat the spec as permission to make a blocking rule.
+
+**Proof boundary:** projection and `inspect` show source-to-config consistency and bounded candidate selection, **not decision-model classification accuracy**. Keep the rule advisory until valid/invalid fixtures, precision/recall, drift, confirmation, recall and `rules audit` justify independently reviewed promotion. See the [SpecForge example](https://github.com/mhingston/jevcheck#specforge-integration-experimental-opt-in).
 
 ### Candidate selection and scope
 
@@ -149,6 +172,7 @@ Use `--config <path>` when not using the root config; `--format json` for machin
 
 `--format json` is the **single JSON contract**; do not parse obsolete top-level command-specific arrays/objects. Every supported command produces one object with `schemaVersion: 1`, `command`, `outcome`, `summary`, `diagnostics` and full `data` on stdout.
 
+- **SpecForge project:** with `--format json`, command `specforge-project` returns `data.output`, `data.checked`, rule count and `status: "shadow"`. Stale `--check` or invalid mappings fail with structured errors and exit 2; `--check` never modifies the file.
 - **Inspect:** `data.rules[]` contains rule/file policies; `data.inspections[]` contains full bounded requests (`request.state`, `request.question`), focus and semantic keys. Read these before invoking a model. `--preview-skipped` entries marked `previewOnly` are hypothetical, **not** requests that enforcement would send.
 - **Rules audit:** `data[]` contains complete reports with `readyForOwned`, `state`, `blockers`, `checks`, and remediation diagnostics. `outcome: "block"` signals evidence/readiness blockers **even though audit may exit 0**; do not treat a zero exit status as approval to promote to `owned`.
 - **Check/replay:** use `outcome` and `data.findings[]`/`data.diagnostics[]`; preserve blocking vs advisory distinctions. Exit status 1 indicates blocking findings or failed/incomplete evaluation; status 2 indicates a CLI/config/runtime failure.
@@ -166,6 +190,7 @@ Replay reuses matching recorded decisions and is useful for deterministic policy
 ## Further details
 
 - [Runnable example](https://github.com/mhingston/jevcheck/tree/main/examples/queue-ack)
+- [SpecForge projection example and commands](https://github.com/mhingston/jevcheck#specforge-integration-experimental-opt-in)
 - [Authoring, applicability, ADR and coverage](https://github.com/mhingston/jevcheck/blob/main/docs/concepts.md)
 - [Calibration, confirmation and graduation](https://github.com/mhingston/jevcheck/blob/main/docs/rule-lifecycle.md)
 - [How to Use Decision Models for Evals — Hamel Husain and Antaripa Saha](https://hamel.dev/blog/posts/decision-model-evals/) (threshold tuning, precision/recall constraints, held-out comparison and score calibration)
