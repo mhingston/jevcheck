@@ -41,7 +41,10 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - run: npm ci && npm run build
       # Pin the compiler to a reviewed commit; no unpinned install script.
-      - run: cargo install --git https://github.com/leaderiop/SpecForge.git --rev 45f9d4ebcd1a01672131033401d5ce680c18c142 --locked specforge-cli
+      - run: |
+          git clone https://github.com/leaderiop/SpecForge.git "$RUNNER_TEMP/specforge-src"
+          git -C "$RUNNER_TEMP/specforge-src" checkout --detach 45f9d4ebcd1a01672131033401d5ce680c18c142
+          cargo install --path "$RUNNER_TEMP/specforge-src/crates/surfaces/cli" --locked
       - run: specforge check --strict
       - run: specforge export --format graph > "$RUNNER_TEMP/specforge-graph.json"
       - run: node dist/specforge-cli.js --graph "$RUNNER_TEMP/specforge-graph.json" --mapping spec/jevcheck-map.json --output examples/specforge/jevcheck.config.json --check
