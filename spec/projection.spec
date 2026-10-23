@@ -32,9 +32,21 @@ invariant projection_must_not_ack_failed_validation "No false success on failed 
   verify unit "failed validation or output writing never reports success"
 }
 
+invariant reject_unsafe_provenance_paths "Canonical local provenance only" {
+  guarantee "Projected source references MUST reject padded paths, URI schemes, drive-relative paths and traversal forms."
+  risk high
+  verify unit "unsafe local-source spellings are rejected before fingerprinting"
+}
+
+invariant reject_scoped_graph_exports "Full graph required" {
+  guarantee "The projector MUST reject scoped SpecForge graph exports, even without a token budget."
+  risk high
+  verify unit "a graph containing schema_ref is rejected"
+}
+
 behavior project_invariants "Project checked specifications into semantic lint rules" {
   category command
-  invariants [mapped_guarantees_must_match, projected_rules_stay_advisory, only_enforced_invariants, preserve_spec_provenance, projection_must_not_ack_failed_validation]
+  invariants [mapped_guarantees_must_match, projected_rules_stay_advisory, only_enforced_invariants, preserve_spec_provenance, projection_must_not_ack_failed_validation, reject_unsafe_provenance_paths, reject_scoped_graph_exports]
   contract "Given a checked full SpecForge graph and reviewed mapping, generate only advisory jevcheck rules, or fail without producing output."
   verify unit "valid mapping projects one shadow rule"
   verify unit "invalid mappings and stale guarantees fail closed"
