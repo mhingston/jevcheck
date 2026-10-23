@@ -143,11 +143,11 @@ With SpecForge installed, from the repository root:
 specforge check --strict
 specforge export --format graph > /tmp/jevcheck-specforge-graph.json
 npm run build
-node dist/specforge-cli.js \
+node dist/cli.js specforge project \
   --graph /tmp/jevcheck-specforge-graph.json \
   --mapping spec/jevcheck-map.json \
   --output examples/specforge/jevcheck.config.json --check
-node dist/cli.js inspect src/specforge-cli.ts \
+node dist/cli.js inspect src/cli.ts \
   --config examples/specforge/jevcheck.config.json \
   --rule reliability/specforge-no-success-after-failure --verbose
 ```
