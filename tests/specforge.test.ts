@@ -53,7 +53,7 @@ describe("SpecForge → jevcheck projection", () => {
       id: "reliability/specforge-no-success-after-failure",
       source, why: guarantee, status: "shadow",
     });
-    expect(parseConfig(projected).rules[0]?.prefilter).toBe("projectSpecForge\(");
+    expect(parseConfig(projected).rules[0]?.prefilter).toBe("projectSpecForge\\(");
   });
 
   it("rejects semantic drift until the mapping is reviewed again", () => {
