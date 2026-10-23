@@ -26,9 +26,15 @@ invariant preserve_spec_provenance "Keep stable specification provenance" {
   verify unit "source paths and invariant references are checked"
 }
 
+invariant projection_must_not_ack_failed_validation "No false success on failed projection" {
+  guarantee "The CLI MUST NOT report successful projection when validation or output writing fails without successful recovery."
+  risk high
+  verify unit "failed validation or output writing never reports success"
+}
+
 behavior project_invariants "Project checked specifications into semantic lint rules" {
   category command
-  invariants [mapped_guarantees_must_match, projected_rules_stay_advisory, only_enforced_invariants, preserve_spec_provenance]
+  invariants [mapped_guarantees_must_match, projected_rules_stay_advisory, only_enforced_invariants, preserve_spec_provenance, projection_must_not_ack_failed_validation]
   contract "Given a checked full SpecForge graph and reviewed mapping, generate only advisory jevcheck rules, or fail without producing output."
   verify unit "valid mapping projects one shadow rule"
   verify unit "invalid mappings and stale guarantees fail closed"
