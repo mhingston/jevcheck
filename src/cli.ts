@@ -576,6 +576,33 @@ async function run(args: CliOptions, gitCwd: string, snapshotMode: boolean): Pro
     : await selectSources(
         args, config, gitCwd, args.command === "check" || args.command === "replay",
       );
+  // Nothing can require a semantic client when the selected source scope is
+  // empty. Owned-rule evidence gates have already been checked above.
+  if (sourceSelection && !sourceSelection.paths.length && args.command !== "recall") {
+    const empty = {
+      findings: [],
+      suppressedFindings: [],
+      evaluations: [],
+      diagnostics: [],
+      stats: {
+        filesChecked: 0,
+        candidatesChecked: 0,
+        requests: 0,
+        cacheHits: 0,
+        replayHits: 0,
+        replayMisses: 0,
+        inputTokens: 0,
+        outputTokens: 0,
+      },
+    };
+    console.log(
+      jsonMode ? formatCommandJson(args.command, { ...empty, sourceSelection.selection }) :
+        args.format === "sarif" ? formatSarif(empty) :
+          [selectionNotice(sourceSelection.selection), "No files matched the current configured scope."].filter(Boolean).join("\n"),
+    );
+    return;
+  }
+
   const needsSemanticClient =
     !ruleEvidenceReports ||
     config.rules.some((rule) => {
@@ -857,30 +884,6 @@ async function run(args: CliOptions, gitCwd: string, snapshotMode: boolean): Pro
     return;
   }
 
-  if (!paths.length) {
-    const empty = {
-      findings: [],
-      suppressedFindings: [],
-      evaluations: [],
-      diagnostics: [],
-      stats: {
-        filesChecked: 0,
-        candidatesChecked: 0,
-        requests: 0,
-        cacheHits: 0,
-        replayHits: 0,
-        replayMisses: 0,
-        inputTokens: 0,
-        outputTokens: 0,
-      },
-    };
-    console.log(
-      jsonMode ? formatCommandJson(args.command, { ...empty, selection }) :
-        args.format === "sarif" ? formatSarif(empty) :
-          [selectionNotice(selection), "No files matched the current configured scope."].filter(Boolean).join("\n"),
-    );
-    return;
-  }
 
   const result = await checker.checkFiles(paths);
 
