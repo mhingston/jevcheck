@@ -166,6 +166,10 @@ jevcheck replay                # strict offline replay, never provider fallback
 jevcheck baseline              # existing accepted findings, not new regressions
 ~~~
 
+**Config changes widen diff-scoped checks.** When a diff changes the active `jevcheck.config.json` (or custom repository-relative `--config <path>`), `inspect`, `check` and `replay` select **all** sources included by the new policy, even if the PR changed no source code. This applies to working-tree (`--changed`), exact staged-index (`--staged`) and committed HEAD (`--changed --base <ref>`) checks, with the same revision used for rules, sources, and evidence. An unchanged config remains diff-only. Config deletion/missing/invalid errors must never be interpreted as a green zero-file result. Changes to other governance artifacts alone do **not** trigger this expansion.
+
+**Agent protocol for config PRs:** first run `jevcheck inspect --changed --base origin/main --format json` (substitute your base and mode) without a provider. Read `data.selection.mode`, `data.selection.changedConfig`, and `data.selection.selectedFiles`; review selected rule/file policies, candidate counts, and request sizes before making paid model calls. `full-policy-change` may increase requests to full-repository scale; prefer fixing over-broad top-level include/exclude and per-rule scopes, **not** hiding required checks behind a manual diff. An empty `full-policy-change` scope is explicit in JSON and human output; investigate accidental exclusions rather than assuming a verified repository. Keep provider-visible context bounded to the same candidates; do not expand whole-file semantic context merely because more files were selected.
+
 Use `--config <path>` when not using the root config; `--format json` for machine-readable results. `--provider` and `--model` are passed through to jev-cli. TypeSafe is the default provider (`TYPESAFE_API_KEY`); OpenRouter is supported using `OPENROUTER_API_KEY` and `JEV_PROVIDER=openrouter`. Credentials belong in environment variables, not in rule files.
 
 ### Agent-readable CLI contract
