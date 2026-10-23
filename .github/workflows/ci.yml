@@ -47,5 +47,5 @@ jobs:
           cargo install --path "$RUNNER_TEMP/specforge-src/crates/surfaces/cli" --locked
       - run: specforge check --strict
       - run: specforge export --format graph > "$RUNNER_TEMP/specforge-graph.json"
-      - run: node dist/specforge-cli.js --graph "$RUNNER_TEMP/specforge-graph.json" --mapping spec/jevcheck-map.json --output examples/specforge/jevcheck.config.json --check
-      - run: node dist/cli.js inspect src/specforge-cli.ts --config examples/specforge/jevcheck.config.json --rule reliability/specforge-no-success-after-failure --format json
+      - run: node dist/cli.js specforge project --graph "$RUNNER_TEMP/specforge-graph.json" --mapping spec/jevcheck-map.json --output examples/specforge/jevcheck.config.json --check
+      - run: node dist/cli.js inspect src/cli.ts --config examples/specforge/jevcheck.config.json --rule reliability/specforge-no-success-after-failure --format json
