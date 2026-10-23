@@ -20,7 +20,13 @@ async function gitOutput(args: string[], cwd: string, env?: NodeJS.ProcessEnv): 
 }
 
 async function gitPaths(args: string[], cwd: string): Promise<string[]> {
-  const stdout = await gitOutput([...args, "-z"], cwd);
+  // -z is a Git option, not a pathspec. It must precede "--" when a
+  // literal path is selected; otherwise Git silently returns no matches.
+  const separator = args.indexOf("--");
+  const withNull = separator < 0
+    ? [...args, "-z"]
+    : [...args.slice(0, separator), "-z", ...args.slice(separator)];
+  const stdout = await gitOutput(withNull, cwd);
   return stdout.split("\0").filter((path) => path.length > 0);
 }
 
