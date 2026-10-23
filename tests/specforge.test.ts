@@ -89,9 +89,33 @@ describe("SpecForge → jevcheck projection", () => {
     expect(() => projectSpecForge(graph(), owned)).toThrow(/differs/);
   });
 
+  it.each([
+    " ../projection.spec#projection_must_not_ack_failed_validation",
+    "spec/ ../projection.spec#projection_must_not_ack_failed_validation",
+    "spec/ projection.spec#projection_must_not_ack_failed_validation",
+    "https://example.com/projection.spec#projection_must_not_ack_failed_validation",
+    "file:///spec/projection.spec#projection_must_not_ack_failed_validation",
+    "C:spec/projection.spec#projection_must_not_ack_failed_validation",
+    "C:/spec/projection.spec#projection_must_not_ack_failed_validation",
+    "\\server\share\projection.spec#projection_must_not_ack_failed_validation",
+    "spec\projection.spec#projection_must_not_ack_failed_validation",
+    "./spec/projection.spec#projection_must_not_ack_failed_validation",
+    "spec//projection.spec#projection_must_not_ack_failed_validation",
+  ])("rejects unsafe provenance %s", (unsafeSource) => {
+    const data = mapping();
+    data.rules[0]!.source = unsafeSource;
+    expect(() => projectSpecForge(graph(), data)).toThrow(/canonical repository-relative/);
+  });
+
   it("refuses partial graphs and unscoped semantic rules", () => {
     expect(() => projectSpecForge({ ...graph(), token_budget: {} }, mapping()))
       .toThrow(/budgeted/);
+    // Scoped exports carry schema_ref but may omit token_budget entirely.
+    // Even a graph retaining both of our mapped nodes is not a full export.
+    expect(() => projectSpecForge({
+      ...graph(),
+      schema_ref: { schema_version: "1.0.0", content_hash: "abcd" },
+    }, mapping())).toThrow(/scoped/);
     const unscoped = mapping();
     const entry = unscoped.rules[0]! as Record<string, unknown>;
     delete entry.ast;
