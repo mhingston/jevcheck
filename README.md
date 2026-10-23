@@ -146,9 +146,9 @@ node dist/specforge-cli.js \
   --graph /tmp/jevcheck-specforge-graph.json \
   --mapping spec/jevcheck-map.json \
   --output examples/specforge/jevcheck.config.json --check
-node dist/cli.js inspect src/specforge.ts \
+node dist/cli.js inspect src/specforge-cli.ts \
   --config examples/specforge/jevcheck.config.json \
-  --rule architecture/specforge-shadow-only --verbose
+  --rule reliability/specforge-no-success-after-failure --verbose
 ```
 
 Remove `--check` to regenerate the advisory config after reviewing a changed
