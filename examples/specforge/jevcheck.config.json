@@ -1,0 +1,24 @@
+{
+  "include": [
+    "src/specforge.ts"
+  ],
+  "rules": [
+    {
+      "id": "architecture/specforge-shadow-only",
+      "question": "Can this projection return an owned rule or permit a mapping to set owned status?",
+      "ast": "function_declaration",
+      "contains": "status",
+      "fixtures": {
+        "valid": [
+          "examples/specforge/fixtures/valid/**/*.ts"
+        ],
+        "invalid": [
+          "examples/specforge/fixtures/invalid/**/*.ts"
+        ]
+      },
+      "why": "A generated rule MUST remain in shadow status regardless of mapping input.",
+      "source": "spec/projection.spec#projected_rules_stay_advisory",
+      "status": "shadow"
+    }
+  ]
+}
