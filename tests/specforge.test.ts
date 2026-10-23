@@ -24,7 +24,7 @@ function graph() {
 
 function mapping() {
   return {
-    include: ["src/specforge-cli.ts"],
+    include: ["src/cli.ts"],
     rules: [{
       invariant: "projection_must_not_ack_failed_validation",
       expectedGuarantee: guarantee,
