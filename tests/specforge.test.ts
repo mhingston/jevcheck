@@ -5,34 +5,38 @@ import { projectSpecForge } from "../src/specforge.js";
 import { inspectSource } from "../src/inspect.js";
 import { parseConfig } from "../src/config.js";
 
-const guarantee = "A generated rule MUST remain in shadow status regardless of mapping input.";
-const source = "spec/projection.spec#projected_rules_stay_advisory";
+const guarantee = "The CLI MUST NOT report successful projection when validation or output writing fails without successful recovery.";
+const source = "spec/projection.spec#projection_must_not_ack_failed_validation";
 
 function graph() {
   return {
     format_version: "2.0",
     schema_version: "1.0.0",
     nodes: [
-      { id: "projected_rules_stay_advisory", kind: "invariant", file: "projection.spec",
+      { id: "projection_must_not_ack_failed_validation", kind: "invariant", file: "projection.spec",
         fields: { guarantee } },
       { id: "project_invariants", kind: "behavior", file: "projection.spec", fields: {} },
     ],
-    edges: [{ source: "project_invariants", target: "projected_rules_stay_advisory",
+    edges: [{ source: "project_invariants", target: "projection_must_not_ack_failed_validation",
       label: "invariants" }],
   };
 }
 
 function mapping() {
   return {
-    include: ["src/specforge.ts"],
+    include: ["src/specforge-cli.ts"],
     rules: [{
-      invariant: "projected_rules_stay_advisory",
+      invariant: "projection_must_not_ack_failed_validation",
       expectedGuarantee: guarantee,
       source,
-      id: "architecture/specforge-shadow-only",
-      question: "Can this projection return an owned rule or permit a mapping to set owned status?",
+      id: "reliability/specforge-no-success-after-failure",
+      question: "Can this CLI report successful projection after projectSpecForge or writing output fails, without successful recovery?",
       ast: "function_declaration",
-      contains: "status",
+      contains: "projectSpecForge(",
+      criteria: {
+        true: "A validation or write failure is swallowed, but the CLI still reports successful projection.",
+        false: "Success is reported only after completed validation and output writing; failures produce a non-success exit.",
+      },
       fixtures: {
         valid: ["examples/specforge/fixtures/valid/**/*.ts"],
         invalid: ["examples/specforge/fixtures/invalid/**/*.ts"],
@@ -46,10 +50,10 @@ describe("SpecForge → jevcheck projection", () => {
     const projected = projectSpecForge(graph(), mapping());
     expect(projected.rules).toHaveLength(1);
     expect(projected.rules[0]).toMatchObject({
-      id: "architecture/specforge-shadow-only",
+      id: "reliability/specforge-no-success-after-failure",
       source, why: guarantee, status: "shadow",
     });
-    expect(parseConfig(projected).rules[0]?.prefilter).toBe("status");
+    expect(parseConfig(projected).rules[0]?.prefilter).toBe("projectSpecForge\(");
   });
 
   it("rejects semantic drift until the mapping is reviewed again", () => {
@@ -79,9 +83,9 @@ describe("SpecForge → jevcheck projection", () => {
     entry.coveredBy = [{ id: "fake", path: "tests/anything.test.ts" }];
     expect(() => projectSpecForge(graph(), owned)).toThrow(/cannot set status/);
     delete entry.coveredBy;
-    entry.source = "../outside.spec#projected_rules_stay_advisory";
+    entry.source = "../outside.spec#projection_must_not_ack_failed_validation";
     expect(() => projectSpecForge(graph(), owned)).toThrow(/repository-relative/);
-    entry.source = "spec/other.spec#projected_rules_stay_advisory";
+    entry.source = "spec/other.spec#projection_must_not_ack_failed_validation";
     expect(() => projectSpecForge(graph(), owned)).toThrow(/differs/);
   });
 
@@ -98,14 +102,14 @@ describe("SpecForge → jevcheck projection", () => {
   it("dogfoods generated selection with valid and invalid source fixtures, provider-free", async () => {
     const checked = parseConfig(projectSpecForge(graph(), mapping()));
     for (const kind of ["valid", "invalid"] as const) {
-      const path = "examples/specforge/fixtures/" + kind + "/status.ts";
+      const path = "examples/specforge/fixtures/" + kind + "/cli.ts";
       const result = await inspectSource(
         { path, source: readFileSync(join(process.cwd(), path), "utf8") },
         checked.rules,
       );
       expect(result.diagnostics).toEqual([]);
       expect(result.inspections).toHaveLength(1);
-      expect(JSON.stringify(result.inspections[0]?.request.question)).toMatch(/owned rule/);
+      expect(JSON.stringify(result.inspections[0]?.request.question)).toMatch(/successful projection/);
     }
   });
 });
