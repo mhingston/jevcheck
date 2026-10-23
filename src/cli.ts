@@ -596,7 +596,7 @@ async function run(args: CliOptions, gitCwd: string, snapshotMode: boolean): Pro
       },
     };
     console.log(
-      jsonMode ? formatCommandJson(args.command, { ...empty, sourceSelection.selection }) :
+      jsonMode ? formatCommandJson(args.command, { ...empty, selection: sourceSelection.selection }) :
         args.format === "sarif" ? formatSarif(empty) :
           [selectionNotice(sourceSelection.selection), "No files matched the current configured scope."].filter(Boolean).join("\n"),
     );
@@ -610,7 +610,7 @@ async function run(args: CliOptions, gitCwd: string, snapshotMode: boolean): Pro
       return (report?.execution ?? "semantic") === "semantic";
     });
   const client =
-    args.command === "replay" || !needsSemanticClient || sourceSelection?.paths.length === 0
+    args.command === "replay" || !needsSemanticClient
       ? undefined
       : createJevClient({ provider: args.provider, model: args.model });
   const cacheFile = resolve(config.cacheFile ?? ".jevcheck/cache.json");
