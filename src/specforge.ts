@@ -33,10 +33,16 @@ function relativeSource(value: unknown, id: string): string {
   }
   const path = parts[0]!;
   const normalized = path.replaceAll("\\", "/");
-  if (isAbsolute(path) || /^[a-zA-Z]:\//.test(normalized) ||
-      normalized.startsWith("/") || normalized.split("/").includes("..") ||
-      normalized.split("/").includes(".") || !normalized.endsWith(".spec")) {
-    throw new Error(id + ".source must name a repository-relative .spec file");
+  const components = normalized.split("/");
+  // Canonical POSIX-style source paths make the provenance reader behave
+  // consistently on all platforms, without URL or drive-relative fallbacks.
+  if (path !== normalized || path !== path.trim() || isAbsolute(path) ||
+      normalized.startsWith("/") || normalized.includes(":") ||
+      /[\u0000-\u001f\u007f]/.test(normalized) ||
+      components.some((component) => !component || component === "." ||
+        component === ".." || component !== component.trim()) ||
+      !normalized.endsWith(".spec")) {
+    throw new Error(id + ".source must name a canonical repository-relative .spec file");
   }
   return source;
 }
@@ -48,6 +54,11 @@ function schemaVersion(graph: Record<string, unknown>): void {
   nonEmpty(graph.schema_version, "graph.schema_version");
   if (graph.token_budget !== undefined) {
     throw new Error("budgeted SpecForge graph exports are not accepted");
+  }
+  // SpecForge marks scoped (partial) exports with schema_ref, even if
+  // the requested scope has no token budget.
+  if ("schema_ref" in graph) {
+    throw new Error("scoped SpecForge graph exports are not accepted");
   }
 }
 
