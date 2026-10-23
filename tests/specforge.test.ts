@@ -105,7 +105,7 @@ describe("SpecForge → jevcheck projection", () => {
       );
       expect(result.diagnostics).toEqual([]);
       expect(result.inspections).toHaveLength(1);
-      expect(result.inspections[0]?.request.question).toMatch(/owned rule/);
+      expect(JSON.stringify(result.inspections[0]?.request.question)).toMatch(/owned rule/);
     }
   });
 });
