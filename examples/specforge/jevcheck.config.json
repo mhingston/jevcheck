@@ -1,6 +1,6 @@
 {
   "include": [
-    "src/specforge-cli.ts"
+    "src/cli.ts"
   ],
   "rules": [
     {
