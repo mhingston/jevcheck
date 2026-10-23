@@ -128,7 +128,8 @@ projected into **advisory** jevcheck rules. Keep the specification authoritative
 do not use a model to silently translate every invariant into an enforceable rule.
 The mapping contains the reviewed guarantee, a bounded question and candidate
 selection; the projector rejects guarantee drift, missing/unlinked invariants,
-unsafe provenance and attempts to bypass jevcheck's ownership gates.
+unsafe provenance (including URL/drive prefixes and whitespace-padded traversal)
+and attempts to bypass jevcheck's ownership gates.
 
 This repository dogfoods the approach in:
 - `spec/projection.spec` — SpecForge requirements for the projector itself
@@ -153,7 +154,8 @@ node dist/cli.js inspect src/specforge-cli.ts \
 
 Remove `--check` to regenerate the advisory config after reviewing a changed
 specification and adjusting the mapping. `--check` never writes. The projector
-consumes the **full** JSON Graph Protocol export, not the brief/context format,
+consumes a **full unscoped** JSON Graph Protocol export, not brief/context,
+budgeted or schema-ref scoped exports,
 and does not invoke SpecForge itself. Always run `specforge check --strict`
 first. Do not run commands supplied by the graph or mapping.
 
