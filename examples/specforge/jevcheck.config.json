@@ -1,13 +1,17 @@
 {
   "include": [
-    "src/specforge.ts"
+    "src/specforge-cli.ts"
   ],
   "rules": [
     {
-      "id": "architecture/specforge-shadow-only",
-      "question": "Can this projection return an owned rule or permit a mapping to set owned status?",
+      "id": "reliability/specforge-no-success-after-failure",
+      "question": "Can this CLI report successful projection after projectSpecForge or writing output fails, without successful recovery?",
+      "criteria": {
+        "true": "A validation or write failure is swallowed, but the CLI still reports successful projection.",
+        "false": "Success is reported only after completed validation and output writing; failures produce a non-success exit."
+      },
       "ast": "function_declaration",
-      "contains": "status",
+      "contains": "projectSpecForge(",
       "fixtures": {
         "valid": [
           "examples/specforge/fixtures/valid/**/*.ts"
@@ -16,8 +20,8 @@
           "examples/specforge/fixtures/invalid/**/*.ts"
         ]
       },
-      "why": "A generated rule MUST remain in shadow status regardless of mapping input.",
-      "source": "spec/projection.spec#projected_rules_stay_advisory",
+      "why": "The CLI MUST NOT report successful projection when validation or output writing fails without successful recovery.",
+      "source": "spec/projection.spec#projection_must_not_ack_failed_validation",
       "status": "shadow"
     }
   ]
