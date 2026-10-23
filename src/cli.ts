@@ -32,7 +32,7 @@ import {
   persistMutationEvidence,
   persistRobustnessEvidence,
 } from "./evidence-store.js";
-import { discoverFiles, filterFiles } from "./files.js";
+import { selectSources, selectionNotice } from "./selection.js";
 import { assertOwnedRuleEvidence } from "./graduation.js";
 import {
   formatFixtureDriftStylish,
@@ -43,7 +43,7 @@ import {
   formatSarif,
   formatStylish,
 } from "./format.js";
-import { changedFiles, checkoutGitSnapshot, stagedFiles } from "./git.js";
+import { checkoutGitSnapshot } from "./git.js";
 import { formatInspectionStylish, inspectSources } from "./inspect.js";
 import { DEFAULT_REPLAY_FILE, DiskSemanticDecisionStore } from "./replay.js";
 import { assertSnapshotPaths } from "./snapshot-paths.js";
@@ -104,6 +104,7 @@ function usage(): string {
     "  --changed             Check working-tree changes and untracked files",
     "  --staged              Check the exact staged index snapshot",
     "  --base <ref>          With --changed, check files changed in base...HEAD at HEAD",
+    "  Diff scopes expand to the full current source scope if the active config changes.",
     "  --format <style>      stylish, json, or sarif (sarif: check/replay only)",
     "  --verbose             Detailed inspection/audit evidence and semantic requests",
     "  --provider <name>     Jev provider inherited from @mhingston5/jev-cli",
@@ -488,18 +489,7 @@ async function run(args: CliOptions, gitCwd: string, snapshotMode: boolean): Pro
     return;
   }
   if (args.command === "inspect") {
-    const includes = config.include ?? DEFAULT_SOURCE_INCLUDE;
-    let paths: string[];
-    if (args.staged) {
-      paths = filterFiles(await stagedFiles(gitCwd), includes, config.exclude ?? []);
-    } else if (args.changed) {
-      paths = filterFiles(await changedFiles(args.base, gitCwd), includes, config.exclude ?? []);
-    } else {
-      paths = await discoverFiles(
-        args.patterns.length ? args.patterns : includes,
-        config.exclude ?? [],
-      );
-    }
+    const { paths, selection } = await selectSources(args, config, gitCwd);
 
     const selectedRules = args.inspectRule
       ? config.rules.filter((rule) => rule.id === args.inspectRule)
@@ -522,17 +512,20 @@ async function run(args: CliOptions, gitCwd: string, snapshotMode: boolean): Pro
     const reports = hasRuntimePolicy
       ? (await evaluateConfiguredRuleEvidence(config, { modelNamespace })).reports
       : undefined;
-    const inspected = await inspectSources(inputs, selectedRules, {
-      config,
-      ruleEvidenceReports: reports,
-      projectRoot: process.cwd(),
-      modelNamespace,
-      previewSkipped: args.previewSkipped,
-    });
+    const inspected = {
+      ...(await inspectSources(inputs, selectedRules, {
+        config,
+        ruleEvidenceReports: reports,
+        projectRoot: process.cwd(),
+        modelNamespace,
+        previewSkipped: args.previewSkipped,
+      })),
+      selection,
+    };
     console.log(
       jsonMode
         ? formatCommandJson(args.command, inspected)
-        : formatInspectionStylish(inspected, args.verbose),
+        : [selectionNotice(selection), formatInspectionStylish(inspected, args.verbose)].filter(Boolean).join("\n"),
     );
     process.exitCode = inspected.diagnostics.some((item) => item.level === "error") ? 1 : 0;
     return;
@@ -576,6 +569,40 @@ async function run(args: CliOptions, gitCwd: string, snapshotMode: boolean): Pro
       : args.command === "replay"
         ? new DiskSemanticDecisionStore(replayFile, true)
         : undefined;
+  // Select source scope before creating a provider client. An empty scope
+  // must remain a genuine empty scan even when no provider key is configured.
+  const sourceSelection = args.command === "test"
+    ? undefined
+    : await selectSources(
+        args, config, gitCwd, args.command === "check" || args.command === "replay",
+      );
+  // Nothing can require a semantic client when the selected source scope is
+  // empty. Owned-rule evidence gates have already been checked above.
+  if (sourceSelection && !sourceSelection.paths.length && args.command !== "recall") {
+    const empty = {
+      findings: [],
+      suppressedFindings: [],
+      evaluations: [],
+      diagnostics: [],
+      stats: {
+        filesChecked: 0,
+        candidatesChecked: 0,
+        requests: 0,
+        cacheHits: 0,
+        replayHits: 0,
+        replayMisses: 0,
+        inputTokens: 0,
+        outputTokens: 0,
+      },
+    };
+    console.log(
+      jsonMode ? formatCommandJson(args.command, { ...empty, selection: sourceSelection.selection }) :
+        args.format === "sarif" ? formatSarif(empty) :
+          [selectionNotice(sourceSelection.selection), "No files matched the current configured scope."].filter(Boolean).join("\n"),
+    );
+    return;
+  }
+
   const needsSemanticClient =
     !ruleEvidenceReports ||
     config.rules.some((rule) => {
@@ -811,15 +838,8 @@ async function run(args: CliOptions, gitCwd: string, snapshotMode: boolean): Pro
     return;
   }
 
+  const { paths, selection } = sourceSelection!;
   const includes = config.include ?? DEFAULT_SOURCE_INCLUDE;
-  let paths: string[];
-  if (args.staged) {
-    paths = filterFiles(await stagedFiles(gitCwd), includes, config.exclude ?? []);
-  } else if (args.changed) {
-    paths = filterFiles(await changedFiles(args.base, gitCwd), includes, config.exclude ?? []);
-  } else {
-    paths = await discoverFiles(args.patterns.length ? args.patterns : includes, config.exclude ?? []);
-  }
 
   if (args.command === "recall") {
     const result = await checker.recallFiles(paths, args.sampleSize);
@@ -864,28 +884,6 @@ async function run(args: CliOptions, gitCwd: string, snapshotMode: boolean): Pro
     return;
   }
 
-  if (!paths.length) {
-    const empty = {
-      findings: [],
-      suppressedFindings: [],
-      evaluations: [],
-      diagnostics: [],
-      stats: {
-        filesChecked: 0,
-        candidatesChecked: 0,
-        requests: 0,
-        cacheHits: 0,
-        replayHits: 0,
-        replayMisses: 0,
-        inputTokens: 0,
-        outputTokens: 0,
-      },
-    };
-    console.log(
-      jsonMode ? formatCommandJson(args.command, empty) : args.format === "sarif" ? formatSarif(empty) : "No files matched.",
-    );
-    return;
-  }
 
   const result = await checker.checkFiles(paths);
 
@@ -894,7 +892,7 @@ async function run(args: CliOptions, gitCwd: string, snapshotMode: boolean): Pro
     const decisions = await decisionStore?.count?.() ?? result.evaluations.length;
     console.log(
       jsonMode
-        ? formatCommandJson(args.command, { ...result, replay: { file: replayFile, decisions } })
+        ? formatCommandJson(args.command, { ...result, selection, replay: { file: replayFile, decisions } })
         : formatStylish(result) +
           "\nReplay corpus: " +
           decisions +
@@ -918,7 +916,7 @@ async function run(args: CliOptions, gitCwd: string, snapshotMode: boolean): Pro
     const total = await writeBaseline(baselineFile, evaluatedScopes, entries);
     console.log(
       jsonMode
-        ? formatCommandJson(args.command, { baselineFile, entriesWritten: entries.length, totalEntries: total })
+        ? formatCommandJson(args.command, { baselineFile, entriesWritten: entries.length, totalEntries: total, selection })
         : "Updated " + baselineFile + " with " + entries.length + " current finding(s); " + total + " total baseline entry(s).",
     );
     return;
@@ -926,10 +924,10 @@ async function run(args: CliOptions, gitCwd: string, snapshotMode: boolean): Pro
 
   console.log(
     jsonMode
-      ? formatCommandJson(args.command, result)
+      ? formatCommandJson(args.command, { ...result, selection })
       : args.format === "sarif"
         ? formatSarif(result)
-        : formatStylish(result),
+        : [selectionNotice(selection), formatStylish(result)].filter(Boolean).join("\n"),
   );
   process.exitCode =
     result.findings.some((finding) => finding.blocking) ||
@@ -945,8 +943,9 @@ async function main(): Promise<void> {
   if (revision && !["check", "replay", "inspect", "list"].includes(args.command)) {
     throw new Error("--staged and --changed --base are read-only snapshot modes; use check, inspect, replay, or list");
   }
-  if (revision && (isAbsolute(args.config) || args.config.replaceAll("\\", "/").split("/").includes(".."))) {
-    throw new Error("Git snapshots require a repository-relative --config path");
+  if ((args.changed || args.staged) &&
+      (isAbsolute(args.config) || args.config.replaceAll("\\", "/").split("/").includes(".."))) {
+    throw new Error("Git diff verification requires a repository-relative --config path");
   }
 
   const gitCwd = process.cwd();

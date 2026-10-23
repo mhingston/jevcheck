@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process";
-import { access, chmod, mkdir, mkdtemp, readlink, readdir, realpath, rm, symlink, writeFile } from "node:fs/promises";
+import { access, chmod, lstat, mkdir, mkdtemp, readlink, readdir, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { dirname, isAbsolute, join, normalize, posix, relative, resolve, sep } from "node:path";
 import { promisify } from "node:util";
 import type { SourceInput } from "./types.js";
 
@@ -20,7 +20,13 @@ async function gitOutput(args: string[], cwd: string, env?: NodeJS.ProcessEnv): 
 }
 
 async function gitPaths(args: string[], cwd: string): Promise<string[]> {
-  const stdout = await gitOutput([...args, "-z"], cwd);
+  // -z is a Git option, not a pathspec. It must precede "--" when a
+  // literal path is selected; otherwise Git silently returns no matches.
+  const separator = args.indexOf("--");
+  const withNull = separator < 0
+    ? [...args, "-z"]
+    : [...args.slice(0, separator), "-z", ...args.slice(separator)];
+  const stdout = await gitOutput(withNull, cwd);
   return stdout.split("\0").filter((path) => path.length > 0);
 }
 
@@ -63,6 +69,67 @@ export async function changedFiles(base: string | undefined, cwd = process.cwd()
   const tracked = await gitPaths(["diff", "--relative", "--no-renames", "--name-only", "--diff-filter=ACMT", "HEAD"], cwd);
   const untracked = await gitPaths(["ls-files", "--others", "--exclude-standard"], cwd);
   return existing(Array.from(new Set([...tracked, ...untracked])).sort(), cwd);
+}
+
+/**
+ * Did the active config change relative to the revision supplying diff inputs?
+ * Include deletions even though deleted paths cannot be linted as sources.
+ * Restrict Git's pathspec to the literal config path (not a glob).
+ */
+export async function activeConfigChanged(
+  configPath: string,
+  mode: "working-tree" | "index" | "head",
+  cwd = process.cwd(),
+  base?: string,
+  selectedCwd = process.cwd(),
+): Promise<boolean> {
+  const repositoryRoot = (await gitOutput(["rev-parse", "--show-toplevel"], cwd)).trim();
+  const relativeCwd = relative(await realpath(repositoryRoot), await realpath(cwd)).replaceAll("\\", "/");
+  if (relativeCwd === ".." || relativeCwd.startsWith("../") || isAbsolute(relativeCwd)) {
+    throw new Error("active config is outside the Git repository");
+  }
+
+  // selectedCwd is the *selected revision*: HEAD/index snapshot or working
+  // tree. Never resolve a staged/HEAD symlink through the live checkout.
+  const selectedRoot = resolve(selectedCwd, ...relativeCwd.split("/").filter(Boolean).map(() => ".."));
+  const selectedRootCanonical = await realpath(selectedRoot);
+  const resolvedConfig = await realpath(resolve(selectedCwd, configPath));
+  const resolvedPath = relative(selectedRootCanonical, resolvedConfig).replaceAll("\\", "/");
+  if (resolvedPath === ".." || resolvedPath.startsWith("../") || isAbsolute(resolvedPath)) {
+    throw new Error("active config resolves outside the selected Git revision: " + configPath);
+  }
+
+  // Include the config itself, the dereferenced content path, and any symlink
+  // ancestors of the configured path. A target-only edit changes effective
+  // policy even though the symlink blob is byte-for-byte unchanged.
+  const paths = new Set<string>([
+    posix.normalize(posix.join(relativeCwd, configPath.replaceAll("\\", "/"))),
+    resolvedPath,
+  ]);
+  const components = configPath.replaceAll("\\", "/").split("/").filter((part) => part && part !== ".");
+  let prefix = "";
+  for (const component of components) {
+    prefix = prefix ? prefix + "/" + component : component;
+    if ((await lstat(resolve(selectedCwd, prefix))).isSymbolicLink()) {
+      paths.add(posix.normalize(posix.join(relativeCwd, prefix)));
+    }
+  }
+
+  const diff = ["diff", "--no-renames", "--name-only", "--diff-filter=ACDMT"];
+  if (mode === "index") diff.push("--cached"); // HEAD or empty tree on an unborn branch.
+  else if (mode === "head") {
+    if (!base) throw new Error("HEAD comparison requires --base");
+    diff.push(base + "...HEAD");
+  } else diff.push("HEAD");
+
+  const literals = [...paths].map((path) => ":(literal)" + path);
+  if ((await gitPaths([...diff, "--", ...literals], repositoryRoot)).some((path) => paths.has(path))) {
+    return true;
+  }
+  // Git diff omits untracked working-tree configs and resolved targets.
+  return mode === "working-tree" &&
+    (await gitPaths(["ls-files", "--others", "--exclude-standard", "--", ...literals], repositoryRoot))
+      .some((path) => paths.has(path));
 }
 
 export interface GitEvaluationSnapshot {
