@@ -374,27 +374,33 @@ function parseArgs(argv: string[]): CliOptions {
   return options;
 }
 
+/** Keep SpecForge projection as a bounded, independently inspectable CLI path. */
+async function runSpecForgeProject(args: CliOptions): Promise<void> {
+  const jsonMode = args.format === "json";
+  // This command needs no jevcheck config, compiler, provider or model.
+  const graph = JSON.parse(await readFile(args.graph!, "utf8")) as unknown;
+  const mapping = JSON.parse(await readFile(args.mapping!, "utf8")) as unknown;
+  const projection = projectSpecForge(graph, mapping);
+  const expected = JSON.stringify(projection, null, 2) + "\n";
+  const target = args.output!;
+  if (args.projectionCheck) {
+    if (await readFile(target, "utf8") !== expected) {
+      throw new Error("projected config is stale: regenerate " + target);
+    }
+  } else {
+    await writeFile(target, expected, "utf8");
+  }
+  console.log(jsonMode
+    ? formatCommandJson(args.command, { output: target, checked: args.projectionCheck, rules: projection.rules.length, status: "shadow" })
+    : args.projectionCheck
+      ? "SpecForge projection matches " + target
+      : "Wrote " + target + " (shadow rules only)");
+}
+
 async function run(args: CliOptions, gitCwd: string, snapshotMode: boolean): Promise<void> {
   const jsonMode = args.format === "json";
   if (args.command === "specforge-project") {
-    // This command needs no jevcheck config, compiler, provider or model.
-    const graph = JSON.parse(await readFile(args.graph!, "utf8")) as unknown;
-    const mapping = JSON.parse(await readFile(args.mapping!, "utf8")) as unknown;
-    const projection = projectSpecForge(graph, mapping);
-    const expected = JSON.stringify(projection, null, 2) + "\n";
-    const target = args.output!;
-    if (args.projectionCheck) {
-      if (await readFile(target, "utf8") !== expected) {
-        throw new Error("projected config is stale: regenerate " + target);
-      }
-    } else {
-      await writeFile(target, expected, "utf8");
-    }
-    console.log(jsonMode
-      ? formatCommandJson(args.command, { output: target, checked: args.projectionCheck, rules: projection.rules.length, status: "shadow" })
-      : args.projectionCheck
-        ? "SpecForge projection matches " + target
-        : "Wrote " + target + " (shadow rules only)");
+    await runSpecForgeProject(args);
     return;
   }
   const config = await loadConfig(args.config).catch((error: unknown) => { throw new CliConfigError(error); });
