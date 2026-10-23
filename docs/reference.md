@@ -137,6 +137,8 @@ A check resolves **source and all associated policy inputs together**, rather th
 | `--staged` | `HEAD` to index | Isolated index checkout, including partially staged config |
 | `--changed` | `HEAD` to working tree (including staged edits and untracked non-ignored config) | Working tree |
 
+Repository-local symlinked configs are supported: edits to the resolved target file (and changes to symlink ancestors) trigger the same expansion. External symlink targets are rejected in diff mode rather than silently bypassing policy-change detection.
+
 A changed config can increase provider requests from zero (config-only diff) to the cost of a **full configured scan**. Inspect first to estimate candidates and model-visible request sizes before enforcing:
 
 ~~~sh
