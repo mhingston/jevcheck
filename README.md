@@ -120,3 +120,44 @@ MIT licensed.
 Default `stylish` output begins with a summary. `check` groups findings by file/rule, `rules audit` shows readiness and actionable blockers, and `inspect` summarises runtime policy without printing requests. Use `inspect --verbose` for exact requests/keys or `rules audit --verbose` for every evidence check. Reviewed coverage and CI-verified coverage are displayed as distinct states.
 
 **Breaking JSON output change:** `--format json` now returns one consistent object with `schemaVersion`, `command`, `outcome`, `summary`, `diagnostics`, and `data` fields for every supported command, including structured errors. Previous raw objects/arrays are now under `data`; there is no separate JSON version flag. For example, run `jevcheck rules audit --format json` to get actionable evidence for agents. Audit `outcome: "block"` indicates readiness blockers even when the audit command exits 0; an owned-rule failure returns `outcome: "error"`, gate diagnostics and `data.evidenceReports[]`. See the [CLI output contract](docs/reference.md#human-output-and-json-for-agents).
+
+## SpecForge integration (experimental, opt-in)
+
+A checked [SpecForge](https://github.com/leaderiop/SpecForge) graph can be
+projected into **advisory** jevcheck rules. Keep the specification authoritative;
+do not use a model to silently translate every invariant into an enforceable rule.
+The mapping contains the reviewed guarantee, a bounded question and candidate
+selection; the projector rejects guarantee drift, missing/unlinked invariants,
+unsafe provenance and attempts to bypass jevcheck's ownership gates.
+
+This repository dogfoods the approach in:
+- `spec/projection.spec` — SpecForge requirements for the projector itself
+- `spec/jevcheck-map.json` — an explicit approved mapping for one invariant
+- `examples/specforge/jevcheck.config.json` — generated config for CI drift detection
+- `tests/specforge.test.ts` — deterministic regressions and offline inspection
+
+With SpecForge installed, from the repository root:
+
+```sh
+specforge check --strict
+specforge export --format graph > /tmp/jevcheck-specforge-graph.json
+npm run build
+node dist/specforge-cli.js \
+  --graph /tmp/jevcheck-specforge-graph.json \
+  --mapping spec/jevcheck-map.json \
+  --output examples/specforge/jevcheck.config.json --check
+node dist/cli.js inspect src/specforge.ts \
+  --config examples/specforge/jevcheck.config.json \
+  --rule architecture/specforge-shadow-only --verbose
+```
+
+Remove `--check` to regenerate the advisory config after reviewing a changed
+specification and adjusting the mapping. `--check` never writes. The projector
+consumes the **full** JSON Graph Protocol export, not the brief/context format,
+and does not invoke SpecForge itself. Always run `specforge check --strict`
+first. Do not run commands supplied by the graph or mapping.
+
+The projected rule remains `shadow`. Offline inspection tests only candidate
+selection, **not** model accuracy. Calibrate against safe/unsafe fixtures and
+measure drift and recall before considering manual promotion with `rules audit`.
+Promotion is deliberately outside the projector.
