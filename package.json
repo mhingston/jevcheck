@@ -32,8 +32,7 @@
     }
   },
   "bin": {
-    "jevcheck": "dist/cli.js",
-    "jevcheck-specforge": "dist/specforge-cli.js"
+    "jevcheck": "dist/cli.js"
   },
   "files": [
     "dist",
