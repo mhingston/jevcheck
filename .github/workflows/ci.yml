@@ -31,3 +31,18 @@ jobs:
       - run: node dist/cli.js inspect examples/multilanguage-ast/sources/example.java --config examples/multilanguage-ast/jevcheck.config.json --rule example/java --format json
       - run: node dist/cli.js inspect examples/multilanguage-ast/sources/example.rs --config examples/multilanguage-ast/jevcheck.config.json --rule example/rust --format json
       - run: npm run pack:check
+  specforge-projection:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - uses: dtolnay/rust-toolchain@stable
+      - run: npm ci && npm run build
+      # Pin the compiler to a reviewed commit; no unpinned install script.
+      - run: cargo install --git https://github.com/leaderiop/SpecForge.git --rev 45f9d4ebcd1a01672131033401d5ce680c18c142 --locked specforge-cli
+      - run: specforge check --strict
+      - run: specforge export --format graph > "$RUNNER_TEMP/specforge-graph.json"
+      - run: node dist/specforge-cli.js --graph "$RUNNER_TEMP/specforge-graph.json" --mapping spec/jevcheck-map.json --output examples/specforge/jevcheck.config.json --check
+      - run: node dist/cli.js inspect src/specforge.ts --config examples/specforge/jevcheck.config.json --rule architecture/specforge-shadow-only --format json
