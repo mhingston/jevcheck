@@ -1,5 +1,7 @@
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { projectSpecForge } from "../src/specforge.js";
 import { inspectSource } from "../src/inspect.js";
@@ -136,4 +138,60 @@ describe("SpecForge → jevcheck projection", () => {
       expect(JSON.stringify(result.inspections[0]?.request.question)).toMatch(/successful projection/);
     }
   });
+  it("supports generate, drift check and JSON errors via the main jevcheck CLI", () => {
+    const cwd = mkdtempSync(join(tmpdir(), "jevcheck-specforge-"));
+    const cli = resolve("dist/cli.js");
+    const target = join(cwd, "jevcheck.config.json");
+    const graphPath = join(cwd, "graph.json");
+    const mappingPath = join(cwd, "mapping.json");
+    const execute = (extra: string[] = []) => {
+      const result = spawnSync(process.execPath, [
+        cli, "specforge", "project",
+        "--graph", graphPath, "--mapping", mappingPath, "--output", target, ...extra,
+      ], { cwd, encoding: "utf8" });
+      if (result.error) throw result.error;
+      return result;
+    };
+    try {
+      writeFileSync(graphPath, JSON.stringify(graph()));
+      writeFileSync(mappingPath, JSON.stringify(mapping()));
+      // No default jevcheck.config.json exists in this temporary workspace.
+      const generated = execute();
+      expect(generated.status).toBe(0);
+      expect(generated.stderr).toBe("");
+      expect(generated.stdout).toContain("shadow rules only");
+      const actual = JSON.parse(readFileSync(target, "utf8"));
+      expect(actual.rules[0].status).toBe("shadow");
+
+      const checked = execute(["--check", "--format", "json"]);
+      expect(checked.status).toBe(0);
+      expect(JSON.parse(checked.stdout)).toMatchObject({
+        command: "specforge-project", outcome: "pass",
+        data: { checked: true, rules: 1, status: "shadow" },
+      });
+
+      writeFileSync(target, "{}\n");
+      const stale = execute(["--check", "--format", "json"]);
+      expect(stale.status).toBe(2);
+      expect(stale.stderr).toBe("");
+      expect(JSON.parse(stale.stdout)).toMatchObject({
+        command: "specforge-project", outcome: "error",
+      });
+      expect(readFileSync(target, "utf8")).toBe("{}\n");
+
+      const disallowed = execute(["--check", "--provider", "typesafe", "--format", "json"]);
+      expect(disallowed.status).toBe(2);
+      expect(JSON.parse(disallowed.stdout).error.code).toBe("INVALID_ARGUMENT");
+
+      const missing = spawnSync(process.execPath, [cli, "specforge", "project",
+        "--format", "json"], { cwd, encoding: "utf8" });
+      expect(missing.status).toBe(2);
+      expect(JSON.parse(missing.stdout)).toMatchObject({
+        command: "specforge-project", outcome: "error",
+      });
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
+    }
+  });
+
 });
