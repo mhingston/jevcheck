@@ -129,6 +129,25 @@ A check resolves **source and all associated policy inputs together**, rather th
 | `--staged` | Added/modified/type-changed destinations in the Git index relative to HEAD | **Index** | **Index** |
 | `--changed --base <ref>` | Added/modified/type-changed destinations in `<ref>...HEAD` (merge-base diff) | **HEAD commit** | **HEAD commit** |
 
+**Active-config changes widen diff-scoped selection.** If the active `jevcheck.config.json` or the repository-relative file named by `--config` differs from the comparison revision, `inspect`, `check` and `replay` discover **all** source paths under the *selected revision's current* top-level `include` / `exclude` patterns instead of only changed source paths. This protects config-only PRs: a new rule, threshold or scope can apply to unchanged code. It is a conservative whole-config trigger, not a per-rule impact analysis; per-rule `files` / `exclude`, `projectWhen`, deterministic coverage and owned-rule evidence gates still run normally. The rule question and selected file content come from the same working tree, index or HEAD revision as before; no extra candidate context or model pass is added. Unchanged configs keep diff-only selection.
+
+| Invocation | Config comparison | Source and policy revision after expansion |
+| --- | --- | --- |
+| `--changed --base origin/main` | `origin/main...HEAD` | Isolated HEAD checkout |
+| `--staged` | `HEAD` to index | Isolated index checkout, including partially staged config |
+| `--changed` | `HEAD` to working tree (including staged edits and untracked non-ignored config) | Working tree |
+
+A changed config can increase provider requests from zero (config-only diff) to the cost of a **full configured scan**. Inspect first to estimate candidates and model-visible request sizes before enforcing:
+
+~~~sh
+jevcheck inspect --changed --base origin/main --format json
+jevcheck --changed --base origin/main --format json
+~~~
+
+The JSON envelope remains `schemaVersion: 1`: check/replay and inspect results add `data.selection`, for example `{ "mode": "full-policy-change", "changedConfig": "jevcheck.config.json", "selectedFiles": 42 }`. Unchanged diff selection reports `{ "mode": "diff", "selectedFiles": 1 }`; unscoped runs report `mode: "full"`. `selectedFiles` counts selected source paths **after top-level discovery and exclusions**, not applicable rules or semantic requests. Human output explicitly announces escalation, including a genuine empty scope (`selectedFiles: 0`); this is not an unchanged-config/diff-only result. A config missing, deleted or invalid in the evaluated revision is a **configuration error (exit 2)**, not a clean empty scan. SARIF remains a valid ordinary SARIF report without custom metadata.
+
+**Limit:** changes to other governance artifacts (ADRs, fixtures, SpecForge mappings, policy documents) do not independently trigger expansion. The active config path must be repository-relative for all diff modes; absolute/outside configs are rejected rather than silently bypassing change detection.
+
 - Deletions are not evaluated as source files. Renames are treated as deletion + addition, so only the destination is checked. Partially staged files use exactly the staged blob under `--staged`.
 - The index/HEAD snapshot includes only Git-tracked files in that revision. Unstaged, untracked, and ignored policy files **cannot silently affect** a snapshot run. A required config missing from the revision is an error; unavailable evidence fails the normal ownership/coverage gates rather than borrowing working-tree data.
 - `--config` and configured local evidence/ADR paths must stay repository-relative for snapshot runs, so an absolute external file cannot change policy results. External HTTP(S) rule sources remain externally referenced, not fingerprinted by Git.
