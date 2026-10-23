@@ -84,7 +84,7 @@ export async function activeConfigChanged(
 ): Promise<boolean> {
   const path = normalize(configPath).replaceAll("\\", "/");
   const diff = ["diff", "--relative", "--no-renames", "--name-only", "--diff-filter=ACDMT"];
-  if (mode === "index") diff.push("--cached", "HEAD");
+  if (mode === "index") diff.push("--cached"); // HEAD or empty tree for an unborn branch
   else if (mode === "head") {
     if (!base) throw new Error("HEAD comparison requires --base");
     diff.push(base + "...HEAD");
