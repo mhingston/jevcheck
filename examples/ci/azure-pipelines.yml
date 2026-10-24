@@ -65,7 +65,7 @@ steps:
   # variable TYPESAFE_API_KEY and change JEV_ENABLE_SEMANTIC_CHECK to true.
   - bash: |
       set -euo pipefail
-      if [[ -z "${TYPESAFE_API_KEY:-}" || "$TYPESAFE_API_KEY" == '$(TYPESAFE_API_KEY)' ]]; then
+      if [[ -z "${TYPESAFE_API_KEY:-}" || "${TYPESAFE_API_KEY:0:2}" == '$(' ]]; then
         echo "Set the approved TYPESAFE_API_KEY secret to enable the semantic gate" >&2
         exit 1
       fi
