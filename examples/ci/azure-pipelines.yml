@@ -1,0 +1,93 @@
+# Copy to azure-pipelines-jevcheck.yml and configure Azure Repos build
+# validation branch policy (YAML 'pr' does not trigger Azure Repos PRs).
+# No webhooks or service hooks are required.
+trigger: none
+pr:
+  branches:
+    include:
+      - '*'
+
+pool:
+  vmImage: ubuntu-latest
+
+variables:
+  JEV_ENABLE_SEMANTIC_CHECK: 'false'
+
+steps:
+  - checkout: self
+    fetchDepth: 0
+    fetchTags: false
+    # Needed for a second fetch of a private Azure Repos base branch.
+    # The build service identity needs only repository read permission.
+    persistCredentials: true
+
+  - bash: |
+      set -euo pipefail
+      test "$(git rev-parse HEAD)" = "$BUILD_SOURCEVERSION"
+      case "$PR_TARGET_REF" in
+        refs/heads/*) ;;
+        *) echo "PR build with System.PullRequest.TargetBranch is required" >&2; exit 1 ;;
+      esac
+      target="${PR_TARGET_REF#refs/heads/}"
+      git check-ref-format --branch "$target"
+      git fetch --no-tags origin "refs/heads/$target:refs/remotes/origin/$target"
+      git rev-parse --verify "origin/$target^{commit}"
+      echo "##vso[task.setvariable variable=JEV_BASE_REF]origin/$target"
+    displayName: Fetch PR base and assert checkout SHA
+    env:
+      PR_TARGET_REF: $(System.PullRequest.TargetBranch)
+      BUILD_SOURCEVERSION: $(Build.SourceVersion)
+
+  - task: NodeTool@0
+    inputs:
+      versionSpec: '24.x'
+    displayName: Install Node.js
+
+  # Commit the dev dependency and lockfile in the consuming repository.
+  - bash: npm ci
+    displayName: Install locked dependencies
+
+  - bash: |
+      set -euo pipefail
+      mkdir -p "$OUT"
+      # Full JSON contains source code; keep it outside the published artifact directory.
+      trap 'rm -f "$INSPECT_TEMP"' EXIT
+      npx --no-install jevcheck inspect --changed --base "$BASE_REF" --format json > "$INSPECT_TEMP"
+      node -e 'const fs=require("node:fs"); const p=process.argv[1]; const r=JSON.parse(fs.readFileSync(p,"utf8")); fs.writeFileSync(process.argv[2], JSON.stringify({outcome:r.outcome,selection:r.data.selection,preflight:r.data.preflight,diagnostics:r.diagnostics},null,2)+"\n")' "$INSPECT_TEMP" "$OUT/inspect-summary.json"
+      npx --no-install jevcheck rules audit --format json > "$OUT/audit.json"
+      node -e 'const r=require(process.argv[1]); console.log("Readiness outcome:",r.outcome); for(const x of r.data) console.log(x.ruleId,"readyForOwned:",x.readyForOwned,"blockers:",x.blockers.length)' "$OUT/audit.json"
+      # audit outcome=block does NOT imply a non-zero exit code.
+    displayName: Offline scope and evidence diagnostics
+    env:
+      BASE_REF: $(JEV_BASE_REF)
+      OUT: $(Agent.TempDirectory)/jevcheck
+      INSPECT_TEMP: $(Agent.TempDirectory)/jevcheck-inspect-full.json
+
+  # Optional owned/blocking semantic gate; configure a secret pipeline
+  # variable TYPESAFE_API_KEY and change JEV_ENABLE_SEMANTIC_CHECK to true.
+  - bash: |
+      set -euo pipefail
+      if [[ -z "${TYPESAFE_API_KEY:-}" || "${TYPESAFE_API_KEY:0:2}" == '$(' ]]; then
+        echo "Set the approved TYPESAFE_API_KEY secret to enable the semantic gate" >&2
+        exit 1
+      fi
+      # Do not swallow the CLI's blocking exit status.
+      npx --no-install jevcheck --changed --base "$BASE_REF" --format sarif > "$OUT/jevcheck.sarif"
+    displayName: Semantic check (opt-in, approved provider)
+    condition: and(succeeded(), eq(variables['JEV_ENABLE_SEMANTIC_CHECK'], 'true'), eq(variables['Build.Reason'], 'PullRequest'))
+    env:
+      BASE_REF: $(JEV_BASE_REF)
+      OUT: $(Agent.TempDirectory)/jevcheck
+      TYPESAFE_API_KEY: $(TYPESAFE_API_KEY)
+
+  # Ordinary downloadable artifacts; not a GitHub code-scanning upload.
+  - task: PublishPipelineArtifact@1
+    displayName: Publish jevcheck reports (even if check fails)
+    condition: succeededOrFailed()
+    inputs:
+      targetPath: $(Agent.TempDirectory)/jevcheck
+      artifact: jevcheck-reports
+
+# Azure Pipelines does NOT have trusted coveredBy same-job attestation.
+# Do not fabricate GITHUB_ACTIONS, GITHUB_SHA or GITHUB_RUN_* variables.
+# Owned rules lacking verified coverage use semantic fallback / evidence gates.

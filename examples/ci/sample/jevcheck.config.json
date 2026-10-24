@@ -1,0 +1,18 @@
+{
+  "include": ["src/**/*.ts"],
+  "rules": [
+    {
+      "id": "reliability/queue-publish-acknowledgement",
+      "status": "shadow",
+      "files": ["src/**/*.ts"],
+      "ast": "function_declaration",
+      "contains": "queue.publish(",
+      "why": "Review handlers that may acknowledge work after a failed queue publication.",
+      "question": "Can this selected function return an accepted/success response after queue.publish fails without completing a successful recovery?",
+      "criteria": {
+        "true": "A caught/rejected publish failure can reach a success response without a successful retry or recovery.",
+        "false": "Publish failures result in a non-success response or a proven successful recovery before any acceptance."
+      }
+    }
+  ]
+}

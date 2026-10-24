@@ -172,6 +172,12 @@ jevcheck baseline              # existing accepted findings, not new regressions
 
 Use `--config <path>` when not using the root config; `--format json` for machine-readable results. `--provider` and `--model` are passed through to jev-cli. TypeSafe is the default provider (`TYPESAFE_API_KEY`); OpenRouter is supported using `OPENROUTER_API_KEY` and `JEV_PROVIDER=openrouter`. Credentials belong in environment variables, not in rule files.
 
+### CI adoption recipes (consumer repositories)
+
+For a no-webhook starter, copy [GitHub Actions](https://github.com/mhingston/jevcheck/blob/main/examples/ci/github-actions.yml) or [Azure Pipelines](https://github.com/mhingston/jevcheck/blob/main/examples/ci/azure-pipelines.yml). See the [CI integration guide](https://github.com/mhingston/jevcheck/blob/main/docs/ci-integration.md) and [offline sample config/source](https://github.com/mhingston/jevcheck/tree/main/examples/ci/sample). Pin the npm package and commit the lockfile, fetch the real PR target, run `inspect --changed --base <ref> --format json` and `rules audit --format json` **without credentials**, and summarise (do not upload) full inspect JSON because it contains bounded code. Audit `outcome: "block"` may exit 0; agents must not mark graduation ready from exit status.
+
+Enforce only as an explicit provider-approved opt-in: supply secrets via CI, never in YAML/config; use `jevcheck --changed --base <ref> --format sarif` without swallowing blocking exits. For GitHub `pull_request`, the default checkout is a merge SHA and `GITHUB_SHA` must match HEAD. Hosted SARIF upload is separate from CLI enforcement. Azure Repos needs a build-validation branch policy and supports no jevcheck trusted `coveredBy` same-run attestation (never spoof GitHub variables). For reviewed `coveredBy` on GitHub, after committing reviewed fingerprints run every `coverage verify` sequentially in the same job/attempt/HEAD, then enforce **without snapshot flags** so transient verification is visible. Snapshot `--changed --base` cannot consume that transient evidence. Treat fork PRs and untrusted model-visible code as explicit security boundaries; the sample's semantic gate skips forks. Do not claim offline diagnostics or skipped gates constitute a passed semantic check.
+
 ### Agent-readable CLI contract
 
 `--format json` is the **single JSON contract**; do not parse obsolete top-level command-specific arrays/objects. Every supported command produces one object with `schemaVersion: 1`, `command`, `outcome`, `summary`, `diagnostics` and full `data` on stdout.

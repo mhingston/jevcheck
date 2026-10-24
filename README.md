@@ -104,6 +104,8 @@ Provider configuration: export `TYPESAFE_API_KEY` (default provider), or set `OP
 
 ## Documentation
 
+- **[CI adoption recipes](docs/ci-integration.md)** — copyable [GitHub Actions](examples/ci/github-actions.yml) and [Azure Pipelines](examples/ci/azure-pipelines.yml) workflows, offline fixture, provider opt-in, SARIF and coverage trust boundaries.
+
 - **[Runnable queue acknowledgement walkthrough](examples/queue-ack/README.md)** — code, config, inspect, safe/unsafe fixtures, optional provider run.
 - **[What makes a good semantic rule?](docs/concepts.md)** — applicability, architecture decisions, deterministic coverage, context sufficiency.
 - **[Rule lifecycle and evidence](docs/rule-lifecycle.md)** — fixtures, calibration, drift, recall, robustness, confirmation, baselines and replay.

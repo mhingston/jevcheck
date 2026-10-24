@@ -1,0 +1,99 @@
+# Copy to .github/workflows/jevcheck.yml in the consuming repository.
+# Default path: provider-free advisory diagnostics. Explicitly enable the
+# semantic check only after provider/security approval and evidence qualification.
+name: jevcheck
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  jevcheck:
+    runs-on: ubuntu-latest
+    steps:
+      # On pull_request this checks out GitHub's PR merge revision; its HEAD
+      # equals GITHUB_SHA. Do not set ref: pull_request.head.sha here if
+      # using same-run coveredBy verification without changing provenance.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: true # scoped checkout token enables private base ref fetch
+
+      - name: Fetch base and assert exact revision
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          git fetch --no-tags origin "refs/heads/$BASE_REF:refs/remotes/origin/$BASE_REF"
+          git rev-parse --verify "origin/$BASE_REF^{commit}"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+
+      # Commit package.json/package-lock.json with @mhingston5/jevcheck in
+      # devDependencies before copying this workflow.
+      - run: npm ci
+
+      - name: Inspect changed scope (offline, no provider)
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx --no-install jevcheck inspect --changed --base "origin/$BASE_REF" --format json > "$RUNNER_TEMP/jevcheck-inspect.json"
+          node -e 'const r=require(process.argv[1]); console.log(JSON.stringify({outcome:r.outcome,selection:r.data.selection,preflight:r.data.preflight,diagnostics:r.diagnostics},null,2))' "$RUNNER_TEMP/jevcheck-inspect.json"
+          # The full inspect JSON contains model-visible source; do not upload it.
+          rm "$RUNNER_TEMP/jevcheck-inspect.json"
+
+      - name: Audit readiness (offline, advisory report; NOT a pass gate)
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx --no-install jevcheck rules audit --format json > "$RUNNER_TEMP/jevcheck-audit.json"
+          node -e 'const r=require(process.argv[1]); console.log("Audit outcome:",r.outcome); for(const x of r.data) console.log(x.ruleId, "readyForOwned:",x.readyForOwned, "blockers:",x.blockers.length)' "$RUNNER_TEMP/jevcheck-audit.json"
+          # Audit may return outcome=block with exit code 0. This is a report.
+
+      # Optional owned/blocking gate. Set repository variable
+      # JEV_ENABLE_SEMANTIC_CHECK=true AND secret TYPESAFE_API_KEY only after
+      # accepting model-visible code and qualifying rules for enforcement.
+      # Fork PRs are advisory-only; make that branch-protection choice explicit.
+      - name: Semantic check (approved same-repo PRs only)
+        if: ${{ vars.JEV_ENABLE_SEMANTIC_CHECK == 'true' && github.event.pull_request.head.repo.full_name == github.repository }}
+        env:
+          BASE_REF: ${{ github.base_ref }}
+          TYPESAFE_API_KEY: ${{ secrets.TYPESAFE_API_KEY }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -z "$TYPESAFE_API_KEY" ]]; then
+            echo "TYPESAFE_API_KEY secret is required when the semantic gate is enabled" >&2
+            exit 1
+          fi
+          # Preserve the CLI exit code; do not suppress failures.
+          npx --no-install jevcheck --changed --base "origin/$BASE_REF" --format sarif > "$RUNNER_TEMP/jevcheck.sarif"
+
+      - name: Attach SARIF for review (not a code-scanning upload)
+        if: ${{ !cancelled() && vars.JEV_ENABLE_SEMANTIC_CHECK == 'true' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: jevcheck-sarif
+          path: ${{ runner.temp }}/jevcheck.sarif
+          if-no-files-found: ignore
+          retention-days: 7
+
+      # Optional GitHub code scanning: grant security-events: write explicitly,
+      # then enable github/codeql-action/upload-sarif@v3 with sarif_file set to
+      # ${{ runner.temp }}/jevcheck.sarif. Upload is separate from enforcement.
+      #
+      # Optional reviewed coveredBy: AFTER recording/committing reviewed
+      # fingerprints, execute *all* declared checks sequentially here, e.g.
+      #   npx --no-install jevcheck coverage verify --check unit -- npm test
+      # Follow with WORKING-TREE 'jevcheck', without --changed --base, in the
+      # SAME job/run attempt/GITHUB_SHA. Snapshot mode cannot see transient
+      # verification records. See docs/ci-integration.md.
