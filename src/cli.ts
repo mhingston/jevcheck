@@ -519,6 +519,9 @@ async function run(args: CliOptions, gitCwd: string, snapshotMode: boolean): Pro
         projectRoot: process.cwd(),
         modelNamespace,
         previewSkipped: args.previewSkipped,
+        // A diff or positional subset cannot prove a dormant rule scope.
+        fullScope: selection.mode === "full-policy-change" ||
+          (selection.mode === "full" && args.patterns.length === 0),
       })),
       selection,
     };

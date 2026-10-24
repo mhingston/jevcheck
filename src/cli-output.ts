@@ -63,6 +63,10 @@ export function decorateDiagnostic(d: Diagnostic): CliDiagnostic {
     level: d.level, message: d.message,
     ...(d.path ? { path: d.path } : {}),
     ...(d.ruleId ? { ruleId: d.ruleId } : {}),
+    ...(d.code === "no-files-in-scope" ? {
+      remediation: "Review top-level include/exclude, rule files/exclude, and repository layout.",
+      suggestedCommand: "jevcheck inspect --format json",
+    } : {}),
     ...(d.code === "incomplete-evaluation" ? {
       remediation: "Fix parser/selector or narrow rule scope to supported languages.",
       suggestedCommand: "jevcheck inspect --verbose",

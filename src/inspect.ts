@@ -28,6 +28,8 @@ export interface InspectOptions {
   modelNamespace?: string;
   /** Show candidates for skipped rules, but never imply they would be sent. */
   previewSkipped?: boolean;
+  /** Set only for the complete configured source discovery, never for diffs or subsets. */
+  fullScope?: boolean;
 }
 
 export interface RuleInspection {
@@ -60,6 +62,16 @@ export interface SemanticInspection {
   request: ReturnType<typeof semanticRequestForCandidate>;
 }
 
+export type RuleScopeState = "no-files-in-scope" | "project-inapplicable" | "applicable" | "covered";
+
+export interface RuleScopeHealth {
+  ruleId: string;
+  state: RuleScopeState;
+  /** Sources admitted by top-level discovery AND the per-rule files/exclude policy. */
+  filesInScope: number;
+  reason: string;
+}
+
 /** A provider-free bound on eligible semantic work, not an estimate of billed calls or tokens. */
 export interface InspectPreflight {
   /** Selected source inputs, including files with no matching rules. */
@@ -87,6 +99,8 @@ export interface InspectResult {
   inspections: SemanticInspection[];
   /** Diagnostics from selectors that enforcement would actually execute. */
   diagnostics: Diagnostic[];
+  /** Empty in diff/path-limited inspections; absence does not establish rule health. */
+  scopeHealth: RuleScopeHealth[];
   preflight: InspectPreflight;
 }
 
@@ -108,7 +122,7 @@ export async function inspectSources(
   options: InspectOptions = {},
 ): Promise<InspectResult> {
   const result: InspectResult = {
-    rules: [], inspections: [], diagnostics: [],
+    rules: [], inspections: [], diagnostics: [], scopeHealth: [],
     preflight: {
       files: inputs.length,
       policyPairs: { semantic: 0, covered: 0, inapplicable: 0 },
@@ -144,9 +158,23 @@ export async function inspectSources(
     contextLines: options.contextLines ?? options.config?.contextLines ?? DEFAULT_CONTEXT_LINES,
   };
 
+  // Iterate rules independently of candidate selection so a zero-file rule is observable.
+  // Count file applicability from the SAME execution-policy resolver as enforcement.
+  const scopeByRule = new Map(rules.map((rule) => [rule.id, {
+    filesInScope: 0,
+    policies: { semantic: 0, covered: 0, inapplicable: 0 } as Record<RuleExecution, number>,
+    reasons: {} as Partial<Record<RuleExecution, string>>,
+  }] as const));
+
   for (const input of inputs) {
     for (const rule of rules) {
       const policy = await resolveExecution(rule, input.path);
+      if (policy.fileApplicable) {
+        const scope = scopeByRule.get(rule.id)!;
+        scope.filesInScope++;
+        scope.policies[policy.execution]++;
+        scope.reasons[policy.execution] ??= policy.reason;
+      }
       const selector = selectorDescription(rule);
       const selectorRan = policy.execution === "semantic" || options.previewSkipped === true;
       const built = selectorRan
@@ -209,6 +237,26 @@ export async function inspectSources(
       }
     }
   }
+  if (options.fullScope) {
+    for (const rule of rules) {
+      const scope = scopeByRule.get(rule.id)!;
+      const state: RuleScopeState = scope.filesInScope === 0 ? "no-files-in-scope"
+        : scope.policies.semantic > 0 ? "applicable"
+        : scope.policies.covered > 0 ? "covered" : "project-inapplicable";
+      const reason = state === "no-files-in-scope"
+        ? "No discovered sources match rule " + rule.id +
+          " after top-level include/exclude and rule files/exclude. Review file globs and repository layout."
+        : state === "applicable"
+          ? "At least one scoped file is eligible for semantic judgement; zero selector candidates is a valid result."
+          : state === "covered"
+            ? scope.reasons.covered ?? "Rule is suppressed by reviewed deterministic coverage."
+            : scope.reasons.inapplicable ?? "Rule is excluded by project or architecture-decision policy.";
+      result.scopeHealth.push({ ruleId: rule.id, state, filesInScope: scope.filesInScope, reason });
+      if (state === "no-files-in-scope") {
+        result.diagnostics.push({ code: "no-files-in-scope", level: "warning", ruleId: rule.id, message: reason });
+      }
+    }
+  }
   return result;
 }
 
@@ -242,6 +290,16 @@ export function formatInspectionStylish(result: InspectResult, verbose = false):
           " errors, " + preflight.previewSelectorDiagnostics.warnings + " warnings (excluded)"
         : ""),
   ];
+  if (result.scopeHealth.length) {
+    const count = (state: RuleScopeState) => result.scopeHealth.filter((item) => item.state === state).length;
+    lines.push("  Scope health: " + count("applicable") + " applicable  |  " +
+      count("covered") + " covered  |  " + count("project-inapplicable") +
+      " project-inapplicable  |  " + count("no-files-in-scope") + " no-files-in-scope");
+    for (const scope of result.scopeHealth) {
+      lines.push("    " + scope.ruleId + "  [" + scope.state + "]  " +
+        scope.filesInScope + " scoped file(s): " + scope.reason);
+    }
+  }
   for (const rule of result.rules) {
     lines.push("", rule.ruleId + "  " + rule.path + "  [" + rule.execution + "]");
     lines.push("  " + rule.reason);
@@ -269,7 +327,7 @@ export function formatInspectionStylish(result: InspectResult, verbose = false):
   } else if (result.inspections.some((item) => item.previewOnly)) {
     lines.push("", "Hypothetical preview candidates are NOT sent by check.");
   }
-  if (!result.rules.length) lines.push("", "No rules or source files selected.");
+  if (!result.rules.length) lines.push("", "No rule/file policies selected.");
   lines.push("", "Use --verbose to see complete requests and semantic keys; --format json for complete structured data.");
   return lines.join("\n");
 }

@@ -191,7 +191,7 @@ export interface BaselineEntry {
 
 export interface Diagnostic {
   /** Applicable content was not evaluated (not an intentional no-match). */
-  code?: "incomplete-evaluation";
+  code?: "incomplete-evaluation" | "no-files-in-scope";
   level: "warning" | "error";
   message: string;
   path?: string;
