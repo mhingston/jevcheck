@@ -207,3 +207,90 @@ describe("semantic request inspection", () => {
     expect(checked.stats.requests).toBe(0);
   });
 });
+
+
+describe("full-scope rule health (advisory only)", () => {
+  it("identifies a stale glob, but not a valid zero-candidate semantic rule", async () => {
+    const stale: JevCheckRule = { ...rule, id: "stale", files: ["old/**/*.ts"] };
+    const quiet: JevCheckRule = { ...rule, id: "quiet", prefilter: "missing_literal" };
+    const inspected = await inspectSources([input], [stale, quiet], { fullScope: true });
+    expect(inspected.scopeHealth).toMatchObject([
+      { ruleId: "stale", state: "no-files-in-scope", filesInScope: 0 },
+      { ruleId: "quiet", state: "applicable", filesInScope: 1 },
+    ]);
+    expect(inspected.preflight.cleanZeroCandidateSemanticPairs).toBe(1);
+    expect(inspected.diagnostics).toMatchObject([
+      { code: "no-files-in-scope", level: "warning", ruleId: "stale" },
+    ]);
+    expect(formatInspectionStylish(inspected)).toContain("Review file globs and repository layout");
+    expect(inspected.inspections).toHaveLength(0);
+  });
+
+  it("reports every configured rule in an empty repository, but does not guess for partial API calls", async () => {
+    const inspected = await inspectSources([], [rule], { fullScope: true });
+    expect(inspected.scopeHealth).toMatchObject([
+      { ruleId: rule.id, state: "no-files-in-scope", filesInScope: 0 },
+    ]);
+    expect(inspected.preflight.files).toBe(0);
+    expect(inspected.diagnostics[0]?.level).toBe("warning");
+    const partial = await inspectSources([], [rule]);
+    expect(partial.scopeHealth).toEqual([]);
+    expect(partial.diagnostics).toEqual([]);
+  });
+
+  it("classifies an unmet projectWhen dependency as inapplicable, not dormant", async () => {
+    const cwd = await mkdtemp(join(tmpdir(), "jevcheck-scope-applicability-"));
+    const condition: JevCheckRule = {
+      ...rule, id: "needs-dependency", projectWhen: { packageJsonHasDep: "missing" },
+    };
+    const inspected = await inspectSources([input], [condition], { fullScope: true, projectRoot: cwd });
+    expect(inspected.scopeHealth).toMatchObject([
+      { ruleId: "needs-dependency", state: "project-inapplicable", filesInScope: 1,
+        reason: expect.stringContaining("not applicable") },
+    ]);
+    expect(inspected.diagnostics).toEqual([]);
+  });
+
+  it("preserves deterministic coverage and retired ADR explanations", async () => {
+    const cwd = await mkdtemp(join(tmpdir(), "jevcheck-scope-policy-"));
+    await mkdir(join(cwd, "docs"), { recursive: true });
+    await writeFile(join(cwd, "docs", "retired.md"),
+      "---\njevcheck-adr: true\nstatus: superseded\n---\n");
+    const covered: JevCheckRule = { ...rule, id: "covered" };
+    const retired: JevCheckRule = { ...rule, id: "retired", source: "docs/retired.md" };
+    const reports = (await evaluateConfiguredRuleEvidence({ rules: [retired] }, {
+      cwd, modelNamespace: "typesafe:default",
+    })).reports;
+    const inspected = await inspectSources([input], [covered, retired], {
+      projectRoot: cwd, fullScope: true,
+      ruleEvidenceReports: [
+        { ruleId: "covered", currentStatus: "shadow", execution: "covered",
+          checks: [{ id: "coverage", status: "pass", message: "reviewed deterministic coverage" }],
+          blockers: [], warnings: [], readyForOwned: true },
+        ...reports,
+      ],
+    });
+    expect(inspected.scopeHealth).toMatchObject([
+      { ruleId: "covered", state: "covered", reason: "reviewed deterministic coverage" },
+      { ruleId: "retired", state: "project-inapplicable",
+        reason: expect.stringContaining("superseded") },
+    ]);
+    expect(inspected.preflight.policyPairs).toEqual({ semantic: 0, covered: 1, inapplicable: 1 });
+    expect(inspected.diagnostics).toEqual([]);
+  });
+
+  it("distinguishes clean AST no-match from incomplete unsupported AST", async () => {
+    const astRule: JevCheckRule = { id: "ast/nothing", question: "Violation?", ast: { kind: "call_expression" } };
+    const clean = await inspectSources([{ path: "src/quiet.ts", source: "const safe = 1;" }],
+      [astRule], { fullScope: true });
+    expect(clean.scopeHealth[0]?.state).toBe("applicable");
+    expect(clean.preflight.cleanZeroCandidateSemanticPairs).toBe(1);
+    expect(clean.diagnostics).toEqual([]);
+    const incomplete = await inspectSources([{ path: "src/quiet.rb", source: "safe = true" }],
+      [astRule], { fullScope: true });
+    expect(incomplete.scopeHealth[0]?.state).toBe("applicable");
+    expect(incomplete.preflight.semanticPairsWithDiagnostics).toBe(1);
+    expect(incomplete.diagnostics.some((d) => d.code === "incomplete-evaluation")).toBe(true);
+    expect(incomplete.diagnostics.some((d) => d.code === "no-files-in-scope")).toBe(false);
+  });
+});

@@ -102,7 +102,7 @@ An argument/config/runtime error returns the same envelope with `outcome: "error
 | --- | --- | --- |
 | `check` / `replay` | `{ findings[], suppressedFindings[], evaluations[], diagnostics[], stats }` | `block` for blocking findings, error diagnostics or replay misses; `warn` for advisory findings |
 | `rules audit` | `[{ruleId,currentStatus,execution,checks[],blockers[],warnings[],readyForOwned,state,outcome,diagnostics[]},...]` | `block` for evidence blockers, but the audit process exits 0: it is a readiness assessment |
-| `inspect` | `{ rules[], inspections[], diagnostics[], preflight }` with full requests and workload bound | `block` for error diagnostics; `warn` for warnings; provider-free |
+| `inspect` | `{ rules[], inspections[], diagnostics[], preflight, scopeHealth[] }` with full requests, workload and complete-scope health | `block` for error diagnostics; `warn` for warnings; provider-free |
 | `coverage verify` | `{checkId,status,evidenceFile}` | `block` for failed CI checks, propagating the child exit code |
 | `test` | Fixture or robustness results and evidence status | Failed fixtures, unrecorded calibration/confirmation, drift differences or incomplete robustness gates produce `block` |
 | `list`, `recall`, `record`, `baseline`, `coverage record` | Their complete existing command-specific detail | Common machine-readable command/outcome/diagnostics envelope |
@@ -414,6 +414,15 @@ The output has one rule/file policy entry with `execution` (`semantic`, `covered
 | `semanticPairsWithDiagnostics` | Eligible semantic pairs with selector warnings/errors; zero candidates here must not be mistaken for a successful no-match. |
 | `eligibleSelectorDiagnostics` / `previewSelectorDiagnostics` | Separate `{errors, warnings}` counters for executed semantic selectors and hypothetical skipped selectors. Only eligible selector diagnostics affect `outcome`. |
 
+**Full-scope rule health:** Unscoped `jevcheck inspect --format json` returns one `data.scopeHealth[]` entry per configured rule, including rules with no discovered files. Each entry has `ruleId`, `state`, `filesInScope` and `reason`:
+
+- `no-files-in-scope`: no sources admitted by top-level `include/exclude` also match the rule's `files/exclude`. Emits a remediable advisory warning; JSON `outcome: "warn"`, **exit status 0**. Check globs and repository layout.
+- `project-inapplicable`: scoped files exist, but `projectWhen` or opted-in retired/invalid ADR policy excludes evaluation. Retains the runtime policy reason.
+- `covered`: scoped files are suppressed under reviewed/verified `coveredBy` policy. Retains the runtime policy reason.
+- `applicable`: one or more scoped files are eligible for semantic judgement. **Zero selector candidates** is a legitimate result. Inspect `preflight.cleanZeroCandidateSemanticPairs` separately from AST/parser or size-limit diagnostics (`preflight.semanticPairsWithDiagnostics` / `incomplete-evaluation`).
+
+Only **complete discovery** establishes dormant scope: ordinary `--changed` / `--staged` selections, explicitly narrowed positional paths, and `inspectSources` calls without `fullScope: true` return an **empty** `scopeHealth[]` (*not assessed*, not healthy). A config-changing diff uses `selection.mode: "full-policy-change"` and does evaluate health because it reselects the complete configured source set. `rules audit` evidence/readiness, owned-rule enforcement/exit codes, and provider-call counts are **unchanged**. Programmatic callers may set `inspectSources(inputs, rules, { fullScope: true })` only for complete configured discovery.
+
 The compact human output shows these workload and selection-health figures before the rule/file breakdown; `--verbose` still prints the exact requests. No additional provider action or `--summary` flag is introduced. Existing `summary.candidates` retains its original meaning (total inspections, including preview-only candidates); agents estimating work should use `data.preflight.eligibleCandidates`.
 
 For example, a zero-file selection produces the following **complete** `jevcheck inspect 'nothing/**/*.ts' --format json` payload:
@@ -429,6 +438,7 @@ For example, a zero-file selection produces the following **complete** `jevcheck
     "rules": [],
     "inspections": [],
     "diagnostics": [],
+    "scopeHealth": [],
     "preflight": {
       "files": 0,
       "policyPairs": { "semantic": 0, "covered": 0, "inapplicable": 0 },
