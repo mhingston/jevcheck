@@ -319,4 +319,32 @@ describe("CLI config-change policy scope", () => {
       expect(payload.data.stats.filesChecked).toBe(2);
       expect(payload.data.stats.requests).toBe(0);
     }));
+  it("does not report dormancy for an unchanged config in diff and staged mode", () =>
+    project((cwd, base) => {
+      put(cwd, "src/other.ts", "const changed = true;\n");
+      git(cwd, "add", "src/other.ts");
+      git(cwd, "-c", "user.name=Test", "-c", "user.email=test@example.com",
+        "commit", "-qm", "source only");
+      // A config-changing diff reselects complete policy scope and establishes dormancy.
+      put(cwd, "jevcheck.config.json", config(["src/**/*.ts"], {
+        rules: [{ id: "rule/stale", question: "Violation?", files: ["legacy/**/*.ts"], wholeFile: true }],
+      }));
+      const widened = inspect(cwd, "--changed");
+      expect(widened.data.selection.mode).toBe("full-policy-change");
+      expect(widened.data.scopeHealth[0].state).toBe("no-files-in-scope");
+      expect(widened.outcome).toBe("warn");
+
+      // The base...HEAD snapshot uses its original policy and is a diff-only scan.
+      const diff = inspect(cwd, "--changed", "--base", base);
+      expect(diff.data.selection.mode).toBe("diff");
+      expect(diff.data.scopeHealth).toEqual([]);
+      expect(diff.diagnostics).toEqual([]);
+
+      put(cwd, "src/other.ts", "const staged = true;\n");
+      git(cwd, "add", "src/other.ts");
+      const staged = inspect(cwd, "--staged");
+      expect(staged.data.selection.mode).toBe("diff");
+      expect(staged.data.scopeHealth).toEqual([]);
+    }));
+
 });
