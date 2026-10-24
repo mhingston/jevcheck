@@ -97,7 +97,7 @@ export interface InspectPreflight {
 export interface InspectResult {
   rules: RuleInspection[];
   inspections: SemanticInspection[];
-  /** Diagnostics from selectors that enforcement would actually execute. */
+  /** Eligible selector diagnostics and full-scope advisory scope warnings. */
   diagnostics: Diagnostic[];
   /** Empty in diff/path-limited inspections; absence does not establish rule health. */
   scopeHealth: RuleScopeHealth[];
@@ -160,11 +160,15 @@ export async function inspectSources(
 
   // Iterate rules independently of candidate selection so a zero-file rule is observable.
   // Count file applicability from the SAME execution-policy resolver as enforcement.
-  const scopeByRule = new Map(rules.map((rule) => [rule.id, {
+  const scopeByRule = new Map<string, {
+    filesInScope: number;
+    policies: Record<RuleExecution, number>;
+    reasons: Partial<Record<RuleExecution, string>>;
+  }>(rules.map((rule) => [rule.id, {
     filesInScope: 0,
     policies: { semantic: 0, covered: 0, inapplicable: 0 } as Record<RuleExecution, number>,
     reasons: {} as Partial<Record<RuleExecution, string>>,
-  }] as const));
+  }]));
 
   for (const input of inputs) {
     for (const rule of rules) {
