@@ -294,7 +294,7 @@ export function formatInspectionStylish(result: InspectResult, verbose = false):
           " errors, " + preflight.previewSelectorDiagnostics.warnings + " warnings (excluded)"
         : ""),
   ];
-  if (result.scopeHealth.length) {
+  if (result.scopeHealth?.length) {
     const count = (state: RuleScopeState) => result.scopeHealth.filter((item) => item.state === state).length;
     lines.push("  Scope health: " + count("applicable") + " applicable  |  " +
       count("covered") + " covered  |  " + count("project-inapplicable") +
