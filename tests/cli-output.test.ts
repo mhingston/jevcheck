@@ -136,9 +136,16 @@ describe("CLI presentation contracts", () => {
       previewOnly: false, selector: "whole file", range: [1,1] as [number,number],
       focusLineRange: [1,1] as [number,number], semanticKey: "private-key",
       estimatedRequestChars: 32, request: { state: { code: "private-request" }, question: "question" },
-    }], diagnostics: [] };
+    }], diagnostics: [], preflight: {
+      files: 1, policyPairs: { semantic: 1, covered: 0, inapplicable: 0 },
+      eligibleCandidates: 1, estimatedRequestChars: 32, previewOnlyCandidates: 0,
+      cleanZeroCandidateSemanticPairs: 0, semanticPairsWithDiagnostics: 0,
+      eligibleSelectorDiagnostics: { errors: 0, warnings: 0 },
+      previewSelectorDiagnostics: { errors: 0, warnings: 0 },
+    } };
     const compact = formatInspectionStylish(value as any);
     expect(compact).toContain("Inspect:");
+    expect(compact).toContain("at most 1 uncached judge calls");
     expect(compact).not.toContain("private-request");
     expect(compact).not.toContain("private-key");
     expect(formatInspectionStylish(value as any, true)).toContain("private-request");

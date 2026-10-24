@@ -102,7 +102,7 @@ An argument/config/runtime error returns the same envelope with `outcome: "error
 | --- | --- | --- |
 | `check` / `replay` | `{ findings[], suppressedFindings[], evaluations[], diagnostics[], stats }` | `block` for blocking findings, error diagnostics or replay misses; `warn` for advisory findings |
 | `rules audit` | `[{ruleId,currentStatus,execution,checks[],blockers[],warnings[],readyForOwned,state,outcome,diagnostics[]},...]` | `block` for evidence blockers, but the audit process exits 0: it is a readiness assessment |
-| `inspect` | `{ rules[], inspections[], diagnostics[] }` with full requests | `block` for error diagnostics; `warn` for warnings; provider-free |
+| `inspect` | `{ rules[], inspections[], diagnostics[], preflight }` with full requests and workload bound | `block` for error diagnostics; `warn` for warnings; provider-free |
 | `coverage verify` | `{checkId,status,evidenceFile}` | `block` for failed CI checks, propagating the child exit code |
 | `test` | Fixture or robustness results and evidence status | Failed fixtures, unrecorded calibration/confirmation, drift differences or incomplete robustness gates produce `block` |
 | `list`, `recall`, `record`, `baseline`, `coverage record` | Their complete existing command-specific detail | Common machine-readable command/outcome/diagnostics envelope |
@@ -400,6 +400,61 @@ npx jevcheck inspect src/handler.ts --preview-skipped
 ~~~
 
 The output has one rule/file policy entry with `execution` (`semantic`, `covered`, or `inapplicable`), a human-readable `reason`, selector description, candidate count, and selector diagnostics. **Plain stylish output is compact**: add `--verbose` to see exact bounded requests and semantic keys. JSON nests the full result under `data`: `data.rules[]` contains policy entries, `data.inspections[]` contains bounded requests for candidates eligible for judging, and `data.diagnostics[]` contains selector diagnostics from eligible rules only. A rule that matches no candidates is **not** the same as a policy-skipped rule.
+
+`data.preflight` is an **additive, provider-free** aggregate of the selected inputs and existing inspections:
+
+| Field | Meaning |
+| --- | --- |
+| `files` | Number of selected source inputs (equals `data.selection.selectedFiles` in the CLI). |
+| `policyPairs.semantic / covered / inapplicable` | Rule/file policy decisions, each reconciling to `data.rules[].execution`. |
+| `eligibleCandidates` | Number of non-preview semantic inspections; **upper bound on uncached judge calls**, not a billed request forecast. Cache hits, deduplication and failures can reduce calls. |
+| `estimatedRequestChars` | Sum of `estimatedRequestChars` for eligible inspections only, measuring the serialized `{state, question}` JSON; **characters, not tokens, cost, or a billing guarantee**. |
+| `previewOnlyCandidates` | Hypothetical requests for skipped policies under `--preview-skipped`; excluded from both eligible totals. |
+| `cleanZeroCandidateSemanticPairs` | Semantic selector pairs that completed without candidates **or diagnostics**; genuine zero matches. |
+| `semanticPairsWithDiagnostics` | Eligible semantic pairs with selector warnings/errors; zero candidates here must not be mistaken for a successful no-match. |
+| `eligibleSelectorDiagnostics` / `previewSelectorDiagnostics` | Separate `{errors, warnings}` counters for executed semantic selectors and hypothetical skipped selectors. Only eligible selector diagnostics affect `outcome`. |
+
+The compact human output shows these workload and selection-health figures before the rule/file breakdown; `--verbose` still prints the exact requests. No additional provider action or `--summary` flag is introduced. Existing `summary.candidates` retains its original meaning (total inspections, including preview-only candidates); agents estimating work should use `data.preflight.eligibleCandidates`.
+
+For example, a zero-file selection produces the following **complete** `jevcheck inspect 'nothing/**/*.ts' --format json` payload:
+
+~~~json
+{
+  "schemaVersion": 1,
+  "command": "inspect",
+  "outcome": "pass",
+  "summary": { "rules": 0, "semantic": 0, "covered": 0, "inapplicable": 0, "candidates": 0, "errors": 0 },
+  "diagnostics": [],
+  "data": {
+    "rules": [],
+    "inspections": [],
+    "diagnostics": [],
+    "preflight": {
+      "files": 0,
+      "policyPairs": { "semantic": 0, "covered": 0, "inapplicable": 0 },
+      "eligibleCandidates": 0,
+      "estimatedRequestChars": 0,
+      "previewOnlyCandidates": 0,
+      "cleanZeroCandidateSemanticPairs": 0,
+      "semanticPairsWithDiagnostics": 0,
+      "eligibleSelectorDiagnostics": { "errors": 0, "warnings": 0 },
+      "previewSelectorDiagnostics": { "errors": 0, "warnings": 0 }
+    },
+    "selection": { "mode": "full", "selectedFiles": 0 }
+  }
+}
+~~~
+
+A nonzero scan can be reconciled locally using `jq` (the exact counts are asserted in the CLI tests):
+
+~~~sh
+jevcheck inspect --changed --base origin/main --format json > inspect.json
+jq '{selectedFiles: .data.selection.selectedFiles,
+     preflight: .data.preflight,
+     eligibleInspections: ([.data.inspections[] | select(.previewOnly == false)] | length),
+     eligibleRequestChars: ([.data.inspections[] | select(.previewOnly == false) | .estimatedRequestChars] | add // 0)}' inspect.json
+~~~
+
 
 - `semantic` means the rule is eligible for a provider judgement **if** its selector finds candidates. It does not mean a violation was found. Project conditions, accepted ADRs and fingerprinted coverage are resolved before selection.
 - `covered` means reviewed coverage authorizes a skip. For shadow rules this is a reviewed declaration (**not** verified execution); for owned rules all checks must also actually pass in the same GitHub Actions job/attempt/checkout. Missing/stale evidence falls back to `semantic`; failed CI checks block owned enforcement.

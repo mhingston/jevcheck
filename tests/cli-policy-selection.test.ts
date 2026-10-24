@@ -26,7 +26,22 @@ function inspect(cwd: string, ...args: string[]) {
   const result = run(cwd, "inspect", ...args, "--format", "json");
   expect(result.status, result.stderr || result.stdout).toBe(0);
   expect(result.stderr).toBe("");
-  return JSON.parse(result.stdout);
+  const payload = JSON.parse(result.stdout);
+  const { preflight, rules, inspections, selection } = payload.data;
+  expect(preflight.files).toBe(selection.selectedFiles);
+  for (const policy of ["semantic", "covered", "inapplicable"]) {
+    expect(preflight.policyPairs[policy]).toBe(rules.filter(
+      (rule: { execution: string }) => rule.execution === policy).length);
+  }
+  expect(preflight.eligibleCandidates).toBe(inspections.filter(
+    (item: { previewOnly: boolean }) => !item.previewOnly).length);
+  expect(preflight.previewOnlyCandidates).toBe(inspections.filter(
+    (item: { previewOnly: boolean }) => item.previewOnly).length);
+  expect(preflight.estimatedRequestChars).toBe(inspections
+    .filter((item: { previewOnly: boolean }) => !item.previewOnly)
+    .reduce((total: number, item: { estimatedRequestChars: number }) =>
+      total + item.estimatedRequestChars, 0));
+  return payload;
 }
 const config = (include = ["src/**/*.ts"], extras: Record<string, unknown> = {}) => JSON.stringify({
   include,
