@@ -200,4 +200,43 @@ describe("CLI JSON stdout contract (built binary)", () => {
       data: { checkId: "unit", status: "failed" },
     });
   }));
+  it("warns for dormant full-scope rules without changing exit codes", () => project((cwd) => {
+    writeFileSync(join(cwd, "jevcheck.config.json"), JSON.stringify({
+      include: ["src/**/*.ts"], exclude: ["src/demo.ts"],
+      rules: [{ id: "stale", question: "Is this a violation?", files: ["src/**/*.ts"], wholeFile: true }],
+    }));
+    const full = execute(cwd, ["inspect", "--format", "json"]);
+    expect(full.code).toBe(0);
+    const data = JSON.parse(full.stdout);
+    expect(data).toMatchObject({
+      outcome: "warn",
+      data: { scopeHealth: [{ ruleId: "stale", state: "no-files-in-scope", filesInScope: 0 }] },
+    });
+    expect(data.diagnostics[0]).toMatchObject({
+      code: "no-files-in-scope", ruleId: "stale", level: "warning",
+      remediation: expect.stringContaining("include/exclude"),
+    });
+    const partial = execute(cwd, ["inspect", "src/nope.ts", "--format", "json"]);
+    expect(partial.code).toBe(0);
+    expect(JSON.parse(partial.stdout)).toMatchObject({ outcome: "pass", data: { scopeHealth: [] } });
+    const human = execute(cwd, ["inspect"]);
+    expect(human.code).toBe(0);
+    expect(human.stdout).toContain("no-files-in-scope");
+  }));
+
+  it("treats valid files with zero AST matches as applicable", () => project((cwd) => {
+    writeFileSync(join(cwd, "jevcheck.config.json"), JSON.stringify({
+      include: ["src/**/*.ts"],
+      rules: [{ id: "ast/quiet", question: "Is this a violation?",
+        files: ["src/**/*.ts"], ast: { kind: "call_expression" } }],
+    }));
+    const run = execute(cwd, ["inspect", "--format", "json"]);
+    expect(run.code).toBe(0);
+    const data = JSON.parse(run.stdout);
+    expect(data.outcome).toBe("pass");
+    expect(data.data.scopeHealth).toMatchObject([{ state: "applicable", filesInScope: 1 }]);
+    expect(data.data.preflight.cleanZeroCandidateSemanticPairs).toBe(1);
+    expect(data.diagnostics).toEqual([]);
+  }));
+
 });
