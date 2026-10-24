@@ -86,10 +86,14 @@ reported readiness blockers (not recommended for initial advisory adoption),
 parse the envelope, rather than trusting exit status:
 
 ```sh
+set -e
 npx --no-install jevcheck rules audit --format json > audit.json
-node -e 'const r=require("./audit.json"); if(r.outcome==="block") process.exit(1)'
+node -e 'const r=JSON.parse(require("node:fs").readFileSync("audit.json","utf8")); if(!["pass","warn"].includes(r.outcome)) process.exit(1)'
 ```
 
+The shell's `set -e` preserves CLI failures (including exit 2 for config/runtime
+errors). Only successful audits with `outcome: "pass"` or `"warn"` pass
+this additional readiness policy; blocked, errored or unknown outcomes fail.
 This optional policy is stricter than running shadow rules as advisory. Owned
 error rules already enforce their evidence gates and fail closed; do not
 promote on the audit process status alone.
