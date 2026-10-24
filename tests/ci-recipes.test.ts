@@ -42,6 +42,8 @@ describe("consumer CI recipes (provider-free)", () => {
     expect(azure).toContain("fetchDepth: 0");
     expect(azure).toContain("System.PullRequest.TargetBranch");
     expect(azure).toContain("persistCredentials: true");
+    expect(azure).toContain('INSPECT_TEMP: $(Agent.TempDirectory)/jevcheck-inspect-full.json');
+    expect(azure).not.toContain('> "$OUT/inspect-full.json"');
     expect(azure).toContain("does NOT have trusted coveredBy");
   });
 
