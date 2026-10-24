@@ -31,6 +31,9 @@ jobs:
       - run: node dist/cli.js inspect examples/multilanguage-ast/sources/example.java --config examples/multilanguage-ast/jevcheck.config.json --rule example/java --format json
       - run: node dist/cli.js inspect examples/multilanguage-ast/sources/example.rs --config examples/multilanguage-ast/jevcheck.config.json --rule example/rust --format json
       - run: npm run pack:check
+      - name: Parse consumer CI YAML recipes
+        if: matrix.os == 'ubuntu-latest'
+        run: ruby -e 'require "yaml"; ARGV.each { |path| YAML.parse_file(path) }' examples/ci/github-actions.yml examples/ci/azure-pipelines.yml
   specforge-projection:
     runs-on: ubuntu-latest
     steps:
