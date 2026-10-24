@@ -50,9 +50,10 @@ steps:
   - bash: |
       set -euo pipefail
       mkdir -p "$OUT"
-      npx --no-install jevcheck inspect --changed --base "$BASE_REF" --format json > "$OUT/inspect-full.json"
-      node -e 'const fs=require("node:fs"); const p=process.argv[1]; const r=JSON.parse(fs.readFileSync(p,"utf8")); fs.writeFileSync(process.argv[2], JSON.stringify({outcome:r.outcome,selection:r.data.selection,preflight:r.data.preflight,diagnostics:r.diagnostics},null,2)+"\n")' "$OUT/inspect-full.json" "$OUT/inspect-summary.json"
-      rm "$OUT/inspect-full.json"
+      # Full JSON contains source code; keep it outside the published artifact directory.
+      trap 'rm -f "$INSPECT_TEMP"' EXIT
+      npx --no-install jevcheck inspect --changed --base "$BASE_REF" --format json > "$INSPECT_TEMP"
+      node -e 'const fs=require("node:fs"); const p=process.argv[1]; const r=JSON.parse(fs.readFileSync(p,"utf8")); fs.writeFileSync(process.argv[2], JSON.stringify({outcome:r.outcome,selection:r.data.selection,preflight:r.data.preflight,diagnostics:r.diagnostics},null,2)+"\n")' "$INSPECT_TEMP" "$OUT/inspect-summary.json"
       npx --no-install jevcheck rules audit --format json > "$OUT/audit.json"
       node -e 'const r=require(process.argv[1]); console.log("Readiness outcome:",r.outcome); for(const x of r.data) console.log(x.ruleId,"readyForOwned:",x.readyForOwned,"blockers:",x.blockers.length)' "$OUT/audit.json"
       # audit outcome=block does NOT imply a non-zero exit code.
@@ -60,6 +61,7 @@ steps:
     env:
       BASE_REF: $(JEV_BASE_REF)
       OUT: $(Agent.TempDirectory)/jevcheck
+      INSPECT_TEMP: $(Agent.TempDirectory)/jevcheck-inspect-full.json
 
   # Optional owned/blocking semantic gate; configure a secret pipeline
   # variable TYPESAFE_API_KEY and change JEV_ENABLE_SEMANTIC_CHECK to true.
