@@ -44,7 +44,48 @@ describe("consumer CI recipes (provider-free)", () => {
     expect(azure).toContain("persistCredentials: true");
     expect(azure).toContain('INSPECT_TEMP: $(Agent.TempDirectory)/jevcheck-inspect-full.json');
     expect(azure).not.toContain('> "$OUT/inspect-full.json"');
+    expect(azure.indexOf("trap 'rm -f")).toBeLessThan(azure.indexOf("jevcheck inspect --changed --base"));
     expect(azure).toContain("does NOT have trusted coveredBy");
+  });
+
+
+  it.skipIf(process.platform === "win32")("documented audit gate preserves CLI errors and rejects blocked readiness", () => {
+    const guide = readFileSync(join(root, "docs/ci-integration.md"), "utf8");
+    const fence = String.fromCharCode(96).repeat(3);
+    const snippet = guide.split("parse the envelope")[1]?.split(fence + "sh\n")[1]?.split("\n" + fence)[0];
+    expect(snippet).toBeTruthy();
+    const cwd = mkdtempSync(join(tmpdir(), "jevcheck-audit-gate-"));
+    try {
+      const bin = join(cwd, "bin");
+      mkdirSync(bin);
+      writeFileSync(join(bin, "npx"), [
+        "#!/bin/sh",
+        "printf '{\"outcome\":\"%s\"}\\n' \"$FAKE_AUDIT_OUTCOME\"",
+        "exit \"$FAKE_AUDIT_EXIT\"",
+        "",
+      ].join("\n"), { mode: 0o755 });
+      for (const [outcome, auditExit, expected] of [
+        ["pass", "0", 0],
+        ["warn", "0", 0],
+        ["block", "0", 1],
+        ["error", "2", 2],
+      ] as const) {
+        const result = spawnSync("sh", ["-c", snippet!], {
+          cwd,
+          encoding: "utf8",
+          env: {
+            ...process.env,
+            PATH: bin + ":" + process.env.PATH,
+            FAKE_AUDIT_OUTCOME: outcome,
+            FAKE_AUDIT_EXIT: auditExit,
+          },
+        });
+        if (result.error) throw result.error;
+        expect(result.status, outcome + " / exit " + auditExit + ": " + result.stderr).toBe(expected);
+      }
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
+    }
   });
 
   it("runs full and HEAD-vs-base inspections plus readiness audit without a provider", () => {
